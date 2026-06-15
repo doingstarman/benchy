@@ -1,0 +1,31 @@
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  prompts TEXT NOT NULL,
+  models TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  saved INTEGER NOT NULL DEFAULT 0,
+  total_calls INTEGER NOT NULL DEFAULT 0,
+  completed_calls INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS results (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  prompt_index INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  ttfs INTEGER,
+  total_time INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  reasoning_tokens INTEGER,
+  feedback TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_results_run_id ON results(run_id);
+CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
