@@ -53,7 +53,7 @@ See `rules/devops.md` for branch, commit, push, and release workflow rules.
 ## Development Commands
 
 ```bash
-npm install -g benchy
+npm install -g github:doingstarman/benchy
 benchy           # production CLI: backend + built frontend on 4242
 benchy start     # explicit equivalent of benchy
 npm run dev      # backend on 4243 + Vite on 5173, using ~/.benchy-dev
@@ -63,7 +63,7 @@ npm run lint     # TypeScript no-emit check
 npm run seed     # add mock providers to ~/.benchy-dev/config.json
 ```
 
-The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and keep `prepack` building both backend and frontend artifacts before npm packaging. Production builds must exclude tests from `dist`.
+The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and keep `prepare` building backend and frontend artifacts. `prepare` is required for `npm install -g github:doingstarman/benchy` and also runs for npm packaging. Production builds must exclude tests from `dist`.
 
 Use `npm run seed` for local demo data. Mock providers use the in-process `/api/mock/chat/completions` route and never call external AI APIs.
 

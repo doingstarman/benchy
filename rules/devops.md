@@ -64,7 +64,7 @@ Never use plain `--force`.
 The installable CLI contract is:
 
 ```bash
-npm install -g benchy
+npm install -g github:doingstarman/benchy
 benchy
 ```
 
@@ -74,9 +74,11 @@ Rules:
 - `src/cli.ts` must keep `#!/usr/bin/env node` as the first line so the compiled npm bin is executable.
 - `benchy` with no subcommand starts the production server on `4242`; `benchy start` remains an explicit equivalent.
 - `package.json` `files` must include `dist` and `frontend/dist` so the published package can serve the built app.
-- `prepack` must run `npm run build` before creating the npm artifact.
+- `prepare` must run `npm run build` so `npm install -g github:doingstarman/benchy` builds `dist/cli.js` from a git checkout.
+- Do not also run the same build in `prepack`; `npm pack` invokes `prepare`, and duplicating it doubles install/pack time.
 - Production builds must use `tsconfig.build.json` or an equivalent build-only config so tests are not emitted into `dist` or packed to npm.
 - Keep Node engine requirements aligned with the project runtime (`>=22` unless the stack changes).
+- Do not document `npm install -g benchy` until this project owns and publishes the `benchy` package on the public npm registry.
 
 ## Required Checks
 
