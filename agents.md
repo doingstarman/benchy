@@ -2,7 +2,7 @@
 
 ## What it is
 
-Open-source self-hosted AI model benchmarking tool. CLI starts a local server on port 4242, opens browser. Compare LLMs side by side: run the same prompts across providers, see TTFS / latency / token metrics in one view.
+Open-source self-hosted AI model benchmarking tool. CLI starts a local server, opens browser. Compare LLMs side by side: run the same prompts across providers, see TTFS / latency / token metrics in one view.
 
 Design aesthetic: **Langfuse / LangSmith** — dense, dark, developer-tool. No decorative elements.  
 Functional references: artificialanalysis.ai, openrouter.ai
@@ -32,7 +32,7 @@ src/cli.ts  (commander entry)
             └─ src/adapters/google.ts   ─┘
 ```
 
-**Dev mode**: Vite on 5173, proxies `/api` → 4242.  
+**Dev mode**: Vite on 5173, proxies `/api` → backend on 4243. Dev config/database live in `~/.benchy-dev/`.  
 **Production**: Fastify serves `frontend/dist/` as static on 4242.
 
 Config: `~/.benchy/config.json` — read/written via `src/config.ts`. Never accessed from frontend.  
@@ -53,12 +53,17 @@ See `rules/devops.md` for branch, commit, push, and release workflow rules.
 ## Development Commands
 
 ```bash
-npm run dev      # backend on 4242 + Vite on 5173
+npm install -g benchy
+benchy           # production CLI: backend + built frontend on 4242
+benchy start     # explicit equivalent of benchy
+npm run dev      # backend on 4243 + Vite on 5173, using ~/.benchy-dev
 npm run build    # TypeScript + production frontend build
 npm test         # full test suite
 npm run lint     # TypeScript no-emit check
-npm run seed     # add mock providers to ~/.benchy/config.json
+npm run seed     # add mock providers to ~/.benchy-dev/config.json
 ```
+
+The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and keep `prepack` building both backend and frontend artifacts before npm packaging. Production builds must exclude tests from `dist`.
 
 Use `npm run seed` for local demo data. Mock providers use the in-process `/api/mock/chat/completions` route and never call external AI APIs.
 

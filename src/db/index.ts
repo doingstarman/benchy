@@ -3,9 +3,6 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const BENCHY_DIR = join(homedir(), '.benchy')
-const DB_PATH = join(BENCHY_DIR, 'benchy.db')
-
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
@@ -42,14 +39,22 @@ CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
 
 let db: Database.Database | null = null
 
+export function getBenchyDir(): string {
+  return process.env.BENCHY_DIR ?? join(homedir(), '.benchy')
+}
+
+function getDbPath(): string {
+  return join(getBenchyDir(), 'benchy.db')
+}
+
 export function getDb(): Database.Database {
   if (!db) throw new Error('Database not initialized — call initDb() first')
   return db
 }
 
 export async function initDb(path?: string): Promise<void> {
-  if (!path) await mkdir(BENCHY_DIR, { recursive: true })
-  db = new Database(path ?? DB_PATH)
+  if (!path) await mkdir(getBenchyDir(), { recursive: true })
+  db = new Database(path ?? getDbPath())
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA)

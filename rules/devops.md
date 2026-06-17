@@ -59,6 +59,25 @@ git push --force-with-lease origin <local-branch>:<remote-branch>
 
 Never use plain `--force`.
 
+## npm Package
+
+The installable CLI contract is:
+
+```bash
+npm install -g benchy
+benchy
+```
+
+Rules:
+
+- `package.json` must expose `"bin": { "benchy": "./dist/cli.js" }`.
+- `src/cli.ts` must keep `#!/usr/bin/env node` as the first line so the compiled npm bin is executable.
+- `benchy` with no subcommand starts the production server on `4242`; `benchy start` remains an explicit equivalent.
+- `package.json` `files` must include `dist` and `frontend/dist` so the published package can serve the built app.
+- `prepack` must run `npm run build` before creating the npm artifact.
+- Production builds must use `tsconfig.build.json` or an equivalent build-only config so tests are not emitted into `dist` or packed to npm.
+- Keep Node engine requirements aligned with the project runtime (`>=22` unless the stack changes).
+
 ## Required Checks
 
 For code changes, run both before pushing:
@@ -97,7 +116,7 @@ Never commit real provider API keys or user credentials.
 Allowed local/demo values:
 
 - `mock-key`
-- `http://localhost:4242/api/mock`
+- `http://localhost:4243/api/mock`
 - temp test directories controlled by `BENCHY_DIR`
 
-Provider credentials live only in `~/.benchy/config.json`; frontend code must never read or embed them directly.
+Dev provider credentials live in `~/.benchy-dev/config.json`. Production credentials live in `~/.benchy/config.json`. Frontend code must never read or embed them directly.

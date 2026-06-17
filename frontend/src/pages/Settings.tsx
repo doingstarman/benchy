@@ -76,9 +76,9 @@ export function Settings() {
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <SectionLabel>Сервер</SectionLabel>
-        <Row label="Порт" value="4242" mono />
-        <Row label="Конфиг" value="~/.benchy/config.json" mono />
-        <Row label="База данных" value="~/.benchy/benchy.db" mono />
+        <Row label="Порт" value="4243 dev / 4242 prod" mono />
+        <Row label="Конфиг" value="~/.benchy-dev/config.json" mono />
+        <Row label="База данных" value="~/.benchy-dev/benchy.db" mono />
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

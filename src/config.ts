@@ -3,16 +3,21 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Provider } from './types.js'
 
-const BENCHY_DIR = process.env.BENCHY_DIR ?? join(homedir(), '.benchy')
-const CONFIG_PATH = join(BENCHY_DIR, 'config.json')
-
 interface Config {
   providers: Provider[]
 }
 
+function getBenchyDir(): string {
+  return process.env.BENCHY_DIR ?? join(homedir(), '.benchy')
+}
+
+function getConfigPath(): string {
+  return join(getBenchyDir(), 'config.json')
+}
+
 export async function readConfig(): Promise<Config> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8')
+    const raw = await readFile(getConfigPath(), 'utf-8')
     return JSON.parse(raw) as Config
   } catch {
     return { providers: [] }
@@ -20,8 +25,8 @@ export async function readConfig(): Promise<Config> {
 }
 
 export async function writeConfig(config: Config): Promise<void> {
-  await mkdir(BENCHY_DIR, { recursive: true })
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8')
+  await mkdir(getBenchyDir(), { recursive: true })
+  await writeFile(getConfigPath(), JSON.stringify(config, null, 2), 'utf-8')
 }
 
 export async function getProviders(): Promise<Provider[]> {

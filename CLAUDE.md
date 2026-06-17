@@ -1,5 +1,7 @@
 # benchy
 
+Dev mode uses backend port 4243 and stores config/database under `~/.benchy-dev/`. Production/start defaults remain port 4242 and `~/.benchy/`.
+
 Self-hosted AI model benchmarking tool. One command starts a local server on port 4242, opens browser. Run same prompts against multiple LLM providers in parallel — see TTFS / latency / token metrics side by side.
 
 → **[agents.md](agents.md)** — architecture, file map, design system, SSE protocol, agent split strategy  
@@ -9,7 +11,7 @@ Self-hosted AI model benchmarking tool. One command starts a local server on por
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Backend (tsx watch, port 4242) + Vite (port 5173) with HMR |
+| `npm run dev` | Backend (tsx watch, port 4243, `~/.benchy-dev`) + Vite (port 5173) with HMR |
 | `npm run build` | tsc + vite build → `frontend/dist/` |
 | `npm run start` | Serve built app on port 4242 |
 | `npm test` | vitest (real HTTP, real SQLite, mocked external APIs) |
@@ -19,9 +21,9 @@ Self-hosted AI model benchmarking tool. One command starts a local server on por
 
 | Constraint | Rule |
 |---|---|
-| Port | **4242** — hardcoded everywhere, never configurable via UI |
-| Config | `~/.benchy/config.json` — never read from frontend, always via `/api/providers` |
-| Database | SQLite only via better-sqlite3, file at `~/.benchy/benchy.db` |
+| Port | Dev backend: **4243**. Production/start default: **4242** |
+| Config | Dev: `~/.benchy-dev/config.json`. Production: `~/.benchy/config.json`. Never read from frontend, always via `/api/providers` |
+| Database | SQLite only via better-sqlite3. Dev file: `~/.benchy-dev/benchy.db`; production file: `~/.benchy/benchy.db` |
 | Adapters | Exactly 3: `openai` (OpenAI-compatible), `anthropic`, `google` |
 | Parallelism | All provider calls via `Promise.all` — never sequential |
 | Streaming | All adapters must stream — required for accurate TTFS |
@@ -35,4 +37,4 @@ Self-hosted AI model benchmarking tool. One command starts a local server on por
 - Don't write comments explaining what code does — only why, when non-obvious
 - Don't add error handling for impossible cases — validate only at API boundary
 - Don't add sequential fallback when `Promise.all` fails — let it fail loudly
-- Don't read `~/.benchy/config.json` from frontend code under any circumstances
+- Don't read `~/.benchy-dev/config.json` or `~/.benchy/config.json` from frontend code under any circumstances

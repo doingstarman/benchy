@@ -17,7 +17,7 @@ export async function createServer(port: number, dbPath?: string) {
 
   const app = Fastify({ logger: false })
 
-  // CORS for dev (Vite on 5173 → backend on 4242)
+  // CORS for dev (Vite on 5173 -> backend on 4243)
   await app.register(fastifyCors, { origin: true })
 
   // API routes
