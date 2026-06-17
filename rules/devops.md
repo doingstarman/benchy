@@ -73,9 +73,10 @@ Rules:
 - `package.json` must expose `"bin": { "benchy": "./dist/cli.js" }`.
 - `src/cli.ts` must keep `#!/usr/bin/env node` as the first line so the compiled npm bin is executable.
 - `benchy` with no subcommand starts the production server on `4242`; `benchy start` remains an explicit equivalent.
+- `dist/` and `frontend/dist/` must be committed when runtime code changes, because `npm install -g github:doingstarman/benchy` installs directly from the GitHub checkout.
 - `package.json` `files` must include `dist` and `frontend/dist` so the published package can serve the built app.
-- `prepare` must run `npm run build` so `npm install -g github:doingstarman/benchy` builds `dist/cli.js` from a git checkout.
-- Do not also run the same build in `prepack`; `npm pack` invokes `prepare`, and duplicating it doubles install/pack time.
+- Do not use `prepare` for the GitHub install path; npm git dependency preparation on Windows may not expose dev dependency binaries such as `tsc`.
+- `prepack` must run `npm run build` before creating an npm artifact.
 - Production builds must use `tsconfig.build.json` or an equivalent build-only config so tests are not emitted into `dist` or packed to npm.
 - Keep Node engine requirements aligned with the project runtime (`>=22` unless the stack changes).
 - Do not document `npm install -g benchy` until this project owns and publishes the `benchy` package on the public npm registry.

@@ -63,7 +63,7 @@ npm run lint     # TypeScript no-emit check
 npm run seed     # add mock providers to ~/.benchy-dev/config.json
 ```
 
-The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and keep `prepare` building backend and frontend artifacts. `prepare` is required for `npm install -g github:doingstarman/benchy` and also runs for npm packaging. Production builds must exclude tests from `dist`.
+The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and commit current `dist/` plus `frontend/dist/` when changing runtime code. GitHub installs use committed build artifacts; `prepack` builds fresh artifacts for npm packaging. Production builds must exclude tests from `dist`.
 
 Use `npm run seed` for local demo data. Mock providers use the in-process `/api/mock/chat/completions` route and never call external AI APIs.
 

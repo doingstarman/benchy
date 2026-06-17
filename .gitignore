@@ -1,6 +1,4 @@
 node_modules/
-dist/
-frontend/dist/
 *.js.map
 .env
 *.db

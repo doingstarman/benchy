@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>benchy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        var saved = localStorage.getItem('benchy-theme') || 'dark';
+        var resolved = saved === 'system'
+          ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+          : saved;
+        document.documentElement.setAttribute('data-theme', resolved);
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-C2qyVFBV.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BRX7m20L.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

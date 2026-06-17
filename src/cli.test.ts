@@ -23,8 +23,8 @@ describe('npm CLI package wiring', () => {
 
   it('builds before npm packs the installable artifact', () => {
     expect(packageJson.scripts?.build).toContain('tsconfig.build.json')
-    expect(packageJson.scripts?.prepare).toBe('npm run build')
-    expect(packageJson.scripts?.prepack).toBeUndefined()
+    expect(packageJson.scripts?.prepack).toBe('npm run build')
+    expect(packageJson.scripts?.prepare).toBeUndefined()
     expect(packageJson.scripts?.start).toBe('node dist/cli.js')
   })
 
