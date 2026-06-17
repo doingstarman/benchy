@@ -38,6 +38,30 @@ src/cli.ts  (commander entry)
 Config: `~/.benchy/config.json` — read/written via `src/config.ts`. Never accessed from frontend.  
 Database: `~/.benchy/benchy.db` — initialized in `src/db/index.ts`, schema inlined there.
 
+## Repository State
+
+GitHub repository: `doingstarman/benchy`.
+
+- Single long-lived branch: `main`
+- Do not recreate or push `master`
+- Local `main` tracks `origin/main`
+- Default GitHub branch must stay `main`
+- If GitHub shows both `main` and `master`, delete `master` after confirming both point at the same commit
+
+See `rules/devops.md` for branch, commit, push, and release workflow rules.
+
+## Development Commands
+
+```bash
+npm run dev      # backend on 4242 + Vite on 5173
+npm run build    # TypeScript + production frontend build
+npm test         # full test suite
+npm run lint     # TypeScript no-emit check
+npm run seed     # add mock providers to ~/.benchy/config.json
+```
+
+Use `npm run seed` for local demo data. Mock providers use the in-process `/api/mock/chat/completions` route and never call external AI APIs.
+
 ## File Map
 
 ### Backend `src/`
@@ -53,10 +77,12 @@ Database: `~/.benchy/benchy.db` — initialized in `src/db/index.ts`, schema inl
 | `api/providers.ts` | `GET /api/providers`, `POST /api/providers`, `DELETE /api/providers/:id`, `POST /api/providers/:id/test` |
 | `api/runs.ts` | `GET /api/runs` (filtered), `GET /api/runs/:id`, `DELETE /api/runs/:id`, `POST /api/runs/:id/fork`, `PATCH /api/runs/:id`, `PATCH /api/runs/:id/results/:resultId/feedback` |
 | `api/benchmark.ts` | `POST /api/benchmark` → creates run, fires `Promise.all`. `GET /api/benchmark/stream/:runId` → SSE. Exports `getAdapter()` |
+| `api/mock.ts` | Local OpenAI-compatible streaming mock endpoint for demos/tests. No external calls |
 | `adapters/base.ts` | `Adapter` interface, `Chunk` union, `Usage`, `AdapterConfig`, `Message` |
 | `adapters/openai.ts` | OpenAI-compatible: raw fetch + SSE line parser. Covers OpenAI, Groq, Fireworks, Together, OpenRouter, Replicate, Ollama, LM Studio, DeepSeek, Mistral, xAI, custom |
 | `adapters/anthropic.ts` | `@anthropic-ai/sdk` stream API → `Chunk` |
 | `adapters/google.ts` | `@google/generative-ai` stream → `Chunk` |
+| `seed.ts` | Seeds mock providers into config for local demo use |
 
 ### Frontend `frontend/src/`
 
@@ -68,6 +94,7 @@ Database: `~/.benchy/benchy.db` — initialized in `src/db/index.ts`, schema inl
 | `tokens.css` | All CSS custom properties. Source of truth for colors/spacing/radii |
 | `api.ts` | Typed `fetch` wrappers for all endpoints + `useSSE(runId, onEvent)` hook |
 | `pages/NewRun.tsx` | Left: model selector (provider tree, toggle chips). Right: prompt textareas + run summary + Run button |
+| `pages/NewRun.test.tsx` | Promptbox/model-selection regression tests |
 | `pages/Results.tsx` | SSE consumer. Prompt tabs, side-by-side `ResponseCard` columns, save/best-TTFS bar |
 | `pages/History.tsx` | Runs table with filters (search/date/status), hover-reveal fork+delete actions |
 | `pages/Providers.tsx` | Provider grid by section, connect/disconnect/test modal |
@@ -176,3 +203,13 @@ Tests live in `src/test/` and `src/**/*.test.ts`. Run: `npm test`.
 - **Config isolation**: `process.env.BENCHY_DIR` redirects to temp dir per test suite
 
 See `rules/testing.md` for patterns.
+
+## DevOps Rules
+
+See `rules/devops.md`.
+
+- Keep exactly one remote branch unless a feature branch or PR is explicitly needed
+- Default branch is `main`
+- Commit before pushing user-visible changes
+- Run `npm test` and `npm run build` before pushing code changes
+- Documentation-only changes can skip tests if the final note says tests were not run
