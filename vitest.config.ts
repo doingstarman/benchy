@@ -1,14 +1,23 @@
 import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  plugins: [react()],
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/test/**/*.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'src/test/**/*.test.ts',
+      'frontend/src/**/*.test.tsx',
+    ],
+    environmentMatchGlobs: [
+      ['frontend/src/**', 'jsdom'],
+    ],
     globals: false,
-    // Each test file gets its own port and temp dir — run sequentially to avoid port conflicts
     pool: 'forks',
     poolOptions: {
       forks: { singleFork: true },
     },
+    setupFiles: ['frontend/src/test-setup.ts'],
   },
 })

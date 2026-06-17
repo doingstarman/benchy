@@ -99,24 +99,27 @@ async function runCell(
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models } = req.body
-    if (!prompts?.length || !models?.length) {
-      return reply.code(400).send({ error: 'prompts and models are required' })
+    const { prompts, models, pairs } = req.body
+    if (!pairs?.length && (!prompts?.length || !models?.length)) {
+      return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
     }
 
     const runId = randomUUID()
-    const totalCalls = prompts.length * models.length
+    const totalCalls = pairs ? pairs.length : prompts!.length * models!.length
     const db = getDb()
+
+    const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts!
+    const storedModels = pairs ? pairs.map(p => p.model) : models!
 
     db.prepare(
       'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(prompts), JSON.stringify(models), 'running', 0, totalCalls, 0, Date.now())
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now())
 
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
-    const tasks = prompts.flatMap((prompt, pi) =>
-      models.map(model => runCell(runId, pi, prompt, model, providers))
-    )
+    const tasks = pairs
+      ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers))
+      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers)))
 
     Promise.all(tasks)
       .then(() => {

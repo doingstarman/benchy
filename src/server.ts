@@ -8,6 +8,7 @@ import { initDb } from './db/index.js'
 import { registerProvidersRoutes } from './api/providers.js'
 import { registerRunsRoutes } from './api/runs.js'
 import { registerBenchmarkRoutes } from './api/benchmark.js'
+import { registerMockRoutes } from './api/mock.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -23,6 +24,7 @@ export async function createServer(port: number, dbPath?: string) {
   await registerProvidersRoutes(app)
   await registerRunsRoutes(app)
   await registerBenchmarkRoutes(app)
+  await registerMockRoutes(app)
 
   // Serve built frontend in production
   const frontendDist = join(__dirname, '..', 'frontend', 'dist')

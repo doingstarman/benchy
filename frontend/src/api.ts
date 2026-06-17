@@ -61,8 +61,9 @@ export const runsApi = {
 // ─── benchmark ───────────────────────────────────────────────────────────────
 
 export interface BenchmarkRequest {
-  prompts: string[]
-  models: string[]
+  prompts?: string[]
+  models?: string[]
+  pairs?: { prompt: string; model: string }[]
 }
 
 export const benchmarkApi = {

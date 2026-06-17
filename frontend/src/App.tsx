@@ -7,8 +7,10 @@ export function App() {
       <Sidebar />
       <main style={{
         flex: 1,
-        overflow: 'auto',
+        overflow: 'hidden',
         background: 'var(--bg-base)',
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         <Outlet />
       </main>
