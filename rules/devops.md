@@ -64,7 +64,7 @@ Never use plain `--force`.
 The installable CLI contract is:
 
 ```bash
-npm install -g github:doingstarman/benchy
+npm install -g https://raw.githubusercontent.com/doingstarman/benchy/main/benchy-0.1.0.tgz
 benchy
 ```
 
@@ -73,9 +73,10 @@ Rules:
 - `package.json` must expose `"bin": { "benchy": "./dist/cli.js" }`.
 - `src/cli.ts` must keep `#!/usr/bin/env node` as the first line so the compiled npm bin is executable.
 - `benchy` with no subcommand starts the production server on `4242`; `benchy start` remains an explicit equivalent.
-- `dist/` and `frontend/dist/` must be committed when runtime code changes, because `npm install -g github:doingstarman/benchy` installs directly from the GitHub checkout.
+- `benchy-0.1.0.tgz` must be refreshed with `npm pack` when runtime code changes, because the GitHub install command installs that npm artifact.
 - `package.json` `files` must include `dist` and `frontend/dist` so the published package can serve the built app.
 - Do not use `prepare` for the GitHub install path; npm git dependency preparation on Windows may not expose dev dependency binaries such as `tsc`.
+- Do not document `npm install -g github:doingstarman/benchy` as the primary install path while `better-sqlite3` is a direct dependency; npm's git-source installer is unreliable on Windows with native dependency install scripts.
 - `prepack` must run `npm run build` before creating an npm artifact.
 - Production builds must use `tsconfig.build.json` or an equivalent build-only config so tests are not emitted into `dist` or packed to npm.
 - Keep Node engine requirements aligned with the project runtime (`>=22` unless the stack changes).

@@ -53,7 +53,7 @@ See `rules/devops.md` for branch, commit, push, and release workflow rules.
 ## Development Commands
 
 ```bash
-npm install -g github:doingstarman/benchy
+npm install -g https://raw.githubusercontent.com/doingstarman/benchy/main/benchy-0.1.0.tgz
 benchy           # production CLI: backend + built frontend on 4242
 benchy start     # explicit equivalent of benchy
 npm run dev      # backend on 4243 + Vite on 5173, using ~/.benchy-dev
@@ -63,7 +63,7 @@ npm run lint     # TypeScript no-emit check
 npm run seed     # add mock providers to ~/.benchy-dev/config.json
 ```
 
-The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and commit current `dist/` plus `frontend/dist/` when changing runtime code. GitHub installs use committed build artifacts; `prepack` builds fresh artifacts for npm packaging. Production builds must exclude tests from `dist`.
+The npm executable is `dist/cli.js`, built from `src/cli.ts` via `tsconfig.build.json`. Keep the shebang in `src/cli.ts`, keep `package.json` `bin.benchy` pointed at `./dist/cli.js`, and refresh the committed `benchy-0.1.0.tgz` with `npm pack` when changing runtime code. The GitHub install command uses that npm tarball; `npm install -g github:doingstarman/benchy` is not the supported path because npm's git-source installer is unreliable on Windows with native dependencies. Production builds must exclude tests from `dist`.
 
 Use `npm run seed` for local demo data. Mock providers use the in-process `/api/mock/chat/completions` route and never call external AI APIs.
 

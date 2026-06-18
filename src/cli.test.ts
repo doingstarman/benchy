@@ -28,6 +28,15 @@ describe('npm CLI package wiring', () => {
     expect(packageJson.scripts?.start).toBe('node dist/cli.js')
   })
 
+  it('documents the GitHub-hosted npm tarball install command', () => {
+    const readme = readFileSync(join(root, 'README.md'), 'utf-8')
+    expect(readme).toContain(
+      'npm install -g https://raw.githubusercontent.com/doingstarman/benchy/main/benchy-0.1.0.tgz',
+    )
+    expect(readme).not.toContain('npm install -g benchy\n')
+    expect(readme).not.toContain('npm install -g github:doingstarman/benchy')
+  })
+
   it('keeps a shebang in the TypeScript CLI for npm bin execution', () => {
     const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
     expect(cliSource.startsWith('#!/usr/bin/env node')).toBe(true)
