@@ -1,0 +1,64 @@
+<!-- @dsCard group="Tokens" -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg-sidebar: #060608; --bg-base: #0a0a0b; --bg-elevated: #111113;
+    --border: #1e1e22; --border-hover: #2a2a30;
+    --text-muted: #555; --text-secondary: #888; --text-primary: #c8c8c8; --text-bright: #e8e8e8;
+    --accent: #7F77DD; --accent-dim: #3a3470; --accent-bg: #1e1a3a;
+    --success: #5ab87a; --success-bg: #132018;
+    --error: #e05c5c; --error-bg: #271515;
+    --warning: #d4944a; --warning-bg: #251d0e;
+    --info: #5b9bd5; --info-bg: #0e1825;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --font-sans: ui-sans-serif, system-ui, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg-base); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; padding: 24px; }
+  h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-bottom: 24px; }
+  .swatch { border-radius: 6px; overflow: hidden; border: 0.5px solid var(--border); }
+  .swatch-color { height: 40px; }
+  .swatch-label { padding: 6px 8px; background: var(--bg-elevated); }
+  .swatch-name { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); }
+  .swatch-hex { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<h2>Backgrounds</h2>
+<div class="grid">
+  <div class="swatch"><div class="swatch-color" style="background:#060608"></div><div class="swatch-label"><div class="swatch-name">bg-sidebar</div><div class="swatch-hex">#060608</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#0a0a0b"></div><div class="swatch-label"><div class="swatch-name">bg-base</div><div class="swatch-hex">#0a0a0b</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#111113"></div><div class="swatch-label"><div class="swatch-name">bg-elevated</div><div class="swatch-hex">#111113</div></div></div>
+</div>
+<h2>Borders</h2>
+<div class="grid">
+  <div class="swatch"><div class="swatch-color" style="background:#1e1e22"></div><div class="swatch-label"><div class="swatch-name">border</div><div class="swatch-hex">#1e1e22</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#2a2a30"></div><div class="swatch-label"><div class="swatch-name">border-hover</div><div class="swatch-hex">#2a2a30</div></div></div>
+</div>
+<h2>Text</h2>
+<div class="grid">
+  <div class="swatch"><div class="swatch-color" style="background:#555"></div><div class="swatch-label"><div class="swatch-name">text-muted</div><div class="swatch-hex">#555</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#888"></div><div class="swatch-label"><div class="swatch-name">text-secondary</div><div class="swatch-hex">#888</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#c8c8c8"></div><div class="swatch-label"><div class="swatch-name">text-primary</div><div class="swatch-hex">#c8c8c8</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#e8e8e8"></div><div class="swatch-label"><div class="swatch-name">text-bright</div><div class="swatch-hex">#e8e8e8</div></div></div>
+</div>
+<h2>Accent</h2>
+<div class="grid">
+  <div class="swatch"><div class="swatch-color" style="background:#7F77DD"></div><div class="swatch-label"><div class="swatch-name">accent</div><div class="swatch-hex">#7F77DD</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#3a3470"></div><div class="swatch-label"><div class="swatch-name">accent-dim</div><div class="swatch-hex">#3a3470</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#1e1a3a"></div><div class="swatch-label"><div class="swatch-name">accent-bg</div><div class="swatch-hex">#1e1a3a</div></div></div>
+</div>
+<h2>Semantic</h2>
+<div class="grid">
+  <div class="swatch"><div class="swatch-color" style="background:#5ab87a"></div><div class="swatch-label"><div class="swatch-name">success</div><div class="swatch-hex">#5ab87a</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#e05c5c"></div><div class="swatch-label"><div class="swatch-name">error</div><div class="swatch-hex">#e05c5c</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#d4944a"></div><div class="swatch-label"><div class="swatch-name">warning</div><div class="swatch-hex">#d4944a</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:#5b9bd5"></div><div class="swatch-label"><div class="swatch-name">info</div><div class="swatch-hex">#5b9bd5</div></div></div>
+</div>
+</body>
+</html>
