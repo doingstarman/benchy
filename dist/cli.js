@@ -69,7 +69,7 @@ program
     const spinner = setInterval(() => {
         process.stdout.write(`\r${c.cyan}${frames[fi++ % frames.length]}${c.reset} Installing latest benchy…`);
     }, 80);
-    const result = spawnSync('npm', ['install', '-g', 'https://github.com/doingstarman/benchy/tarball/main'], {
+    const result = spawnSync('npm', ['install', '-g', 'https://raw.githubusercontent.com/doingstarman/benchy/main/benchy-0.1.0.tgz'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
         encoding: 'utf8',

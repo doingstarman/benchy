@@ -37,6 +37,14 @@ describe('npm CLI package wiring', () => {
     expect(readme).not.toContain('npm install -g github:doingstarman/benchy')
   })
 
+  it('updates from the same GitHub-hosted npm tarball', () => {
+    const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
+    expect(cliSource).toContain(
+      'https://raw.githubusercontent.com/doingstarman/benchy/main/benchy-0.1.0.tgz',
+    )
+    expect(cliSource).not.toContain('https://github.com/doingstarman/benchy/tarball/main')
+  })
+
   it('keeps a shebang in the TypeScript CLI for npm bin execution', () => {
     const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
     expect(cliSource.startsWith('#!/usr/bin/env node')).toBe(true)
