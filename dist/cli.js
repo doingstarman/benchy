@@ -31,9 +31,8 @@ program
     .name('benchy')
     .description('Self-hosted AI model benchmarking tool')
     .version('0.1.0');
-// Default command: start server (runs when no subcommand given)
 program
-    .command('start', { isDefault: true })
+    .command('start')
     .description('Start the benchy server')
     .option('-p, --port <number>', 'port to listen on', '4242')
     .option('--config-dir <path>', 'directory for config and database files')
@@ -95,7 +94,14 @@ program
     console.log(`\n${c.dim}Restart benchy to apply the update.${c.reset}`);
     process.exit(0);
 });
-program.parseAsync().catch(err => {
+const rootOnlyOptions = new Set(['-h', '--help', '-V', '--version']);
+const args = process.argv.slice(2);
+const shouldUseStartCommand = args.length === 0 ||
+    (args[0]?.startsWith('-') === true && !rootOnlyOptions.has(args[0]));
+const argv = shouldUseStartCommand
+    ? [process.argv[0], process.argv[1], 'start', ...args]
+    : process.argv;
+program.parseAsync(argv).catch(err => {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
 });

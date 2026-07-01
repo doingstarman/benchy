@@ -45,6 +45,12 @@ describe('npm CLI package wiring', () => {
     expect(cliSource).not.toContain('https://github.com/doingstarman/benchy/tarball/main')
   })
 
+  it('does not use commander isDefault for the start command', () => {
+    const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
+    expect(cliSource).toContain("'start', ...args")
+    expect(cliSource).not.toContain('isDefault')
+  })
+
   it('keeps a shebang in the TypeScript CLI for npm bin execution', () => {
     const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
     expect(cliSource.startsWith('#!/usr/bin/env node')).toBe(true)
