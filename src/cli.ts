@@ -122,6 +122,7 @@ program
     }
 
     console.log(`\n${c.dim}Restart benchy to apply the update.${c.reset}`)
+    process.exit(0)
   })
 
 async function main(): Promise<void> {
