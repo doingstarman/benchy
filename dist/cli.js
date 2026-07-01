@@ -49,6 +49,7 @@ program
     .command('update')
     .description('Update benchy to the latest version from GitHub')
     .action(async () => {
+    handledCommand = true;
     const { spawnSync } = await import('node:child_process');
     const c = {
         reset: '\x1b[0m',
