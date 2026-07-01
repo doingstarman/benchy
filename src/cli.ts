@@ -60,6 +60,69 @@ program
     await startServer(opts)
   })
 
+program
+  .command('update')
+  .description('Update benchy to the latest version from GitHub')
+  .action(async () => {
+    const { spawnSync } = await import('node:child_process')
+
+    const c = {
+      reset: '\x1b[0m',
+      dim: '\x1b[2m',
+      green: '\x1b[32m',
+      cyan: '\x1b[36m',
+      yellow: '\x1b[33m',
+      bold: '\x1b[1m',
+      red: '\x1b[31m',
+    }
+
+    // Fetch recent commits from GitHub before installing
+    process.stdout.write(`${c.dim}Checking for updates…${c.reset}\n`)
+    type CommitEntry = { sha: string; commit: { message: string } }
+    let commits: CommitEntry[] = []
+    try {
+      const res = await fetch('https://api.github.com/repos/doingstarman/benchy/commits?per_page=5&sha=main')
+      if (res.ok) commits = await res.json() as CommitEntry[]
+    } catch { /* no network info */ }
+
+    // Spinner while installing
+    const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    let fi = 0
+    process.stdout.write('\x1b[?25l')
+    const spinner = setInterval(() => {
+      process.stdout.write(`\r${c.cyan}${frames[fi++ % frames.length]}${c.reset} Installing latest benchy…`)
+    }, 80)
+
+    const result = spawnSync('npm', ['install', '-g', 'https://github.com/doingstarman/benchy/tarball/main'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+      encoding: 'utf8',
+    })
+
+    clearInterval(spinner)
+    process.stdout.write('\x1b[?25h')
+    process.stdout.write('\r' + ' '.repeat(50) + '\r')
+
+    if (result.status !== 0) {
+      console.error(`${c.red}✗ Update failed.${c.reset}`)
+      if (result.stderr) console.error(c.dim + result.stderr.trim() + c.reset)
+      process.exit(1)
+    }
+
+    console.log(`${c.green}${c.bold}✓ benchy updated${c.reset}`)
+
+    if (commits.length > 0) {
+      console.log(`\n${c.dim}Recent changes:${c.reset}`)
+      for (const entry of commits.slice(0, 3)) {
+        const msg = entry.commit.message.split('\n')[0]
+        const sha = entry.sha.slice(0, 7)
+        console.log(`  ${c.yellow}${sha}${c.reset}  ${msg}`)
+      }
+    }
+
+    console.log(`\n${c.dim}Restart benchy to apply the update.${c.reset}`)
+  })
+
 async function main(): Promise<void> {
   await program.parseAsync()
   if (!handledCommand) await startServer(program.opts<StartOptions>())
