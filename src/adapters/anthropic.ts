@@ -15,8 +15,10 @@ export const anthropicAdapter: Adapter = {
     try {
       const stream = client.messages.stream({
         model: config.model,
-        max_tokens: 4096,
+        max_tokens: config.settings?.maxOutputTokens ?? 4096,
         ...(system ? { system } : {}),
+        ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+        ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
         messages: chatMessages.map(m => ({
           role: m.role as 'user' | 'assistant',
           content: m.content,

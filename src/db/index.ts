@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS runs (
   saved INTEGER NOT NULL DEFAULT 0,
   total_calls INTEGER NOT NULL DEFAULT 0,
   completed_calls INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  settings_overrides TEXT,
+  run_settings TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -58,6 +60,14 @@ export async function initDb(path?: string): Promise<void> {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA)
+
+  // Migrations for existing databases
+  for (const sql of [
+    'ALTER TABLE runs ADD COLUMN settings_overrides TEXT',
+    'ALTER TABLE runs ADD COLUMN run_settings TEXT',
+  ]) {
+    try { db.exec(sql) } catch { /* column already exists */ }
+  }
 }
 
 export function closeDb(): void {

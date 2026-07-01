@@ -13,6 +13,7 @@ export interface AdapterConfig {
   apiKey?: string
   baseUrl?: string
   model: string
+  settings?: import('../types.js').ProviderDefaults
 }
 
 export interface Message {

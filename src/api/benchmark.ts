@@ -1,16 +1,22 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
-import { getProviders } from '../config.js'
+import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js'
 import { openaiAdapter } from '../adapters/openai.js'
 import { anthropicAdapter } from '../adapters/anthropic.js'
 import { googleAdapter } from '../adapters/google.js'
+import { httpJsonAdapter } from '../adapters/http-json.js'
+import { scriptAdapter } from '../adapters/script.js'
+import { webhookAdapter } from '../adapters/webhook.js'
 import type { Adapter } from '../adapters/base.js'
-import type { ProviderType, BenchmarkRequest } from '../types.js'
+import type { ProviderType, BenchmarkRequest, RunSettings } from '../types.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
   if (type === 'google') return googleAdapter
+  if (type === 'http-json') return httpJsonAdapter
+  if (type === 'script') return scriptAdapter
+  if (type === 'webhook') return webhookAdapter
   return openaiAdapter
 }
 
@@ -32,6 +38,7 @@ async function runCell(
   promptText: string,
   modelKey: string,
   providers: Awaited<ReturnType<typeof getProviders>>,
+  runSettings?: RunSettings,
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
@@ -59,9 +66,15 @@ async function runCell(
 
   try {
     const adapter = getAdapter(provider.type)
+    const effectiveSettings = {
+      ...DEFAULT_PROVIDER_SETTINGS,
+      ...provider.defaults,
+      ...(runSettings?.global ?? {}),
+      ...(runSettings?.perModel?.[modelKey] ?? {}),
+    }
     const stream = adapter.stream(
       [{ role: 'user', content: promptText }],
-      { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model },
+      { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings },
     )
 
     for await (const chunk of stream) {
@@ -99,7 +112,7 @@ async function runCell(
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models, pairs } = req.body
+    const { prompts, models, pairs, runSettings } = req.body
     if (!pairs?.length && (!prompts?.length || !models?.length)) {
       return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
     }
@@ -110,16 +123,21 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
     const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts!
     const storedModels = pairs ? pairs.map(p => p.model) : models!
+    const hasSettings = runSettings && (
+      Object.keys(runSettings.global ?? {}).length > 0 ||
+      Object.keys(runSettings.perModel ?? {}).length > 0
+    )
+    const runSettingsJson = hasSettings ? JSON.stringify(runSettings) : null
 
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now())
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson)
 
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
     const tasks = pairs
-      ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers))
-      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers)))
+      ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
+      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings)))
 
     Promise.all(tasks)
       .then(() => {

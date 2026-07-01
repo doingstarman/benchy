@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
 function rowToRun(row) {
+    const settingsOverrides = row.settings_overrides
+        ? JSON.parse(row.settings_overrides)
+        : undefined;
     return {
         id: row.id,
         prompts: JSON.parse(row.prompts),
@@ -10,6 +13,7 @@ function rowToRun(row) {
         totalCalls: row.total_calls,
         completedCalls: row.completed_calls,
         createdAt: row.created_at,
+        ...(settingsOverrides ? { settingsOverrides } : {}),
     };
 }
 function rowToResult(row) {
@@ -91,6 +95,7 @@ export async function registerRunsRoutes(app) {
             return reply.code(404).send({ error: 'Run not found' });
         const newId = randomUUID();
         db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now());
+        // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
         const newRun = db.prepare('SELECT * FROM runs WHERE id = ?').get(newId);
         return reply.code(201).send({ data: rowToRun(newRun) });
     });

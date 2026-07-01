@@ -20,7 +20,16 @@ export const googleAdapter = {
                 yield { type: 'error', message: 'No user message provided' };
                 return;
             }
-            const chat = geminiModel.startChat({ history });
+            const generationConfig = {
+                ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+                ...(config.settings?.topP != null ? { topP: config.settings.topP } : {}),
+                ...(config.settings?.topK != null ? { topK: config.settings.topK } : {}),
+                ...(config.settings?.maxOutputTokens != null ? { maxOutputTokens: config.settings.maxOutputTokens } : {}),
+            };
+            const chat = geminiModel.startChat({
+                history,
+                ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
+            });
             const result = await chat.sendMessageStream(lastMessage.content);
             let inputTokens = 0;
             let outputTokens = 0;

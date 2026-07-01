@@ -1,5 +1,51 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 
+// Prompt-specific dataset: matched against last user message (case-insensitive)
+const DATASET: Array<{ match: RegExp; responses: Record<string, string> }> = [
+  {
+    match: /^привет[!.]?$/i,
+    responses: {
+      'gpt-4o':         'Привет! Я GPT-4o от OpenAI. Чем могу помочь сегодня?',
+      'gpt-4o-mini':    'Привет! GPT-4o mini на связи — быстро и по делу. Что нужно?',
+      'claude-3-5-sonnet': 'Привет! Это Клод от Anthropic. Рад познакомиться — расскажи, чем могу быть полезен?',
+      'claude-3-haiku':    'Привет! Claude Haiku здесь. Коротко и ясно — чего хочешь?',
+      'llama-3.3-70b':  'Привет! Llama 3.3 70B на связи. Готов к работе — что делаем?',
+      'llama-3.1-8b':   'Привет! Слушаю.',
+      'deepseek-chat':  'Привет! DeepSeek Chat готов к диалогу. Задай свой вопрос.',
+      'gemini-2.5-flash': 'Привет! Gemini Flash слушает. Очень быстро помогу с чем угодно.',
+      'gemini-2.5-pro': 'Привет! Gemini Pro к вашим услугам. Что будем делать?',
+    },
+  },
+  {
+    match: /как дела\??/i,
+    responses: {
+      'gpt-4o':         'Дела отлично, спасибо! Как языковая модель я не устаю и не скучаю — всегда в рабочем режиме. Обрабатываю запросы, генерирую текст, анализирую данные. А у тебя как дела? Могу чем-то помочь?',
+      'gpt-4o-mini':    'Хорошо! Всегда готов. Что нужно сделать?',
+      'claude-3-5-sonnet': 'Спасибо, что спросил! У меня всё замечательно — я языковая модель, у меня нет настроений в человеческом смысле, но если бы было — сейчас оно было бы отличным. Мне нравится помогать! А у тебя как дела? Есть что-то, с чем могу помочь?',
+      'claude-3-haiku':    'Отлично. Готов помочь.',
+      'llama-3.3-70b':  'Всё хорошо, спасибо! Обрабатываю задачи с максимальной точностью. Что нужно решить?',
+      'llama-3.1-8b':   'Хорошо. Чем помочь?',
+      'deepseek-chat':  'Спасибо за вопрос. Функционирую в штатном режиме. Готов к аналитическим задачам.',
+      'gemini-2.5-flash': 'Отлично! Быстро и эффективно, как всегда. Давай задачу.',
+      'gemini-2.5-pro': 'Всё хорошо, спасибо! Нахожусь в полной готовности. Какую задачу будем решать сегодня?',
+    },
+  },
+  {
+    match: /что ты умеешь|что умеешь|на что способен/i,
+    responses: {
+      'gpt-4o':         'Я умею писать, редактировать и переводить тексты, отвечать на вопросы, разбираться в коде, объяснять сложные концепции простыми словами, помогать с анализом данных и брейнштормингом. Мои сильные стороны — точность, широкий кругозор и способность поддерживать контекст длинного диалога.',
+      'gpt-4o-mini':    'Отвечаю на вопросы, пишу текст, помогаю с кодом. Быстро и дёшево.',
+      'claude-3-5-sonnet': 'Умею многое! Пишу и редактирую тексты, помогаю с кодом, объясняю сложные темы, провожу анализ, отвечаю на вопросы и поддерживаю длинные диалоги. Мне особенно нравится разбирать сложные задачи шаг за шагом и искать нестандартные решения. Что хочешь попробовать?',
+      'claude-3-haiku':    'Текст, код, Q&A, анализ. Что нужно?',
+      'llama-3.3-70b':  'Генерация и редактура текстов, программирование, ответы на вопросы, суммаризация, перевод. Поддерживаю длинный контекст. Открытые веса — работаю локально.',
+      'llama-3.1-8b':   'Текст, код, ответы. Небольшая модель — быстро.',
+      'deepseek-chat':  'Специализируюсь на логических задачах, коде, математике и аналитике. Также помогаю с написанием текстов и ответами на вопросы. Сильная сторона — пошаговые рассуждения.',
+      'gemini-2.5-flash': 'Текст, код, анализ, Q&A — всё быстро. Оптимизирован для скорости.',
+      'gemini-2.5-pro': 'Умею работать с текстом, кодом, изображениями и данными. Сильные стороны: длинный контекст, мультимодальность, точный анализ и структурированные ответы.',
+    },
+  },
+]
+
 // Canned responses keyed by model name fragment → streamed word-by-word via SSE
 const RESPONSES: Record<string, string> = {
   'gpt-4o': `The transformer architecture uses self-attention to process sequences in parallel. Each token attends to all others via Query, Key, and Value matrices. Attention(Q,K,V) = softmax(QK^T/√d_k)V. Multi-head attention runs several attention functions simultaneously, capturing different representation subspaces. Residual connections and layer normalization stabilize training. This design enables far better parallelism than RNNs and captures long-range dependencies efficiently.`,
@@ -36,7 +82,18 @@ const TTFS_MS: Record<string, number> = {
   'gemini-2.5-pro': 510,
 }
 
-function getResponse(model: string): string {
+function getResponse(model: string, lastUserMessage?: string): string {
+  if (lastUserMessage) {
+    const entry = DATASET.find(d => d.match.test(lastUserMessage.trim()))
+    if (entry) {
+      for (const [key, text] of Object.entries(entry.responses)) {
+        if (model.includes(key)) return text
+      }
+      // Model not in dataset entry — return a generic reply for the prompt
+      const first = Object.values(entry.responses)[0]
+      if (first) return first
+    }
+  }
   for (const [key, text] of Object.entries(RESPONSES)) {
     if (model.includes(key)) return text
   }
@@ -61,13 +118,14 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: ChatBody }>(
     '/api/mock/chat/completions',
     async (req: FastifyRequest<{ Body: ChatBody }>, reply: FastifyReply) => {
-      const { model = 'mock', stream } = req.body
+      const { model = 'mock', messages = [], stream } = req.body
 
       if (!stream) {
         return reply.code(400).send({ error: { message: 'mock adapter requires stream: true' } })
       }
 
-      const text = getResponse(model)
+      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content
+      const text = getResponse(model, lastUserMsg)
       const words = text.split(' ')
       const ttfsDelay = getTtfsMs(model)
       const wordDelay = Math.max(20, Math.min(60, (3000 - ttfsDelay) / words.length))

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
-import type { Run, Result, Metrics } from '../types.js'
+import type { Run, Result, Metrics, RunSettings } from '../types.js'
 
 interface RunRow {
   id: string
@@ -12,6 +12,8 @@ interface RunRow {
   total_calls: number
   completed_calls: number
   created_at: number
+  settings_overrides: string | null
+  run_settings: string | null
 }
 
 interface ResultRow {
@@ -32,6 +34,9 @@ interface ResultRow {
 }
 
 function rowToRun(row: RunRow): Run {
+  const runSettings = row.run_settings
+    ? JSON.parse(row.run_settings) as RunSettings
+    : undefined
   return {
     id: row.id,
     prompts: JSON.parse(row.prompts) as string[],
@@ -41,6 +46,7 @@ function rowToRun(row: RunRow): Run {
     totalCalls: row.total_calls,
     completedCalls: row.completed_calls,
     createdAt: row.created_at,
+    ...(runSettings ? { runSettings } : {}),
   }
 }
 
@@ -125,6 +131,7 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     db.prepare(
       'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now())
+    // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
 
     const newRun = db.prepare('SELECT * FROM runs WHERE id = ?').get(newId) as RunRow
     return reply.code(201).send({ data: rowToRun(newRun) })

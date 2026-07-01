@@ -174,12 +174,30 @@ export function History() {
                     {formatDate(run.createdAt)}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
-                    <span style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 10,
-                      color: statusColor[run.status] ?? 'var(--text-muted)',
-                    }}>
-                      {run.status}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 10,
+                        color: statusColor[run.status] ?? 'var(--text-muted)',
+                      }}>
+                        {run.status}
+                      </span>
+                      {(() => {
+                        const gc = Object.values(run.runSettings?.global ?? {}).filter(v => v != null).length
+                        const pc = Object.values(run.runSettings?.perModel ?? {}).reduce((s, m) => s + Object.values(m).filter(v => v != null).length, 0)
+                        const total = gc + pc
+                        if (!total) return null
+                        return (
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--font-mono)',
+                            color: 'var(--accent)', background: 'var(--accent-bg)',
+                            border: '0.5px solid var(--accent-dim)', borderRadius: 8,
+                            padding: '1px 5px',
+                          }}>
+                            ⚙ {total}
+                          </span>
+                        )
+                      })()}
+                    </div>
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 6, opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s' }}>

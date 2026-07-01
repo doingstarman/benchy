@@ -1,14 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
-import { getProviders } from '../config.js';
+import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js';
 import { openaiAdapter } from '../adapters/openai.js';
 import { anthropicAdapter } from '../adapters/anthropic.js';
 import { googleAdapter } from '../adapters/google.js';
+import { httpJsonAdapter } from '../adapters/http-json.js';
+import { scriptAdapter } from '../adapters/script.js';
+import { webhookAdapter } from '../adapters/webhook.js';
 export function getAdapter(type) {
     if (type === 'anthropic')
         return anthropicAdapter;
     if (type === 'google')
         return googleAdapter;
+    if (type === 'http-json')
+        return httpJsonAdapter;
+    if (type === 'script')
+        return scriptAdapter;
+    if (type === 'webhook')
+        return webhookAdapter;
     return openaiAdapter;
 }
 // In-memory SSE connections keyed by runId
@@ -25,7 +34,7 @@ function broadcast(runId, event, data) {
         catch { /* client disconnected */ }
     }
 }
-async function runCell(runId, promptIndex, promptText, modelKey, providers) {
+async function runCell(runId, promptIndex, promptText, modelKey, providers, settingsOverrides) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
     const provider = providers.find(p => p.id === providerId);
@@ -45,7 +54,12 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers) {
     let reasoningTokens;
     try {
         const adapter = getAdapter(provider.type);
-        const stream = adapter.stream([{ role: 'user', content: promptText }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model });
+        const effectiveSettings = {
+            ...DEFAULT_PROVIDER_SETTINGS,
+            ...provider.defaults,
+            ...(settingsOverrides ?? {}),
+        };
+        const stream = adapter.stream([{ role: 'user', content: promptText }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings });
         for await (const chunk of stream) {
             if (chunk.type === 'token') {
                 if (ttfs === null)
@@ -81,7 +95,7 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers) {
 }
 export async function registerBenchmarkRoutes(app) {
     app.post('/api/benchmark', async (req, reply) => {
-        const { prompts, models, pairs } = req.body;
+        const { prompts, models, pairs, settingsOverrides } = req.body;
         if (!pairs?.length && (!prompts?.length || !models?.length)) {
             return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' });
         }
@@ -90,12 +104,15 @@ export async function registerBenchmarkRoutes(app) {
         const db = getDb();
         const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts;
         const storedModels = pairs ? pairs.map(p => p.model) : models;
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now());
+        const overridesJson = settingsOverrides && Object.keys(settingsOverrides).length > 0
+            ? JSON.stringify(settingsOverrides)
+            : null;
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, settings_overrides) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), overridesJson);
         // Fire and forget — SSE stream delivers results
         const providers = await getProviders();
         const tasks = pairs
-            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers))
-            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers)));
+            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, settingsOverrides))
+            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, settingsOverrides)));
         Promise.all(tasks)
             .then(() => {
             db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId);

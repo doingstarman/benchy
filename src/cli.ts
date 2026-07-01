@@ -46,7 +46,8 @@ program
   .option('-p, --port <number>', 'port to listen on', '4242')
   .option('--config-dir <path>', 'directory for config and database files')
   .option('--no-open', 'do not open browser on start')
-  .action(startServer)
+
+let handledCommand = false
 
 program
   .command('start')
@@ -54,9 +55,17 @@ program
   .option('-p, --port <number>', 'port to listen on', '4242')
   .option('--config-dir <path>', 'directory for config and database files')
   .option('--no-open', 'do not open browser on start')
-  .action(startServer)
+  .action(async (opts: StartOptions) => {
+    handledCommand = true
+    await startServer(opts)
+  })
 
-program.parseAsync().catch(err => {
+async function main(): Promise<void> {
+  await program.parseAsync()
+  if (!handledCommand) await startServer(program.opts<StartOptions>())
+}
+
+main().catch(err => {
   console.error(err instanceof Error ? err.message : err)
   process.exit(1)
 })

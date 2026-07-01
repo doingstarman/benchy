@@ -1,7 +1,19 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Provider } from './types.js'
+import type { Provider, ProviderDefaults } from './types.js'
+
+export const DEFAULT_PROVIDER_SETTINGS: Required<ProviderDefaults> = {
+  temperature: 0.7,
+  topP: 1.0,
+  topK: null,
+  maxOutputTokens: 2048,
+  contextBudget: null,
+  truncation: 'auto',
+  timeoutMs: 60000,
+  retries: 2,
+  streaming: true,
+}
 
 interface Config {
   providers: Provider[]

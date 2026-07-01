@@ -19,6 +19,9 @@ export const openaiAdapter: Adapter = {
         messages,
         stream: true,
         stream_options: { include_usage: true },
+        ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+        ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
+        ...(config.settings?.maxOutputTokens != null ? { max_tokens: config.settings.maxOutputTokens } : {}),
       }),
     })
 

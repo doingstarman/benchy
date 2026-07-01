@@ -220,6 +220,40 @@ export function Results() {
         {prompt}
       </div>
 
+      {/* Run settings summary */}
+      {run.runSettings?.global && Object.values(run.runSettings.global).some(v => v != null) && (() => {
+        const global = run.runSettings!.global!
+        const entries = Object.entries(global).filter(([, v]) => v != null) as [string, number | string | boolean][]
+        const labels: Record<string, string> = {
+          temperature: 'temp', topP: 'top_p', topK: 'top_k',
+          maxOutputTokens: 'max_tokens', timeoutMs: 'timeout',
+          retries: 'retries', streaming: 'stream',
+        }
+        const perModelKeys = Object.keys(run.runSettings?.perModel ?? {})
+        return (
+          <div style={{
+            padding: '7px 24px', borderBottom: '0.5px solid var(--border)',
+            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              ⚙ {perModelKeys.length > 0 ? 'Custom settings (global)' : 'Custom settings'}
+            </span>
+            {entries.map(([key, val]) => (
+              <span key={key} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                {labels[key] ?? key}: <span style={{ color: 'var(--text-secondary)' }}>
+                  {key === 'timeoutMs' ? `${Math.round((val as number) / 1000)}s` : String(val)}
+                </span>
+              </span>
+            ))}
+            {perModelKeys.length > 0 && (
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                + {perModelKeys.length} model override{perModelKeys.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Response columns */}
       <div style={{
         flex: 1, padding: 24, display: 'flex', gap: 12,

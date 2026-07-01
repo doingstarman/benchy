@@ -1,6 +1,17 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+export const DEFAULT_PROVIDER_SETTINGS = {
+    temperature: 0.7,
+    topP: 1.0,
+    topK: null,
+    maxOutputTokens: 2048,
+    contextBudget: null,
+    truncation: 'auto',
+    timeoutMs: 60000,
+    retries: 2,
+    streaming: true,
+};
 function getBenchyDir() {
     return process.env.BENCHY_DIR ?? join(homedir(), '.benchy');
 }

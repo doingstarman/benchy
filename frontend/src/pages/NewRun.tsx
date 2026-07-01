@@ -1,7 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { providersApi, benchmarkApi } from '../api'
-import type { Provider } from '../../../src/types'
+import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
+
+const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
+  temperature: 0.7,
+  topP: 1.0,
+  topK: null,
+  maxOutputTokens: 2048,
+  contextBudget: null,
+  truncation: 'auto',
+  timeoutMs: 60000,
+  retries: 2,
+  streaming: true,
+}
 
 interface UIResult {
   text: string
@@ -27,11 +39,12 @@ const ANIM_CSS = `
   .nr-ta::placeholder { color: var(--text-muted); }
   .nr-head-btn { background: none; border: 0.5px solid var(--border); border-radius: 5px; padding: 3px 7px; color: var(--text-secondary); font-size: 13px; cursor: pointer; line-height: 1; }
   .nr-head-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
+  .settings-tab { background: none; border: 0.5px solid transparent; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-family: var(--font-mono); cursor: pointer; color: var(--text-muted); white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+  .settings-tab:hover { color: var(--text-secondary); border-color: var(--border); }
+  .settings-tab.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-dim); }
 `
 
 // ─── ChipsRow ─────────────────────────────────────────────────────────────
-// Defined at module level — must NOT be inside NewRun or React will remount
-// on every state change (new function reference = new component type).
 
 interface ChipsRowProps {
   models: { key: string; label: string }[]
@@ -92,7 +105,6 @@ export function ChipsRow({ models, selectedModels, onToggle, onAdd, wrap }: Chip
 }
 
 // ─── Promptbox ────────────────────────────────────────────────────────────
-// Defined at module level — same reason as ChipsRow above.
 
 interface PromptboxProps {
   simplified: boolean
@@ -107,16 +119,196 @@ interface PromptboxProps {
   callCount: number
   isRunning: boolean
   onRun: () => void
+  runSettings: RunSettings
+  onRunSettingsChange: (rs: RunSettings) => void
+  providerDefaultsByModel: Record<string, RunSettingsOverrides>
 }
 
 export function Promptbox({
   simplified, mode, onModeChange, selectedCount, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
   callCount, isRunning, onRun,
+  runSettings, onRunSettingsChange, providerDefaultsByModel,
 }: PromptboxProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('all')
+  const settingsRef = useRef<HTMLDivElement>(null)
   const disabled = callCount === 0 || isRunning
+
+  // Clamp active tab to valid options
+  const validTab = activeTab === 'all' || selectedModels.includes(activeTab) ? activeTab : 'all'
+
+  // Count overrides per tab for badge display
+  const globalCount = Object.values(runSettings.global ?? {}).filter(v => v != null).length
+  const perModelCounts: Record<string, number> = {}
+  for (const [mk, ov] of Object.entries(runSettings.perModel ?? {})) {
+    perModelCounts[mk] = Object.values(ov).filter(v => v != null).length
+  }
+  const activeCount = globalCount + Object.values(perModelCounts).reduce((s, n) => s + n, 0)
+
+  // Current tab's overrides and inherited base
+  const currentTabOverrides: RunSettingsOverrides = validTab === 'all'
+    ? (runSettings.global ?? {})
+    : (runSettings.perModel?.[validTab] ?? {})
+
+  const currentTabInherited: RunSettingsOverrides = validTab === 'all'
+    ? RUN_DEFAULTS
+    : { ...RUN_DEFAULTS, ...(providerDefaultsByModel[validTab] ?? {}), ...(runSettings.global ?? {}) }
+
+  function updateTabOverrides(o: RunSettingsOverrides) {
+    if (validTab === 'all') {
+      onRunSettingsChange({ ...runSettings, global: o })
+    } else {
+      onRunSettingsChange({
+        ...runSettings,
+        perModel: { ...(runSettings.perModel ?? {}), [validTab]: o },
+      })
+    }
+  }
+
+  function resetOverride(key: keyof RunSettingsOverrides) {
+    const next = { ...currentTabOverrides }
+    delete next[key]
+    updateTabOverrides(next)
+  }
+
+  function resetAllOverrides() {
+    onRunSettingsChange({})
+  }
+
+  useEffect(() => {
+    if (!settingsOpen) return
+    function onDown(e: MouseEvent) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [settingsOpen])
+
+  function numField(
+    key: keyof RunSettingsOverrides,
+    label: string,
+    displayFn: (v: RunSettingsOverrides[keyof RunSettingsOverrides]) => string,
+    inputProps: { min?: number; max?: number; step?: number; placeholder?: string; toStore?: (n: number) => number; fromStore?: (n: number) => number },
+  ) {
+    const isSet = key in currentTabOverrides && currentTabOverrides[key] != null
+    const storedVal = isSet ? currentTabOverrides[key] as number : null
+    const displayVal = storedVal != null && inputProps.fromStore ? inputProps.fromStore(storedVal) : storedVal
+    const inheritedVal = currentTabInherited[key as keyof typeof currentTabInherited]
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+        {isSet ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <input
+              type="number" min={inputProps.min} max={inputProps.max} step={inputProps.step ?? 1}
+              placeholder={inputProps.placeholder}
+              value={displayVal ?? ''}
+              onChange={e => {
+                if (e.target.value === '') { resetOverride(key); return }
+                const n = Number(e.target.value)
+                updateTabOverrides({ ...currentTabOverrides, [key]: inputProps.toStore ? inputProps.toStore(n) : n })
+              }}
+              style={{ width: 64, background: 'var(--bg-base)', border: '0.5px solid var(--accent-dim)', borderRadius: 5, padding: '4px 6px', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', outline: 'none' }}
+            />
+            <button onClick={() => resetOverride(key)} title="Reset" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, padding: '0 2px', lineHeight: 1 }}>↺</button>
+          </div>
+        ) : (
+          <button
+            onClick={() => updateTabOverrides({ ...currentTabOverrides, [key]: inheritedVal as number })}
+            style={{ textAlign: 'left', background: 'none', border: '0.5px solid var(--border)', borderRadius: 5, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', width: 64 }}
+          >
+            {displayFn(inheritedVal)}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const showTabs = selectedModels.length > 1 || Object.keys(runSettings.perModel ?? {}).length > 0
+
   return (
-    <div style={{ background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
+    <div style={{ position: 'relative', background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 10, overflow: 'visible', flexShrink: 0 }}>
+
+      {/* Settings popover */}
+      {settingsOpen && (
+        <div ref={settingsRef} style={{
+          position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, right: 0,
+          background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+          borderRadius: 10, padding: '14px 16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.35)', zIndex: 50,
+          display: 'flex', flexDirection: 'column', gap: 14,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>Run settings</span>
+            {activeCount > 0 && (
+              <button onClick={resetAllOverrides} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+                reset all
+              </button>
+            )}
+          </div>
+
+          {/* Model tabs */}
+          {showTabs && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <button
+                className={`settings-tab${validTab === 'all' ? ' active' : ''}`}
+                onClick={() => setActiveTab('all')}
+              >
+                All models{globalCount > 0 ? ` · ${globalCount}` : ''}
+              </button>
+              {selectedModels.map(modelKey => {
+                const label = modelKey.split(':').slice(1).join(':')
+                const cnt = perModelCounts[modelKey] ?? 0
+                return (
+                  <button
+                    key={modelKey}
+                    className={`settings-tab${validTab === modelKey ? ' active' : ''}`}
+                    onClick={() => setActiveTab(modelKey)}
+                    title={label}
+                  >
+                    {label}{cnt > 0 ? ` · ${cnt}` : ''}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Inherited note for per-model tabs */}
+          {validTab !== 'all' && globalCount > 0 && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: -8 }}>
+              ↑ inherits {globalCount} global override{globalCount !== 1 ? 's' : ''}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Generation</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {numField('temperature', 'Temp', v => String(v ?? 0.7), { min: 0, max: 2, step: 0.1 })}
+              {numField('topP', 'Top P', v => String(v ?? 1.0), { min: 0, max: 1, step: 0.05 })}
+              {numField('topK', 'Top K', v => v != null ? String(v) : 'Auto', { min: 1, step: 1, placeholder: 'Auto' })}
+              {numField('maxOutputTokens', 'Max tokens', v => String(v ?? 2048), { min: 1, step: 1 })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Reliability</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {numField('timeoutMs', 'Timeout (s)', v => v != null ? `${Math.round((v as number) / 1000)}s` : '60s', {
+                min: 1, max: 600, step: 1,
+                toStore: n => n * 1000,
+                fromStore: n => Math.round(n / 1000),
+              })}
+              {numField('retries', 'Retries', v => String(v ?? 2), { min: 0, max: 10, step: 1 })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ borderRadius: 10, overflow: 'hidden' }}>
       {!simplified && (
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
           {(['one prompt → all models', 'prompt per model'] as const).map((label, i) => (
@@ -178,6 +370,28 @@ export function Promptbox({
 
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 8 }}>
         <span style={{ color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}>📎</span>
+        <button
+          onClick={() => setSettingsOpen(v => !v)}
+          title="Run settings"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: settingsOpen || activeCount > 0 ? 'var(--accent-bg)' : 'none',
+            border: settingsOpen || activeCount > 0 ? '0.5px solid var(--accent-dim)' : '0.5px solid transparent',
+            borderRadius: 6, padding: '3px 6px', cursor: 'pointer', gap: 4,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}>
+            <line x1="2" y1="4" x2="14" y2="4" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="5" cy="4" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
+            <line x1="2" y1="8" x2="14" y2="8" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="10" cy="8" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
+            <line x1="2" y1="12" x2="14" y2="12" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="6" cy="12" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
+          </svg>
+          {activeCount > 0 && (
+            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{activeCount}</span>
+          )}
+        </button>
         <div style={{ flex: 1 }} />
         {callCount > 0 && !isRunning && (
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginRight: 6 }}>
@@ -199,6 +413,7 @@ export function Promptbox({
           {isRunning ? '⏸ running' : '▶ run'}
         </button>
       </div>
+      </div>
     </div>
   )
 }
@@ -213,6 +428,8 @@ export function NewRun() {
   const [mode, setMode] = useState<0 | 1>(0)
   const [prompt, setPrompt] = useState('')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>({})
+
+  const [runSettings, setRunSettings] = useState<RunSettings>({})
 
   const [screenState, setScreenState] = useState<ScreenState>('idle')
   const [results, setResults] = useState<Map<string, UIResult>>(new Map())
@@ -339,9 +556,13 @@ export function NewRun() {
 
     currentPromptRef.current = prompt.trim()
 
+    const hasGlobal = Object.values(runSettings.global ?? {}).some(v => v != null)
+    const hasPerModel = Object.values(runSettings.perModel ?? {}).some(m => Object.values(m).some(v => v != null))
+    const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
+
     const req = effectiveMode === 0
-      ? { prompts: [prompt.trim()], models: activeModels }
-      : { pairs: filledPairs }
+      ? { prompts: [prompt.trim()], models: activeModels, runSettings: effectiveRunSettings }
+      : { pairs: filledPairs, runSettings: effectiveRunSettings }
 
     try {
       const { runId } = await benchmarkApi.start(req)
@@ -452,6 +673,14 @@ export function NewRun() {
     )
   }
 
+  // Build per-model provider defaults map
+  const providerDefaultsByModel: Record<string, RunSettingsOverrides> = {}
+  for (const modelKey of [...selectedModels]) {
+    const providerId = modelKey.split(':')[0]
+    const provider = providers.find(p => p.id === providerId)
+    if (provider?.defaults) providerDefaultsByModel[modelKey] = provider.defaults
+  }
+
   const promptboxProps: Omit<PromptboxProps, 'simplified'> = {
     mode,
     onModeChange: setMode,
@@ -464,6 +693,9 @@ export function NewRun() {
     callCount,
     isRunning: screenState === 'running',
     onRun: handleRun,
+    runSettings,
+    onRunSettingsChange: setRunSettings,
+    providerDefaultsByModel,
   }
 
   const chipsRowProps: Omit<ChipsRowProps, 'wrap'> = {

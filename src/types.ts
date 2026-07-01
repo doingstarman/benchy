@@ -5,6 +5,28 @@ export type ProviderType =
   | 'openai-compatible'
   | 'local'
   | 'custom'
+  | 'http-json'
+  | 'script'
+  | 'webhook'
+
+export interface ProviderDefaults {
+  temperature?: number | null
+  topP?: number | null
+  topK?: number | null
+  maxOutputTokens?: number | null
+  contextBudget?: number | null
+  truncation?: 'auto' | 'start' | 'middle' | 'end' | null
+  timeoutMs?: number | null
+  retries?: number | null
+  streaming?: boolean | null
+}
+
+export type RunSettingsOverrides = Partial<ProviderDefaults>
+
+export interface RunSettings {
+  global?: RunSettingsOverrides
+  perModel?: Record<string, RunSettingsOverrides>
+}
 
 export interface Provider {
   id: string
@@ -14,6 +36,9 @@ export interface Provider {
   baseUrl?: string
   models: string[]
   enabled: boolean
+  timeout?: number
+  retries?: number
+  defaults?: ProviderDefaults
 }
 
 export interface Message {
@@ -53,10 +78,12 @@ export interface Run {
   totalCalls: number
   completedCalls: number
   createdAt: number
+  runSettings?: RunSettings
 }
 
 export interface BenchmarkRequest {
   prompts?: string[]
   models?: string[]
   pairs?: { prompt: string; model: string }[]
+  runSettings?: RunSettings
 }

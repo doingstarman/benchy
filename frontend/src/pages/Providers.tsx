@@ -1,42 +1,576 @@
 import { useState, useEffect } from 'react'
 import { providersApi } from '../api'
 import { ProviderTile } from '../components/ProviderTile'
-import type { Provider, ProviderType } from '../../../src/types'
+import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
 
-// Browser-safe UUID
+const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
+  temperature: 0.7,
+  topP: 1.0,
+  topK: null,
+  maxOutputTokens: 2048,
+  contextBudget: null,
+  truncation: 'auto',
+  timeoutMs: 60000,
+  retries: 2,
+  streaming: true,
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function uid() {
   return typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
-const PRESET_PROVIDERS: Array<{ name: string; type: ProviderType; baseUrl?: string; placeholderKey?: string; defaultModels: string[] }> = [
-  { name: 'OpenAI', type: 'openai', placeholderKey: 'sk-…', defaultModels: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
-  { name: 'Anthropic', type: 'anthropic', placeholderKey: 'sk-ant-…', defaultModels: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'] },
-  { name: 'Google', type: 'google', placeholderKey: 'AIza…', defaultModels: ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'] },
-  { name: 'Mistral', type: 'openai-compatible', baseUrl: 'https://api.mistral.ai/v1', defaultModels: ['mistral-large-latest', 'mistral-small-latest'] },
-  { name: 'DeepSeek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', defaultModels: ['deepseek-chat', 'deepseek-reasoner'] },
-  { name: 'xAI', type: 'openai-compatible', baseUrl: 'https://api.x.ai/v1', defaultModels: ['grok-4', 'grok-3'] },
-  { name: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', defaultModels: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'] },
-  { name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', defaultModels: [] },
-  { name: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', defaultModels: [] },
-  { name: 'Ollama', type: 'local', baseUrl: 'http://localhost:11434/v1', defaultModels: [] },
-  { name: 'LM Studio', type: 'local', baseUrl: 'http://localhost:1234/v1', defaultModels: [] },
+function maskKey(key: string): string {
+  if (key.length < 8) return '•'.repeat(key.length)
+  return key.slice(0, 3) + '•'.repeat(16) + key.slice(-4)
+}
+
+// ─── Static data ──────────────────────────────────────────────────────────────
+
+const MODEL_CAPABILITIES: Record<string, string[]> = {
+  'gpt-4o': ['chat', 'vision'],
+  'gpt-4o-mini': ['fast', 'cheap'],
+  'gpt-4.1': ['chat'],
+  'gpt-4.1-mini': ['fast', 'cheap'],
+  'o3': ['reasoning'],
+  'o3-mini': ['reasoning'],
+  'o1': ['reasoning'],
+  'text-embedding-3-large': ['embeddings'],
+  'text-embedding-3-small': ['embeddings'],
+  'claude-opus-4-5': ['flagship'],
+  'claude-sonnet-4-5': ['chat'],
+  'claude-haiku-4-5': ['fast', 'cheap'],
+  'claude-3-5-haiku-20241022': ['fast', 'cheap'],
+  'gemini-2.5-pro': ['chat', 'vision'],
+  'gemini-2.5-flash': ['fast'],
+  'gemini-2.0-flash': ['fast'],
+  'gemini-2.0-flash-lite': ['fast', 'cheap'],
+  'mistral-large-latest': ['chat', 'flagship'],
+  'mistral-small-latest': ['fast', 'cheap'],
+  'open-mixtral-8x22b': ['open weights'],
+  'codestral-latest': ['code'],
+  'deepseek-chat': ['chat'],
+  'deepseek-reasoner': ['reasoning'],
+  'grok-4': ['chat', 'flagship'],
+  'grok-3': ['chat'],
+  'llama-3.3-70b-versatile': ['chat'],
+  'llama-3.1-8b-instant': ['fast', 'cheap'],
+}
+
+interface PresetProvider {
+  name: string
+  type: ProviderType
+  baseUrl?: string
+  placeholderKey?: string
+  docsUrl: string
+  subtitle: string
+}
+
+const PRESET_PROVIDERS: PresetProvider[] = [
+  { name: 'OpenAI', type: 'openai', placeholderKey: 'sk-…', subtitle: 'Official provider · OpenAI API', docsUrl: 'https://platform.openai.com/docs/overview' },
+  { name: 'Anthropic', type: 'anthropic', placeholderKey: 'sk-ant-…', subtitle: 'Official provider · Anthropic API', docsUrl: 'https://docs.anthropic.com/' },
+  { name: 'Google', type: 'google', placeholderKey: 'AIza…', subtitle: 'Official provider · Google AI', docsUrl: 'https://ai.google.dev/gemini-api/docs' },
+  { name: 'Mistral', type: 'openai-compatible', baseUrl: 'https://api.mistral.ai/v1', subtitle: 'Custom endpoint · OpenAI-style API', docsUrl: 'https://docs.mistral.ai/' },
+  { name: 'DeepSeek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', subtitle: 'Custom endpoint · OpenAI-style API', docsUrl: 'https://api-docs.deepseek.com/' },
+  { name: 'xAI', type: 'openai-compatible', baseUrl: 'https://api.x.ai/v1', subtitle: 'Custom endpoint · OpenAI-style API', docsUrl: 'https://docs.x.ai/' },
+  { name: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', subtitle: 'Fast inference · OpenAI-style API', docsUrl: 'https://console.groq.com/docs/openai' },
+  { name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', subtitle: 'Fast inference · OpenAI-style API', docsUrl: 'https://docs.together.ai/' },
+  { name: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', subtitle: 'Model aggregator · OpenAI-style API', docsUrl: 'https://openrouter.ai/docs' },
+  { name: 'Ollama', type: 'local', baseUrl: 'http://localhost:11434/v1', subtitle: 'Local provider · OpenAI-style API', docsUrl: 'https://ollama.com/library' },
+  { name: 'LM Studio', type: 'local', baseUrl: 'http://localhost:1234/v1', subtitle: 'Local provider · OpenAI-style API', docsUrl: 'https://lmstudio.ai/docs' },
+  { name: 'HTTP JSON', type: 'http-json', placeholderKey: 'Bearer token (optional)', subtitle: 'Custom HTTP endpoint · JSON or SSE response' },
+  { name: 'Script', type: 'script', subtitle: 'Local script · JSON messages on stdin' },
+  { name: 'Webhook', type: 'webhook', placeholderKey: 'Webhook secret (optional)', subtitle: 'Webhook · POST with JSON payload' },
 ]
 
 const SECTIONS = [
   { title: 'Frontier', names: ['OpenAI', 'Anthropic', 'Google', 'Mistral', 'DeepSeek', 'xAI'] },
   { title: 'Fast inference', names: ['Groq', 'Together AI', 'OpenRouter'] },
   { title: 'Local', names: ['Ollama', 'LM Studio'] },
+  { title: 'Custom integrations', names: ['HTTP JSON', 'Script', 'Webhook'] },
 ]
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface TestResult {
+  ok: boolean
+  ttfs?: number
+  message?: string
+  error?: string
+}
 
 interface ModalState {
   provider: Provider
-  preset?: typeof PRESET_PROVIDERS[0]
-  modelsText: string
+  preset?: PresetProvider
+  selectedModels: Set<string>
+  availableModels: string[]
+  manualMode: boolean
+  manualText: string
+  modelSearch: string
+  replacingKey: boolean
+  newKey: string
+  testModelId: string
   testing: boolean
-  testResult: { ok: boolean; error?: string } | null
+  fetchingModels: boolean
+  testResult: TestResult | null
+  advancedOpen: boolean
+  defaults: ProviderDefaults
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const MODAL_CSS = `
+  .prov-checkbox { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .prov-model-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 0.5px solid var(--border); }
+  .prov-model-row:last-child { border-bottom: none; }
+  .prov-model-row:hover { background: var(--bg-base); }
+  .prov-tag { display: inline-block; font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); padding: 1px 5px; border-radius: 3px; background: var(--bg-base); border: 0.5px solid var(--border); }
+  .prov-icon-btn { background: none; border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  .prov-icon-btn:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-primary); }
+  .prov-icon-btn:disabled { opacity: .45; cursor: default; }
+  .prov-select { background: var(--bg-base); border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); cursor: pointer; flex: 1; }
+  .prov-select:focus { outline: 1.5px solid var(--accent); }
+  .prov-input { background: var(--bg-base); border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); width: 100%; box-sizing: border-box; }
+  .prov-input:focus { outline: 1.5px solid var(--accent); border-color: transparent; }
+  .prov-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: prov-spin .6s linear infinite; }
+  @keyframes prov-spin { to { transform: rotate(360deg) } }
+`
+
+// ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
+
+interface ProviderHeaderProps {
+  name: string
+  subtitle: string
+  connected: boolean
+  docsUrl?: string
+}
+
+function ProviderHeader({ name, subtitle, connected, docsUrl }: ProviderHeaderProps) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-bright)', letterSpacing: -0.3 }}>{name}</div>
+        <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</span>
+          {docsUrl && (
+            <a href={docsUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)', opacity: 0.85 }}>
+              docs ↗
+            </a>
+          )}
+        </div>
+      </div>
+      {connected && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--success-bg)', border: '0.5px solid var(--success)', flexShrink: 0 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />
+          <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>Connected</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface SectionLabelProps { children: string; actions?: React.ReactNode }
+
+function SectionLabel({ children, actions }: SectionLabelProps) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+      <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{children}</span>
+      {actions && <div style={{ display: 'flex', gap: 6 }}>{actions}</div>}
+    </div>
+  )
+}
+
+interface ApiKeySectionProps {
+  apiKey: string
+  replacingKey: boolean
+  newKey: string
+  placeholder: string
+  onStartReplace: () => void
+  onNewKeyChange: (v: string) => void
+}
+
+function ApiKeySection({ apiKey, replacingKey, newKey, placeholder, onStartReplace, onNewKeyChange }: ApiKeySectionProps) {
+  return (
+    <div>
+      <SectionLabel>API KEY</SectionLabel>
+      {!replacingKey && apiKey ? (
+        <div style={{ background: 'var(--bg-base)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>
+            {maskKey(apiKey)}
+          </span>
+          <button onClick={onStartReplace} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)', padding: '0 0 0 12px' }}>
+            Replace key
+          </button>
+        </div>
+      ) : (
+        <input
+          className="prov-input"
+          type="password"
+          value={newKey}
+          onChange={e => onNewKeyChange(e.target.value)}
+          placeholder={placeholder}
+          autoFocus={replacingKey}
+        />
+      )}
+      {!replacingKey && apiKey && (
+        <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-muted)' }}>Stored locally</div>
+      )}
+    </div>
+  )
+}
+
+interface BaseUrlSectionProps { baseUrl: string; onChange: (v: string) => void; label?: string; placeholder?: string }
+
+function BaseUrlSection({ baseUrl, onChange, label = 'BASE URL', placeholder = 'https://api.example.com/v1' }: BaseUrlSectionProps) {
+  return (
+    <div>
+      <SectionLabel>{label}</SectionLabel>
+      <input className="prov-input" type="text" value={baseUrl} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+    </div>
+  )
+}
+
+interface ModelsSectionProps {
+  available: string[]
+  selected: Set<string>
+  search: string
+  manualMode: boolean
+  manualText: string
+  fetchingModels: boolean
+  onToggle: (id: string) => void
+  onSearchChange: (v: string) => void
+  onManualModeToggle: () => void
+  onManualTextChange: (v: string) => void
+  onFetchModels: () => void
+}
+
+function ModelsSection({ available, selected, search, manualMode, manualText, fetchingModels, onToggle, onSearchChange, onManualModeToggle, onManualTextChange, onFetchModels }: ModelsSectionProps) {
+  const filtered = available.filter(id => id.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <div>
+      <SectionLabel actions={
+        <>
+          <button className="prov-icon-btn" onClick={onFetchModels} disabled={fetchingModels}>
+            {fetchingModels ? <span className="prov-spinner" /> : '⟳'} Fetch models
+          </button>
+          <button className="prov-icon-btn" onClick={onManualModeToggle}>
+            ✎ {manualMode ? 'List' : 'Manual'}
+          </button>
+        </>
+      }>MODELS</SectionLabel>
+
+      <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+        {manualMode ? (
+          <textarea
+            className="prov-input"
+            value={manualText}
+            onChange={e => onManualTextChange(e.target.value)}
+            placeholder="model-1, model-2, model-3"
+            rows={4}
+            style={{ borderRadius: 0, border: 'none', resize: 'vertical' }}
+          />
+        ) : (
+          <>
+            <div style={{ padding: '8px 12px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>⌕</span>
+              <input
+                type="text"
+                value={search}
+                onChange={e => onSearchChange(e.target.value)}
+                placeholder="Search models..."
+                style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', flex: 1 }}
+              />
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              {filtered.length === 0 && (
+                <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  {available.length === 0 ? 'Click "Fetch models" to load available models' : 'No models match'}
+                </div>
+              )}
+              {filtered.map(id => {
+                const caps = MODEL_CAPABILITIES[id] ?? []
+                return (
+                  <div key={id} className="prov-model-row">
+                    <input
+                      type="checkbox"
+                      className="prov-checkbox"
+                      checked={selected.has(id)}
+                      onChange={() => onToggle(id)}
+                      id={`model-${id}`}
+                    />
+                    <label htmlFor={`model-${id}`} style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                      {id}
+                    </label>
+                    {caps.length > 0 && (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {caps.map(c => <span key={c} className="prov-tag">{c}</span>)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface TestSectionProps {
+  models: string[]
+  testModelId: string
+  testing: boolean
+  result: TestResult | null
+  onModelChange: (id: string) => void
+  onTest: () => void
+}
+
+function TestSection({ models, testModelId, testing, result, onModelChange, onTest }: TestSectionProps) {
+  const disabled = testing || models.length === 0
+  return (
+    <div>
+      <SectionLabel>TEST</SectionLabel>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Test model</span>
+        <select className="prov-select" value={testModelId} onChange={e => onModelChange(e.target.value)}>
+          {models.map(m => <option key={m} value={m}>{m}</option>)}
+          {models.length === 0 && <option value="">— select a model —</option>}
+        </select>
+        <button
+          onClick={onTest}
+          disabled={disabled}
+          style={{
+            padding: '6px 14px', border: 'none', borderRadius: 'var(--radius-sm)',
+            background: disabled ? 'var(--accent-bg)' : 'var(--accent)',
+            color: disabled ? 'var(--text-muted)' : '#fff',
+            fontSize: 12, fontFamily: 'var(--font-mono)', cursor: disabled ? 'default' : 'pointer',
+            whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          {testing ? <><span className="prov-spinner" />Testing…</> : 'Test connection'}
+        </button>
+      </div>
+      {result && (
+        <div style={{
+          marginTop: 10, padding: '9px 12px', borderRadius: 'var(--radius-sm)',
+          background: result.ok ? 'var(--success-bg)' : 'var(--error-bg)',
+          border: `0.5px solid ${result.ok ? 'var(--success)' : 'var(--error)'}`,
+          fontSize: 12, fontFamily: 'var(--font-mono)',
+          color: result.ok ? 'var(--success)' : 'var(--error)',
+        }}>
+          {result.ok
+            ? `✓ Connection OK · ${result.ttfs ?? '?'}ms · ${result.message ?? 'streamed response received'}`
+            : `✗ ${result.error}`}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface AdvancedDefaultsSectionProps {
+  open: boolean
+  onToggle: () => void
+  baseUrl: string
+  onBaseUrlChange: (v: string) => void
+  showBaseUrl: boolean
+  defaults: ProviderDefaults
+  onChange: (patch: Partial<ProviderDefaults>) => void
+}
+
+function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, showBaseUrl, defaults, onChange }: AdvancedDefaultsSectionProps) {
+  const d = { ...DEFAULT_DEFAULTS, ...defaults }
+  const fieldRow = { display: 'flex', flexDirection: 'column' as const, gap: 4, flex: 1 }
+  const fieldLabel = { fontSize: 11, color: 'var(--text-muted)' }
+  const groupLabel = { fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }
+
+  return (
+    <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Advanced Defaults</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.7 }}>Applied to new runs unless overridden</span>
+        </div>
+        <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>{open ? '∧' : '∨'}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 14px 16px', display: 'flex', flexDirection: 'column', gap: 0, borderTop: '0.5px solid var(--border)' }}>
+
+          {showBaseUrl && (
+            <div style={{ paddingTop: 14, paddingBottom: 14, borderBottom: '0.5px solid var(--border)' }}>
+              <div style={fieldLabel as React.CSSProperties}>Base URL</div>
+              <input className="prov-input" type="text" value={baseUrl} onChange={e => onBaseUrlChange(e.target.value)} style={{ marginTop: 5 }} />
+            </div>
+          )}
+
+          {/* Generation */}
+          <div style={{ paddingTop: 14 }}>
+            <div style={groupLabel}>Generation</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Temperature</span>
+                <input className="prov-input" type="number" min={0} max={2} step={0.1}
+                  value={d.temperature ?? ''}
+                  onChange={e => onChange({ temperature: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 80 }} />
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Top P</span>
+                <input className="prov-input" type="number" min={0} max={1} step={0.05}
+                  value={d.topP ?? ''}
+                  onChange={e => onChange({ topP: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 80 }} />
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Top K</span>
+                <input className="prov-input" type="number" min={1} step={1}
+                  placeholder="Auto"
+                  value={d.topK ?? ''}
+                  onChange={e => onChange({ topK: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 80 }} />
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Max output tokens</span>
+                <input className="prov-input" type="number" min={1} step={1}
+                  value={d.maxOutputTokens ?? ''}
+                  onChange={e => onChange({ maxOutputTokens: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 100 }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Context */}
+          <div style={{ paddingTop: 14 }}>
+            <div style={groupLabel}>Context</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Context budget</span>
+                <input className="prov-input" type="number" min={1} step={1}
+                  placeholder="Model default"
+                  value={d.contextBudget ?? ''}
+                  onChange={e => onChange({ contextBudget: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 140 }} />
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Truncation</span>
+                <select className="prov-select"
+                  value={d.truncation ?? 'auto'}
+                  onChange={e => onChange({ truncation: e.target.value as ProviderDefaults['truncation'] })}
+                  style={{ width: 120 }}>
+                  <option value="auto">auto</option>
+                  <option value="start">start</option>
+                  <option value="middle">middle</option>
+                  <option value="end">end</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Reliability */}
+          <div style={{ paddingTop: 14 }}>
+            <div style={groupLabel}>Reliability</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Timeout</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input className="prov-input" type="number" min={1} max={600} step={1}
+                    value={d.timeoutMs != null ? Math.round(d.timeoutMs / 1000) : ''}
+                    onChange={e => onChange({ timeoutMs: e.target.value === '' ? null : Number(e.target.value) * 1000 })}
+                    style={{ width: 70 }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>s</span>
+                </div>
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Retries</span>
+                <input className="prov-input" type="number" min={0} max={10} step={1}
+                  value={d.retries ?? ''}
+                  onChange={e => onChange({ retries: e.target.value === '' ? null : Number(e.target.value) })}
+                  style={{ width: 70 }} />
+              </div>
+              <div style={fieldRow}>
+                <span style={fieldLabel}>Streaming</span>
+                <button
+                  onClick={() => onChange({ streaming: !d.streaming })}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: d.streaming ? 'var(--accent)' : 'var(--bg-base)',
+                    border: '0.5px solid var(--border)', borderRadius: 20,
+                    padding: '4px 10px', cursor: 'pointer',
+                    fontSize: 12, fontFamily: 'var(--font-mono)',
+                    color: d.streaming ? '#fff' : 'var(--text-muted)',
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  <span style={{
+                    width: 10, height: 10, borderRadius: '50%',
+                    background: d.streaming ? '#fff' : 'var(--text-muted)',
+                  }} />
+                  {d.streaming ? 'On' : 'Off'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface ModalFooterProps {
+  onCancel: () => void
+  onSave: () => void
+  saving: boolean
+}
+
+function ModalFooter({ onCancel, onSave, saving }: ModalFooterProps) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <button
+        onClick={onCancel}
+        style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '7px 16px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}
+      >
+        Cancel
+      </button>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        style={{ background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '7px 18px', fontSize: 12, color: '#fff', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1 }}
+      >
+        {saving ? 'Saving…' : 'Save provider'}
+      </button>
+    </div>
+  )
+}
+
+interface DangerZoneProps { onDisconnect: () => void }
+
+function DangerZone({ onDisconnect }: DangerZoneProps) {
+  return (
+    <div style={{ border: '0.5px solid var(--error)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--error)', marginBottom: 3 }}>Danger zone</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Disconnecting will remove this provider and stop any in-flight requests.</div>
+      </div>
+      <button
+        onClick={onDisconnect}
+        style={{ flexShrink: 0, background: 'none', border: '0.5px solid var(--error)', borderRadius: 'var(--radius-sm)', padding: '7px 14px', fontSize: 12, color: 'var(--error)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+      >
+        Disconnect provider
+      </button>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export function Providers() {
   const [providers, setProviders] = useState<Provider[]>([])
@@ -47,35 +581,136 @@ export function Providers() {
     providersApi.list().then(setProviders).catch(() => {})
   }, [])
 
-  function openPreset(preset: typeof PRESET_PROVIDERS[0]) {
-    const existing = providers.find(p => p.name === preset.name)
-    const p: Provider = existing ?? {
+  const CUSTOM_INTEGRATION_TYPES: string[] = ['http-json', 'script', 'webhook']
+
+  function buildModal(preset: PresetProvider, existing?: Provider): ModalState {
+    const isCustomIntegration = CUSTOM_INTEGRATION_TYPES.includes(preset.type)
+    if (existing) {
+      return {
+        provider: existing,
+        preset,
+        selectedModels: new Set(existing.models),
+        availableModels: existing.models,
+        manualMode: isCustomIntegration || existing.models.length > 0,
+        manualText: existing.models.join(', '),
+        modelSearch: '',
+        replacingKey: !existing.apiKey,
+        newKey: '',
+        testModelId: existing.models[0] ?? '',
+        testing: false,
+        fetchingModels: false,
+        testResult: null,
+        advancedOpen: true,
+        defaults: existing.defaults ?? { ...DEFAULT_DEFAULTS },
+      }
+    }
+    const p: Provider = {
       id: uid(),
       name: preset.name,
       type: preset.type,
       apiKey: '',
       baseUrl: preset.baseUrl,
-      models: preset.defaultModels,
+      models: [],
       enabled: true,
     }
-    setModal({ provider: p, preset, modelsText: p.models.join(', '), testing: false, testResult: null })
+    return {
+      provider: p,
+      preset,
+      selectedModels: new Set(),
+      availableModels: [],
+      manualMode: isCustomIntegration,
+      manualText: '',
+      modelSearch: '',
+      replacingKey: true,
+      newKey: '',
+      testModelId: '',
+      testing: false,
+      fetchingModels: false,
+      testResult: null,
+      advancedOpen: true,
+      defaults: { ...DEFAULT_DEFAULTS },
+    }
+  }
+
+  function openPreset(preset: PresetProvider) {
+    const existing = providers.find(p => p.name === preset.name)
+    setModal(buildModal(preset, existing))
   }
 
   function openCustom() {
-    const p: Provider = { id: uid(), name: '', type: 'custom', apiKey: '', baseUrl: '', models: [], enabled: true }
-    setModal({ provider: p, modelsText: '', testing: false, testResult: null })
+    const p: Provider = { id: uid(), name: '', type: 'openai-compatible', apiKey: '', baseUrl: '', models: [], enabled: true }
+    setModal({
+      provider: p,
+      selectedModels: new Set(),
+      availableModels: [],
+      manualMode: true,
+      manualText: '',
+      modelSearch: '',
+      replacingKey: true,
+      newKey: '',
+      testModelId: '',
+      testing: false,
+      fetchingModels: false,
+      testResult: null,
+      advancedOpen: true,
+      defaults: { ...DEFAULT_DEFAULTS },
+    })
+  }
+
+  function openExistingCustom(p: Provider) {
+    setModal({
+      provider: p,
+      selectedModels: new Set(p.models),
+      availableModels: p.models,
+      manualMode: true,
+      manualText: p.models.join(', '),
+      modelSearch: '',
+      replacingKey: !p.apiKey,
+      newKey: '',
+      testModelId: p.models[0] ?? '',
+      testing: false,
+      fetchingModels: false,
+      testResult: null,
+      advancedOpen: true,
+      defaults: p.defaults ?? { ...DEFAULT_DEFAULTS },
+    })
+  }
+
+  function updateModal(patch: Partial<ModalState>) {
+    setModal(m => m ? { ...m, ...patch } : m)
+  }
+
+  function updateProvider(patch: Partial<Provider>) {
+    setModal(m => m ? { ...m, provider: { ...m.provider, ...patch } } : m)
+  }
+
+  function getFinalModels(m: ModalState): string[] {
+    if (m.manualMode) return m.manualText.split(',').map(s => s.trim()).filter(Boolean)
+    return [...m.selectedModels]
+  }
+
+  function getFinalProvider(m: ModalState): Provider {
+    return {
+      ...m.provider,
+      apiKey: m.replacingKey ? m.newKey : (m.provider.apiKey ?? ''),
+      models: getFinalModels(m),
+      defaults: m.defaults,
+    }
+  }
+
+  function syncProviders(saved: Provider) {
+    setProviders(prev => {
+      const idx = prev.findIndex(p => p.id === saved.id)
+      return idx >= 0 ? prev.map((p, i) => i === idx ? saved : p) : [...prev, saved]
+    })
   }
 
   async function handleSave() {
     if (!modal) return
     setSaving(true)
-    const models = modal.modelsText.split(',').map(m => m.trim()).filter(Boolean)
     try {
-      const saved = await providersApi.upsert({ ...modal.provider, models })
-      setProviders(prev => {
-        const idx = prev.findIndex(p => p.id === saved.id)
-        return idx >= 0 ? prev.map((p, i) => i === idx ? saved : p) : [...prev, saved]
-      })
+      const saved = await providersApi.upsert(getFinalProvider(modal))
+      syncProviders(saved)
       setModal(null)
     } finally {
       setSaving(false)
@@ -91,23 +726,66 @@ export function Providers() {
 
   async function handleTest() {
     if (!modal) return
-    setModal(m => m ? { ...m, testing: true, testResult: null } : m)
-    // Save first, then test
-    const models = modal.modelsText.split(',').map(m => m.trim()).filter(Boolean)
-    const saved = await providersApi.upsert({ ...modal.provider, models })
-    const result = await providersApi.test(saved.id)
-    setProviders(prev => {
-      const idx = prev.findIndex(p => p.id === saved.id)
-      return idx >= 0 ? prev.map((p, i) => i === idx ? saved : p) : [...prev, saved]
-    })
-    setModal(m => m ? { ...m, provider: saved, testing: false, testResult: result } : m)
+    updateModal({ testing: true, testResult: null })
+    try {
+      const saved = await providersApi.upsert(getFinalProvider(modal))
+      syncProviders(saved)
+      const result = await providersApi.test(saved.id, modal.testModelId || undefined)
+      updateModal({ testing: false, testResult: result, provider: saved })
+    } catch (err) {
+      updateModal({ testing: false, testResult: { ok: false, error: err instanceof Error ? err.message : String(err) } })
+    }
   }
 
-  function updateModal(patch: Partial<Provider>) {
-    setModal(m => m ? { ...m, provider: { ...m.provider, ...patch } } : m)
+  async function handleFetchModels() {
+    if (!modal) return
+    updateModal({ fetchingModels: true })
+    try {
+      const saved = await providersApi.upsert(getFinalProvider(modal))
+      syncProviders(saved)
+      const fetched = await providersApi.fetchModels(saved.id)
+      setModal(m => {
+        if (!m) return m
+        const merged = [...new Set([...fetched, ...m.availableModels])]
+        return { ...m, provider: saved, availableModels: merged, fetchingModels: false, manualMode: false }
+      })
+    } catch {
+      updateModal({ fetchingModels: false })
+    }
+  }
+
+  function toggleModelSelection(id: string) {
+    setModal(m => {
+      if (!m) return m
+      const next = new Set(m.selectedModels)
+      next.has(id) ? next.delete(id) : next.add(id)
+      const firstSelected = next.values().next().value ?? ''
+      return { ...m, selectedModels: next, testModelId: m.testModelId || firstSelected }
+    })
   }
 
   const providerMap = new Map(providers.map(p => [p.name, p]))
+  const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
+  const isLocal = modal?.provider.type === 'local'
+  const isScript = modal?.provider.type === 'script'
+  const isCustom = !modal?.preset
+  const isCompatible = modal ? (modal.provider.type === 'openai-compatible' || modal.provider.type === 'local' || isCustom) : false
+  const isCustomIntegration = modal ? CUSTOM_INTEGRATION_TYPES.includes(modal.provider.type) : false
+  const showBaseUrlAbove = (isCompatible && !isCustom) || isCustomIntegration
+  const currentSelectedList = modal ? getFinalModels(modal) : []
+
+  function baseUrlLabel(type: string): string {
+    if (type === 'script') return 'COMMAND'
+    if (type === 'http-json') return 'ENDPOINT URL'
+    if (type === 'webhook') return 'WEBHOOK URL'
+    return 'BASE URL'
+  }
+  function baseUrlPlaceholder(type: string): string {
+    if (type === 'script') return 'python /path/to/script.py'
+    if (type === 'http-json') return 'https://my-server.com/chat'
+    if (type === 'webhook') return 'https://my-server.com/webhook'
+    return 'https://api.example.com/v1'
+  }
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -125,7 +803,7 @@ export function Providers() {
               return (
                 <ProviderTile
                   key={name}
-                  provider={connected ?? { id: '', name, type: preset.type, models: preset.defaultModels, enabled: false }}
+                  provider={connected ?? { id: '', name, type: preset.type, models: [], enabled: false }}
                   onClick={() => openPreset(preset)}
                 />
               )
@@ -134,22 +812,17 @@ export function Providers() {
         </div>
       ))}
 
-      {/* Custom */}
       <div>
         <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
           Custom
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
           {providers.filter(p => !SECTIONS.flatMap(s => s.names).includes(p.name)).map(p => (
-            <ProviderTile key={p.id} provider={p} onClick={() => setModal({ provider: p, modelsText: p.models.join(', '), testing: false, testResult: null })} />
+            <ProviderTile key={p.id} provider={p} onClick={() => openExistingCustom(p)} />
           ))}
           <button
             onClick={openCustom}
-            style={{
-              background: 'none', border: '0.5px dashed var(--border)',
-              borderRadius: 'var(--radius-md)', padding: 16, cursor: 'pointer',
-              color: 'var(--text-muted)', fontSize: 12, textAlign: 'center',
-            }}
+            style={{ background: 'none', border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: 16, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}
           >
             + custom endpoint
           </button>
@@ -160,119 +833,94 @@ export function Providers() {
       {modal && (
         <div
           onClick={e => { if (e.target === e.currentTarget) setModal(null) }}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-          }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}
         >
           <div style={{
             background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
-            borderRadius: 'var(--radius-lg)', padding: 24, width: 440, display: 'flex', flexDirection: 'column', gap: 14,
+            borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 660,
+            maxHeight: 'calc(100vh - 40px)', overflowY: 'auto',
+            display: 'flex', flexDirection: 'column',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--text-bright)' }}>
-              {modal.provider.name || 'Custom provider'}
+            <style>{MODAL_CSS}</style>
+
+            {/* Scrollable content */}
+            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <ProviderHeader
+                name={modal.provider.name || 'Custom provider'}
+                subtitle={modal.preset?.subtitle ?? 'Custom endpoint · OpenAI-style API'}
+                connected={isConnected}
+                docsUrl={modal.preset?.docsUrl}
+              />
+
+              {!isLocal && !isScript && (
+                <ApiKeySection
+                  apiKey={modal.provider.apiKey ?? ''}
+                  replacingKey={modal.replacingKey}
+                  newKey={modal.newKey}
+                  placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
+                  onStartReplace={() => updateModal({ replacingKey: true })}
+                  onNewKeyChange={v => updateModal({ newKey: v })}
+                />
+              )}
+
+              {isCustom && (
+                <div>
+                  <SectionLabel>PROVIDER NAME</SectionLabel>
+                  <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder="My Provider" />
+                </div>
+              )}
+
+              {showBaseUrlAbove && (
+                <BaseUrlSection
+                  baseUrl={modal.provider.baseUrl ?? ''}
+                  onChange={v => updateProvider({ baseUrl: v })}
+                  label={baseUrlLabel(modal.provider.type)}
+                  placeholder={baseUrlPlaceholder(modal.provider.type)}
+                />
+              )}
+
+              <ModelsSection
+                available={modal.availableModels}
+                selected={modal.selectedModels}
+                search={modal.modelSearch}
+                manualMode={modal.manualMode}
+                manualText={modal.manualText}
+                fetchingModels={modal.fetchingModels}
+                onToggle={toggleModelSelection}
+                onSearchChange={v => updateModal({ modelSearch: v })}
+                onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })}
+                onManualTextChange={v => updateModal({ manualText: v })}
+                onFetchModels={handleFetchModels}
+              />
+
+              <TestSection
+                models={currentSelectedList}
+                testModelId={modal.testModelId}
+                testing={modal.testing}
+                result={modal.testResult}
+                onModelChange={v => updateModal({ testModelId: v })}
+                onTest={handleTest}
+              />
+
+              <AdvancedDefaultsSection
+                open={modal.advancedOpen}
+                onToggle={() => updateModal({ advancedOpen: !modal.advancedOpen })}
+                baseUrl={modal.provider.baseUrl ?? ''}
+                onBaseUrlChange={v => updateProvider({ baseUrl: v })}
+                showBaseUrl={!showBaseUrlAbove}
+                defaults={modal.defaults}
+                onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })}
+              />
             </div>
 
-            {!modal.preset && (
-              <>
-                <Field label="Name" value={modal.provider.name} onChange={v => updateModal({ name: v })} />
-                <Field label="Base URL" value={modal.provider.baseUrl ?? ''} onChange={v => updateModal({ baseUrl: v })} placeholder="https://api.example.com/v1" />
-              </>
-            )}
-
-            {modal.preset?.type !== 'local' && (
-              <Field
-                label="API Key"
-                value={modal.provider.apiKey ?? ''}
-                onChange={v => updateModal({ apiKey: v })}
-                type="password"
-                placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
-              />
-            )}
-
-            {modal.preset?.baseUrl && (
-              <Field label="Base URL" value={modal.provider.baseUrl ?? modal.preset.baseUrl} onChange={v => updateModal({ baseUrl: v })} />
-            )}
-
-            <Field label="Models (comma separated)" value={modal.modelsText} onChange={v => setModal(m => m ? { ...m, modelsText: v } : m)} placeholder="model-1, model-2" />
-
-            {modal.testResult && (
-              <div style={{
-                padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                background: modal.testResult.ok ? 'var(--success-bg)' : 'var(--error-bg)',
-                color: modal.testResult.ok ? 'var(--success)' : 'var(--error)',
-                fontSize: 12, fontFamily: 'var(--font-mono)',
-              }}>
-                {modal.testResult.ok ? '✓ connection ok' : `✗ ${modal.testResult.error}`}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  style={{
-                    background: 'var(--accent)', color: '#fff', border: 'none',
-                    borderRadius: 'var(--radius-sm)', padding: '7px 16px', fontSize: 12, cursor: 'pointer',
-                  }}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-                <button
-                  onClick={handleTest}
-                  disabled={modal.testing}
-                  style={{
-                    background: 'none', border: '0.5px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)', padding: '7px 16px', fontSize: 12,
-                    color: 'var(--text-secondary)', cursor: 'pointer',
-                  }}
-                >
-                  {modal.testing ? 'Testing…' : 'Test'}
-                </button>
-              </div>
-              {providers.find(p => p.id === modal.provider.id) && (
-                <button
-                  onClick={handleDisconnect}
-                  style={{
-                    background: 'none', border: '0.5px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 12,
-                    color: 'var(--error)', cursor: 'pointer',
-                  }}
-                >
-                  Disconnect
-                </button>
-              )}
+            {/* Sticky footer */}
+            <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <ModalFooter onCancel={() => setModal(null)} onSave={handleSave} saving={saving} />
+              {isConnected && <DangerZone onDisconnect={handleDisconnect} />}
             </div>
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function Field({ label, value, onChange, type = 'text', placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
-        {label}
-      </label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{
-          background: 'var(--bg-base)', border: '0.5px solid var(--border)',
-          borderRadius: 'var(--radius-sm)', padding: '8px 10px',
-          color: 'var(--text-primary)', outline: 'none',
-          fontFamily: 'var(--font-mono)', fontSize: 12,
-        }}
-        onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
-        onBlur={e => (e.target.style.borderColor = 'var(--border)')}
-      />
     </div>
   )
 }

@@ -21,8 +21,12 @@ export const providersApi = {
     apiFetch<Provider>('/api/providers', { method: 'POST', body: JSON.stringify(p) }),
   remove: (id: string) =>
     fetch(`/api/providers/${id}`, { method: 'DELETE' }),
-  test: (id: string) =>
-    apiFetch<{ ok: boolean; error?: string }>(`/api/providers/${id}/test`, { method: 'POST' }),
+  test: (id: string, model?: string) =>
+    apiFetch<{ ok: boolean; ttfs?: number; message?: string; error?: string }>(
+      `/api/providers/${id}/test${model ? `?model=${encodeURIComponent(model)}` : ''}`,
+      { method: 'POST' }
+    ),
+  fetchModels: (id: string) => apiFetch<string[]>(`/api/providers/${id}/models`),
 }
 
 // ─── runs ────────────────────────────────────────────────────────────────────
@@ -64,6 +68,7 @@ export interface BenchmarkRequest {
   prompts?: string[]
   models?: string[]
   pairs?: { prompt: string; model: string }[]
+  runSettings?: import('../../src/types').RunSettings
 }
 
 export const benchmarkApi = {
