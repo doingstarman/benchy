@@ -43,20 +43,15 @@ program
   .name('benchy')
   .description('Self-hosted AI model benchmarking tool')
   .version('0.1.0')
-  .option('-p, --port <number>', 'port to listen on', '4242')
-  .option('--config-dir <path>', 'directory for config and database files')
-  .option('--no-open', 'do not open browser on start')
 
-let handledCommand = false
-
+// Default command: start server (runs when no subcommand given)
 program
-  .command('start')
+  .command('start', { isDefault: true })
   .description('Start the benchy server')
   .option('-p, --port <number>', 'port to listen on', '4242')
   .option('--config-dir <path>', 'directory for config and database files')
   .option('--no-open', 'do not open browser on start')
   .action(async (opts: StartOptions) => {
-    handledCommand = true
     await startServer(opts)
   })
 
@@ -64,7 +59,6 @@ program
   .command('update')
   .description('Update benchy to the latest version from GitHub')
   .action(async () => {
-    handledCommand = true
     const { spawnSync } = await import('node:child_process')
 
     const c = {
@@ -77,7 +71,6 @@ program
       red: '\x1b[31m',
     }
 
-    // Fetch recent commits from GitHub before installing
     process.stdout.write(`${c.dim}Checking for updates…${c.reset}\n`)
     type CommitEntry = { sha: string; commit: { message: string } }
     let commits: CommitEntry[] = []
@@ -86,7 +79,6 @@ program
       if (res.ok) commits = await res.json() as CommitEntry[]
     } catch { /* no network info */ }
 
-    // Spinner while installing
     const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
     let fi = 0
     process.stdout.write('\x1b[?25l')
@@ -125,12 +117,7 @@ program
     process.exit(0)
   })
 
-async function main(): Promise<void> {
-  await program.parseAsync()
-  if (!handledCommand) await startServer(program.opts<StartOptions>())
-}
-
-main().catch(err => {
+program.parseAsync().catch(err => {
   console.error(err instanceof Error ? err.message : err)
   process.exit(1)
 })

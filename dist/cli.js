@@ -30,26 +30,21 @@ async function startServer(opts) {
 program
     .name('benchy')
     .description('Self-hosted AI model benchmarking tool')
-    .version('0.1.0')
-    .option('-p, --port <number>', 'port to listen on', '4242')
-    .option('--config-dir <path>', 'directory for config and database files')
-    .option('--no-open', 'do not open browser on start');
-let handledCommand = false;
+    .version('0.1.0');
+// Default command: start server (runs when no subcommand given)
 program
-    .command('start')
+    .command('start', { isDefault: true })
     .description('Start the benchy server')
     .option('-p, --port <number>', 'port to listen on', '4242')
     .option('--config-dir <path>', 'directory for config and database files')
     .option('--no-open', 'do not open browser on start')
     .action(async (opts) => {
-    handledCommand = true;
     await startServer(opts);
 });
 program
     .command('update')
     .description('Update benchy to the latest version from GitHub')
     .action(async () => {
-    handledCommand = true;
     const { spawnSync } = await import('node:child_process');
     const c = {
         reset: '\x1b[0m',
@@ -60,7 +55,6 @@ program
         bold: '\x1b[1m',
         red: '\x1b[31m',
     };
-    // Fetch recent commits from GitHub before installing
     process.stdout.write(`${c.dim}Checking for updates…${c.reset}\n`);
     let commits = [];
     try {
@@ -69,7 +63,6 @@ program
             commits = await res.json();
     }
     catch { /* no network info */ }
-    // Spinner while installing
     const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let fi = 0;
     process.stdout.write('\x1b[?25l');
@@ -102,12 +95,7 @@ program
     console.log(`\n${c.dim}Restart benchy to apply the update.${c.reset}`);
     process.exit(0);
 });
-async function main() {
-    await program.parseAsync();
-    if (!handledCommand)
-        await startServer(program.opts());
-}
-main().catch(err => {
+program.parseAsync().catch(err => {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
 });
