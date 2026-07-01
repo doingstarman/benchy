@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
 function rowToRun(row) {
-    const settingsOverrides = row.settings_overrides
-        ? JSON.parse(row.settings_overrides)
+    const runSettings = row.run_settings
+        ? JSON.parse(row.run_settings)
         : undefined;
     return {
         id: row.id,
@@ -13,7 +13,7 @@ function rowToRun(row) {
         totalCalls: row.total_calls,
         completedCalls: row.completed_calls,
         createdAt: row.created_at,
-        ...(settingsOverrides ? { settingsOverrides } : {}),
+        ...(runSettings ? { runSettings } : {}),
     };
 }
 function rowToResult(row) {

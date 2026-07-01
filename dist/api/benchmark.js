@@ -34,7 +34,7 @@ function broadcast(runId, event, data) {
         catch { /* client disconnected */ }
     }
 }
-async function runCell(runId, promptIndex, promptText, modelKey, providers, settingsOverrides) {
+async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
     const provider = providers.find(p => p.id === providerId);
@@ -57,7 +57,8 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, sett
         const effectiveSettings = {
             ...DEFAULT_PROVIDER_SETTINGS,
             ...provider.defaults,
-            ...(settingsOverrides ?? {}),
+            ...(runSettings?.global ?? {}),
+            ...(runSettings?.perModel?.[modelKey] ?? {}),
         };
         const stream = adapter.stream([{ role: 'user', content: promptText }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings });
         for await (const chunk of stream) {
@@ -95,7 +96,7 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, sett
 }
 export async function registerBenchmarkRoutes(app) {
     app.post('/api/benchmark', async (req, reply) => {
-        const { prompts, models, pairs, settingsOverrides } = req.body;
+        const { prompts, models, pairs, runSettings } = req.body;
         if (!pairs?.length && (!prompts?.length || !models?.length)) {
             return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' });
         }
@@ -104,15 +105,15 @@ export async function registerBenchmarkRoutes(app) {
         const db = getDb();
         const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts;
         const storedModels = pairs ? pairs.map(p => p.model) : models;
-        const overridesJson = settingsOverrides && Object.keys(settingsOverrides).length > 0
-            ? JSON.stringify(settingsOverrides)
-            : null;
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, settings_overrides) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), overridesJson);
+        const hasSettings = runSettings && (Object.keys(runSettings.global ?? {}).length > 0 ||
+            Object.keys(runSettings.perModel ?? {}).length > 0);
+        const runSettingsJson = hasSettings ? JSON.stringify(runSettings) : null;
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson);
         // Fire and forget — SSE stream delivers results
         const providers = await getProviders();
         const tasks = pairs
-            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, settingsOverrides))
-            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, settingsOverrides)));
+            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
+            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings)));
         Promise.all(tasks)
             .then(() => {
             db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId);
