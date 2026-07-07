@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 
-const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
 const EXPANDED_WIDTH = 160
 const COLLAPSED_WIDTH = 52
 
@@ -52,6 +50,15 @@ const SIDEBAR_CSS = `
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
   .sidebar-collapse-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
+  .sidebar-logo-btn {
+    background: none; border: none; cursor: pointer;
+    width: 26px; height: 26px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .sidebar-logo-btn .logo-expand { display: none; color: var(--text-primary); }
+  .sidebar-logo-btn:hover { border: 0.5px solid var(--border-hover); }
+  .sidebar-logo-btn:hover .logo-mark { display: none; }
+  .sidebar-logo-btn:hover .logo-expand { display: flex; }
 `
 
 function Icon({ children }: { children: React.ReactNode }) {
@@ -116,13 +123,12 @@ function DisabledItem({ label, icon, collapsed, soon }: { label: string; icon: s
   )
 }
 
-export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
+interface SidebarProps {
+  collapsed: boolean
+  onCollapsedChange: (collapsed: boolean) => void
+}
 
-  useEffect(() => {
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? '1' : '0')
-  }, [collapsed])
-
+export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   return (
     <nav style={{
       width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
@@ -138,30 +144,45 @@ export function Sidebar() {
     }}>
       <style>{SIDEBAR_CSS}</style>
 
-      {/* Logo + collapse toggle — same row, same height in both states */}
+      {/* Logo + collapse toggle — same row, same height in both states.
+          Collapsed: the Y mark itself is the expand button, morphing into a
+          chevron on hover. */}
       <div style={{
         padding: collapsed ? '16px 0 14px' : '16px 14px 14px',
         display: 'flex', alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
         flexShrink: 0,
       }}>
-        {!collapsed && (
-          <div style={{
-            fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)',
-            color: 'var(--text-bright)', letterSpacing: '-0.02em',
-          }}>
-            bench<span style={{ color: 'var(--accent)' }}>Y</span>
-          </div>
+        {collapsed ? (
+          <button
+            className="sidebar-logo-btn"
+            onClick={() => onCollapsedChange(false)}
+            title="Expand sidebar"
+          >
+            <span className="logo-mark" style={{ fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>Y</span>
+            <svg className="logo-expand" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 3l5 5-5 5" />
+            </svg>
+          </button>
+        ) : (
+          <>
+            <div style={{
+              fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)',
+              color: 'var(--text-bright)', letterSpacing: '-0.02em',
+            }}>
+              bench<span style={{ color: 'var(--accent)' }}>Y</span>
+            </div>
+            <button
+              className="sidebar-collapse-btn"
+              onClick={() => onCollapsedChange(true)}
+              title="Collapse sidebar"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 3L5 8l5 5" />
+              </svg>
+            </button>
+          </>
         )}
-        <button
-          className="sidebar-collapse-btn"
-          onClick={() => setCollapsed(v => !v)}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
-          </svg>
-        </button>
       </div>
 
       <Divider />

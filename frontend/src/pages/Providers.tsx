@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { providersApi } from '../api'
 import { ProviderTile } from '../components/ProviderTile'
+import { SliderField } from '../components/SliderField'
 import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
 
 const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
@@ -134,10 +135,6 @@ const MODAL_CSS = `
   .prov-input:focus { outline: 1.5px solid var(--accent); border-color: transparent; }
   .prov-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: prov-spin .6s linear infinite; }
   @keyframes prov-spin { to { transform: rotate(360deg) } }
-  .prov-slider { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--border); accent-color: var(--accent); cursor: pointer; }
-  .prov-slider:disabled { opacity: .4; cursor: default; }
-  .prov-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); cursor: pointer; }
-  .prov-slider::-moz-range-thumb { width: 13px; height: 13px; border: none; border-radius: 50%; background: var(--accent); cursor: pointer; }
 `
 
 // ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
@@ -372,58 +369,6 @@ function TestSection({ models, testModelId, testing, result, onModelChange, onTe
   )
 }
 
-interface SliderFieldProps {
-  label: string
-  min: number
-  max: number
-  step: number
-  value: number | null
-  onChange: (v: number | null) => void
-  allowAuto?: boolean
-  unit?: string
-  width?: number
-}
-
-function SliderField({ label, min, max, step, value, onChange, allowAuto, unit, width = 160 }: SliderFieldProps) {
-  const fieldLabel = { fontSize: 11, color: 'var(--text-muted)' }
-  const isAuto = value == null
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={fieldLabel}>{label}</span>
-        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-          {isAuto ? 'Auto' : `${value}${unit ?? ''}`}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input
-          className="prov-slider"
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          disabled={isAuto}
-          value={value ?? min}
-          onChange={e => onChange(Number(e.target.value))}
-          style={{ flex: 1 }}
-        />
-        {allowAuto && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}>
-            <input
-              type="checkbox"
-              className="prov-checkbox"
-              checked={isAuto}
-              onChange={e => onChange(e.target.checked ? null : min)}
-            />
-            Auto
-          </label>
-        )}
-      </div>
-    </div>
-  )
-}
-
 interface AdvancedDefaultsSectionProps {
   open: boolean
   onToggle: () => void
@@ -436,9 +381,12 @@ interface AdvancedDefaultsSectionProps {
 
 function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, showBaseUrl, defaults, onChange }: AdvancedDefaultsSectionProps) {
   const d = { ...DEFAULT_DEFAULTS, ...defaults }
-  const fieldRow = { display: 'flex', flexDirection: 'column' as const, gap: 4, flex: 1 }
   const fieldLabel = { fontSize: 11, color: 'var(--text-muted)' }
-  const groupLabel = { fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }
+  const groupLabel = { fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: 10, marginTop: 4 }
+  const fieldGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12, alignItems: 'center' }
+  // Same row shape as SliderField: label (88px) | control — keeps non-slider
+  // controls (select, toggle) on the same visual rhythm as the sliders.
+  const inlineLabel = { ...fieldLabel, width: 88, flexShrink: 0 }
 
   return (
     <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
@@ -468,42 +416,37 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
           {/* Generation */}
           <div style={{ paddingTop: 14 }}>
             <div style={groupLabel}>Generation</div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+            <div style={fieldGrid}>
               <SliderField label="Temperature" min={0} max={2} step={0.1}
                 value={d.temperature ?? null}
-                onChange={v => onChange({ temperature: v })}
-                width={130} />
+                onChange={v => onChange({ temperature: v })} />
               <SliderField label="Top P" min={0} max={1} step={0.05}
                 value={d.topP ?? null}
-                onChange={v => onChange({ topP: v })}
-                width={130} />
+                onChange={v => onChange({ topP: v })} />
               <SliderField label="Top K" min={1} max={100} step={1}
                 value={d.topK ?? null}
                 onChange={v => onChange({ topK: v })}
-                allowAuto
-                width={150} />
-              <SliderField label="Max output tokens" min={1} max={32000} step={64}
+                allowAuto />
+              <SliderField label="Max tokens" min={1} max={32000} step={64}
                 value={d.maxOutputTokens ?? null}
-                onChange={v => onChange({ maxOutputTokens: v })}
-                width={170} />
+                onChange={v => onChange({ maxOutputTokens: v })} />
             </div>
           </div>
 
           {/* Context */}
-          <div style={{ paddingTop: 14 }}>
+          <div style={{ paddingTop: 18 }}>
             <div style={groupLabel}>Context</div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+            <div style={fieldGrid}>
               <SliderField label="Context budget" min={1} max={200000} step={1000}
                 value={d.contextBudget ?? null}
                 onChange={v => onChange({ contextBudget: v })}
-                allowAuto
-                width={180} />
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Truncation</span>
+                allowAuto />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={inlineLabel}>Truncation</span>
                 <select className="prov-select"
                   value={d.truncation ?? 'auto'}
                   onChange={e => onChange({ truncation: e.target.value as ProviderDefaults['truncation'] })}
-                  style={{ width: 120 }}>
+                  style={{ flex: 'none', width: 110 }}>
                   <option value="auto">auto</option>
                   <option value="start">start</option>
                   <option value="middle">middle</option>
@@ -514,20 +457,18 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
           </div>
 
           {/* Reliability */}
-          <div style={{ paddingTop: 14 }}>
+          <div style={{ paddingTop: 18 }}>
             <div style={groupLabel}>Reliability</div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
+            <div style={fieldGrid}>
               <SliderField label="Timeout" min={1} max={120} step={1}
                 value={d.timeoutMs != null ? Math.round(d.timeoutMs / 1000) : null}
                 onChange={v => onChange({ timeoutMs: v == null ? null : v * 1000 })}
-                unit="s"
-                width={130} />
+                unit="s" />
               <SliderField label="Retries" min={0} max={10} step={1}
                 value={d.retries ?? null}
-                onChange={v => onChange({ retries: v })}
-                width={130} />
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Streaming</span>
+                onChange={v => onChange({ retries: v })} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={inlineLabel}>Streaming</span>
                 <button
                   onClick={() => onChange({ streaming: !d.streaming })}
                   style={{

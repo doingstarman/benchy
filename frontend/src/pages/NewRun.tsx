@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { providersApi, benchmarkApi } from '../api'
 import { extractHtmlArtifact } from '../lib/artifact'
 import { ArtifactPreview } from '../components/ArtifactPreview'
+import { SliderField } from '../components/SliderField'
 import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
@@ -25,6 +26,22 @@ interface UIResult {
   outputTokens: number | null
   status: 'pending' | 'streaming' | 'done' | 'error'
   error?: string
+}
+
+interface Turn {
+  promptIndex: number
+  prompt: string
+  // false only for a "prompt per model" initial turn, where there's no single
+  // shared prompt text to show as a chat bubble — every continuation turn is
+  // always a shared prompt, so this is only ever false on turn 0.
+  showPromptBubble: boolean
+  results: Map<string, UIResult>
+}
+
+function pendingResults(models: string[]): Map<string, UIResult> {
+  return new Map(models.map(key => [key, {
+    text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending',
+  }]))
 }
 
 type ScreenState = 'idle' | 'running' | 'done'
@@ -52,11 +69,13 @@ interface ChipsRowProps {
   models: { key: string; label: string }[]
   selectedModels: Set<string>
   onToggle: (key: string) => void
+  onToggleAll: () => void
   onAdd: () => void
   wrap: boolean
 }
 
-export function ChipsRow({ models, selectedModels, onToggle, onAdd, wrap }: ChipsRowProps) {
+export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd, wrap }: ChipsRowProps) {
+  const allSelected = models.length > 0 && models.every(m => selectedModels.has(m.key))
   return (
     <div
       className="chips-row"
@@ -69,6 +88,23 @@ export function ChipsRow({ models, selectedModels, onToggle, onAdd, wrap }: Chip
         ...(wrap ? { justifyContent: 'center', maxWidth: 640 } : {}),
       }}
     >
+      {models.length > 1 && (
+        <button
+          onClick={onToggleAll}
+          title={allSelected ? 'Deselect all models' : 'Select all models'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+            padding: '5px 11px',
+            border: `0.5px solid ${allSelected ? 'var(--accent-dim)' : 'var(--border)'}`,
+            borderRadius: 20,
+            background: allSelected ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+            cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
+            color: allSelected ? 'var(--accent)' : 'var(--text-secondary)',
+          }}
+        >
+          {allSelected ? '✓ all' : 'all'}
+        </button>
+      )}
       {models.map(({ key, label }) => {
         const active = selectedModels.has(key)
         return (
@@ -121,6 +157,7 @@ interface PromptboxProps {
   callCount: number
   isRunning: boolean
   onRun: () => void
+  onStop: () => void
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
@@ -129,7 +166,7 @@ interface PromptboxProps {
 export function Promptbox({
   simplified, mode, onModeChange, selectedCount, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
-  callCount, isRunning, onRun,
+  callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
 }: PromptboxProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -189,43 +226,47 @@ export function Promptbox({
     return () => document.removeEventListener('mousedown', onDown)
   }, [settingsOpen])
 
-  function numField(
+  function overrideSlider(
     key: keyof RunSettingsOverrides,
     label: string,
-    displayFn: (v: RunSettingsOverrides[keyof RunSettingsOverrides]) => string,
-    inputProps: { min?: number; max?: number; step?: number; placeholder?: string; toStore?: (n: number) => number; fromStore?: (n: number) => number },
+    opts: { min: number; max: number; step: number; unit?: string; allowAuto?: boolean; toStore?: (n: number) => number; fromStore?: (n: number) => number },
   ) {
     const isSet = key in currentTabOverrides && currentTabOverrides[key] != null
     const storedVal = isSet ? currentTabOverrides[key] as number : null
-    const displayVal = storedVal != null && inputProps.fromStore ? inputProps.fromStore(storedVal) : storedVal
-    const inheritedVal = currentTabInherited[key as keyof typeof currentTabInherited]
+    const displayVal = storedVal != null && opts.fromStore ? opts.fromStore(storedVal) : storedVal
+    const inheritedRaw = currentTabInherited[key as keyof typeof currentTabInherited] as number | null
+    const inheritedDisplay = inheritedRaw != null && opts.fromStore ? opts.fromStore(inheritedRaw) : inheritedRaw
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-        {isSet ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <input
-              type="number" min={inputProps.min} max={inputProps.max} step={inputProps.step ?? 1}
-              placeholder={inputProps.placeholder}
-              value={displayVal ?? ''}
-              onChange={e => {
-                if (e.target.value === '') { resetOverride(key); return }
-                const n = Number(e.target.value)
-                updateTabOverrides({ ...currentTabOverrides, [key]: inputProps.toStore ? inputProps.toStore(n) : n })
-              }}
-              style={{ width: 64, background: 'var(--bg-base)', border: '0.5px solid var(--accent-dim)', borderRadius: 5, padding: '4px 6px', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', outline: 'none' }}
-            />
-            <button onClick={() => resetOverride(key)} title="Reset" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, padding: '0 2px', lineHeight: 1 }}>↺</button>
-          </div>
-        ) : (
-          <button
-            onClick={() => updateTabOverrides({ ...currentTabOverrides, [key]: inheritedVal as number })}
-            style={{ textAlign: 'left', background: 'none', border: '0.5px solid var(--border)', borderRadius: 5, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', width: 64 }}
-          >
-            {displayFn(inheritedVal)}
-          </button>
-        )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SliderField
+            label={label}
+            min={opts.min}
+            max={opts.max}
+            step={opts.step}
+            unit={opts.unit}
+            allowAuto={opts.allowAuto}
+            accent={isSet}
+            value={isSet ? displayVal : inheritedDisplay}
+            onChange={v => {
+              const stored = v == null ? null : (opts.toStore ? opts.toStore(v) : v)
+              updateTabOverrides({ ...currentTabOverrides, [key]: stored })
+            }}
+          />
+        </div>
+        {/* Slot is always reserved so rows don't reflow when an override appears */}
+        <button
+          onClick={() => resetOverride(key)}
+          title="Reset to inherited"
+          style={{
+            visibility: isSet ? 'visible' : 'hidden',
+            background: 'none', border: 'none', color: 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0,
+          }}
+        >
+          ↺
+        </button>
       </div>
     )
   }
@@ -288,23 +329,23 @@ export function Promptbox({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Generation</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {numField('temperature', 'Temp', v => String(v ?? 0.7), { min: 0, max: 2, step: 0.1 })}
-              {numField('topP', 'Top P', v => String(v ?? 1.0), { min: 0, max: 1, step: 0.05 })}
-              {numField('topK', 'Top K', v => v != null ? String(v) : 'Auto', { min: 1, step: 1, placeholder: 'Auto' })}
-              {numField('maxOutputTokens', 'Max tokens', v => String(v ?? 2048), { min: 1, step: 1 })}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12 }}>
+              {overrideSlider('temperature', 'Temperature', { min: 0, max: 2, step: 0.1 })}
+              {overrideSlider('topP', 'Top P', { min: 0, max: 1, step: 0.05 })}
+              {overrideSlider('topK', 'Top K', { min: 1, max: 100, step: 1, allowAuto: true })}
+              {overrideSlider('maxOutputTokens', 'Max tokens', { min: 1, max: 32000, step: 64 })}
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Reliability</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {numField('timeoutMs', 'Timeout (s)', v => v != null ? `${Math.round((v as number) / 1000)}s` : '60s', {
-                min: 1, max: 600, step: 1,
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12 }}>
+              {overrideSlider('timeoutMs', 'Timeout', {
+                min: 1, max: 120, step: 1, unit: 's',
                 toStore: n => n * 1000,
                 fromStore: n => Math.round(n / 1000),
               })}
-              {numField('retries', 'Retries', v => String(v ?? 2), { min: 0, max: 10, step: 1 })}
+              {overrideSlider('retries', 'Retries', { min: 0, max: 10, step: 1 })}
             </div>
           </div>
         </div>
@@ -405,20 +446,34 @@ export function Promptbox({
             <span style={{ color: 'var(--accent)' }}>{callCount}</span> call{callCount !== 1 ? 's' : ''}
           </span>
         )}
-        <button
-          onClick={onRun}
-          disabled={disabled}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '6px 16px', border: 'none', borderRadius: 7,
-            background: disabled ? 'var(--accent-bg)' : 'var(--accent)',
-            color: disabled ? 'var(--text-muted)' : '#fff',
-            fontSize: 13, fontFamily: 'var(--font-mono)',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {isRunning ? '⏸ running' : '▶ run'}
-        </button>
+        {isRunning ? (
+          <button
+            onClick={onStop}
+            title="Stop run"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 32, height: 32, border: 'none', borderRadius: 7,
+              background: 'var(--accent)', cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            <span style={{ width: 10, height: 10, background: '#fff', borderRadius: 2 }} />
+          </button>
+        ) : (
+          <button
+            onClick={onRun}
+            disabled={disabled}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 16px', border: 'none', borderRadius: 7,
+              background: disabled ? 'var(--accent-bg)' : 'var(--accent)',
+              color: disabled ? 'var(--text-muted)' : '#fff',
+              fontSize: 13, fontFamily: 'var(--font-mono)',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+            }}
+          >
+            ▶ run
+          </button>
+        )}
       </div>
       </div>
     </div>
@@ -427,29 +482,81 @@ export function Promptbox({
 
 // ─── NewRun ───────────────────────────────────────────────────────────────
 
+// Module-scoped (not component-scoped) on purpose: React Router unmounts
+// this component when you navigate to another page, which would otherwise
+// wipe all state. Living here means the conversation survives navigating
+// away and back, and only resets on an actual page reload (fresh module
+// evaluation), matching "clear only on refresh."
+interface SavedSession {
+  screenState: ScreenState
+  turns: Turn[]
+  sessionModels: string[]
+  runId: string | null
+  selectedModels: Set<string>
+  mode: 0 | 1
+  prompt: string
+  perModelPrompts: Record<string, string>
+  runSettings: RunSettings
+  vote: string | null
+  previewCells: Set<string>
+}
+
+let savedSession: SavedSession | null = null
+
+// Exposed for tests only — in a real page load this module only ever
+// re-initializes on an actual reload, but a test file imports it once and
+// renders <NewRun/> many times, so tests must reset the module-level state
+// themselves between cases.
+export function __resetNewRunSessionForTests(): void {
+  savedSession = null
+}
+
+// Whether a conversation is in progress on /run — lets the app shell offer a
+// way back to it when the user has navigated elsewhere.
+export function hasActiveNewRunSession(): boolean {
+  return savedSession != null && savedSession.turns.length > 0
+}
+
 export function NewRun() {
   const navigate = useNavigate()
 
   const [providers, setProviders] = useState<Provider[]>([])
-  const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set())
-  const [mode, setMode] = useState<0 | 1>(0)
-  const [prompt, setPrompt] = useState('')
-  const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>({})
+  const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
+  const [mode, setMode] = useState<0 | 1>(() => savedSession?.mode ?? 0)
+  const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
+  const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
 
-  const [runSettings, setRunSettings] = useState<RunSettings>({})
+  const [runSettings, setRunSettings] = useState<RunSettings>(() => savedSession?.runSettings ?? {})
 
-  const [screenState, setScreenState] = useState<ScreenState>('idle')
-  const [results, setResults] = useState<Map<string, UIResult>>(new Map())
-  const [vote, setVote] = useState<string | null>(null)
+  const [screenState, setScreenState] = useState<ScreenState>(() => savedSession?.screenState ?? 'idle')
+  const [turns, setTurns] = useState<Turn[]>(() => savedSession?.turns ?? [])
+  const [sessionModels, setSessionModels] = useState<string[]>(() => savedSession?.sessionModels ?? [])
+  const [runId, setRunId] = useState<string | null>(() => savedSession?.runId ?? null)
+  const [vote, setVote] = useState<string | null>(() => savedSession?.vote ?? null)
+  // expandedCol / copiedCol / previewNonce / previewCells are keyed by `${promptIndex}:${modelKey}`
   const [expandedCol, setExpandedCol] = useState<string | null>(null)
   const [copiedCol, setCopiedCol] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [previewMode, setPreviewMode] = useState(false)
+  const [previewCells, setPreviewCells] = useState<Set<string>>(() => savedSession?.previewCells ?? new Set())
   const [previewNonce, setPreviewNonce] = useState<Record<string, number>>({})
 
   const esRef = useRef<EventSource | null>(null)
   const regenEsRef = useRef<EventSource | null>(null)
-  const currentPromptRef = useRef('')
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    savedSession = {
+      screenState, turns, sessionModels, runId, selectedModels,
+      mode, prompt, perModelPrompts, runSettings, vote, previewCells,
+    }
+  })
+
+  // Streams are tied to this component instance's closures — don't let them
+  // keep writing into a stale instance after navigating away.
+  useEffect(() => () => {
+    esRef.current?.close()
+    regenEsRef.current?.close()
+  }, [])
 
   useEffect(() => {
     providersApi.list().then(ps => {
@@ -472,11 +579,17 @@ export function NewRun() {
 
   useEffect(() => {
     if (screenState !== 'running') return
-    const all = [...results.values()]
+    const lastTurn = turns[turns.length - 1]
+    if (!lastTurn) return
+    const all = [...lastTurn.results.values()]
     if (all.length > 0 && all.every(r => r.status === 'done' || r.status === 'error')) {
       setScreenState('done')
     }
-  }, [results, screenState])
+  }, [turns, screenState])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
+  }, [turns.length])
 
   const connectedModels = providers
     .filter(p => p.enabled && (p.apiKey || p.baseUrl))
@@ -491,7 +604,14 @@ export function NewRun() {
     })
   }
 
-  const activeRunModels = [...results.keys()]
+  function toggleAllModels() {
+    const allKeys = connectedModels.map(m => m.key)
+    setSelectedModels(prev =>
+      // All already selected → collapse back to the minimum (first model),
+      // mirroring the "at least one stays selected" rule of toggleModel.
+      prev.size === allKeys.length ? new Set(allKeys.slice(0, 1)) : new Set(allKeys)
+    )
+  }
 
   const filledPairs = [...selectedModels]
     .filter(k => perModelPrompts[k]?.trim())
@@ -502,52 +622,37 @@ export function NewRun() {
     ? (prompt.trim() ? selectedModels.size : 0)
     : filledPairs.length
 
-  const allTtfs = [...results.values()].map(r => r.ttfs).filter((t): t is number => t !== null)
-  const minTtfs = allTtfs.length > 1 ? Math.min(...allTtfs) : null
+  function updateTurnResult(promptIndex: number, model: string, updater: (r: UIResult) => UIResult) {
+    setTurns(prev => prev.map(turn => {
+      if (turn.promptIndex !== promptIndex || !turn.results.has(model)) return turn
+      const next = new Map(turn.results)
+      next.set(model, updater(next.get(model)!))
+      return { ...turn, results: next }
+    }))
+  }
 
   function wireSSE(es: EventSource) {
     es.addEventListener('cell_start', e => {
-      const { model } = JSON.parse((e as MessageEvent).data) as { model: string }
-      setResults(prev => {
-        if (!prev.has(model)) return prev
-        const next = new Map(prev)
-        next.set(model, { ...next.get(model)!, status: 'streaming' })
-        return next
-      })
+      const { promptIndex, model } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string }
+      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
     })
     es.addEventListener('cell_token', e => {
-      const { model, text } = JSON.parse((e as MessageEvent).data) as { model: string; text: string }
-      setResults(prev => {
-        if (!prev.has(model)) return prev
-        const next = new Map(prev)
-        const r = next.get(model)!
-        next.set(model, { ...r, text: r.text + text, status: 'streaming' })
-        return next
-      })
+      const { promptIndex, model, text } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; text: string }
+      updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
     })
     es.addEventListener('cell_done', e => {
-      const { model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
-        model: string; ttfs: number; totalTime: number
+      const { promptIndex, model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
+        promptIndex: number; model: string; ttfs: number; totalTime: number
         usage: { inputTokens: number; outputTokens: number }
       }
-      setResults(prev => {
-        if (!prev.has(model)) return prev
-        const next = new Map(prev)
-        next.set(model, {
-          ...next.get(model)!, status: 'done', ttfs, totalTime,
-          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
-        })
-        return next
-      })
+      updateTurnResult(promptIndex, model, r => ({
+        ...r, status: 'done', ttfs, totalTime,
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+      }))
     })
     es.addEventListener('cell_error', e => {
-      const { model, error: msg } = JSON.parse((e as MessageEvent).data) as { model: string; error: string }
-      setResults(prev => {
-        if (!prev.has(model)) return prev
-        const next = new Map(prev)
-        next.set(model, { ...next.get(model)!, status: 'error', error: msg })
-        return next
-      })
+      const { promptIndex, model, error: msg } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; error: string }
+      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
     })
     es.addEventListener('run_done', () => es.close())
     es.onerror = () => es.close()
@@ -563,28 +668,31 @@ export function NewRun() {
       : filledPairs.map(p => p.model)
     if (!activeModels.length || (effectiveMode === 0 && !prompt.trim())) return
 
-    currentPromptRef.current = prompt.trim()
+    const sharedPrompt = prompt.trim()
 
     const hasGlobal = Object.values(runSettings.global ?? {}).some(v => v != null)
     const hasPerModel = Object.values(runSettings.perModel ?? {}).some(m => Object.values(m).some(v => v != null))
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
 
     const req = effectiveMode === 0
-      ? { prompts: [prompt.trim()], models: activeModels, runSettings: effectiveRunSettings }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings }
       : { pairs: filledPairs, runSettings: effectiveRunSettings }
 
     try {
-      const { runId } = await benchmarkApi.start(req)
-      const initial = new Map<string, UIResult>(activeModels.map(key => [key, {
-        text: '', ttfs: null, totalTime: null,
-        inputTokens: null, outputTokens: null, status: 'pending',
-      }]))
-      setResults(initial)
+      const { runId: newRunId } = await benchmarkApi.start(req)
+      setTurns([{
+        promptIndex: 0,
+        prompt: sharedPrompt,
+        showPromptBubble: effectiveMode === 0,
+        results: pendingResults(activeModels),
+      }])
+      setSessionModels(activeModels)
+      setRunId(newRunId)
       setScreenState('running')
       if (effectiveMode === 0) setPrompt('')
       else setPerModelPrompts({})
       esRef.current?.close()
-      const es = new EventSource(`/api/benchmark/stream/${runId}`)
+      const es = new EventSource(`/api/benchmark/stream/${newRunId}`)
       esRef.current = es
       wireSSE(es)
     } catch (err) {
@@ -592,59 +700,145 @@ export function NewRun() {
     }
   }
 
-  async function handleRegenerate(modelKey: string) {
-    const savedPrompt = currentPromptRef.current
-    setResults(prev => {
-      const next = new Map(prev)
-      next.set(modelKey, { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending' })
-      return next
-    })
+  // Client-side stop: close the streams and freeze cells with whatever text
+  // has arrived. The server finishes its calls in the background (there's no
+  // abort endpoint) — we just stop listening.
+  function handleStop() {
+    esRef.current?.close()
+    regenEsRef.current?.close()
+    setTurns(prev => prev.map(turn => {
+      const hasLive = [...turn.results.values()].some(r => r.status === 'pending' || r.status === 'streaming')
+      if (!hasLive) return turn
+      const next = new Map(turn.results)
+      for (const [k, r] of next) {
+        if (r.status === 'pending' || r.status === 'streaming') next.set(k, { ...r, status: 'done' })
+      }
+      return { ...turn, results: next }
+    }))
+    setScreenState('done')
+  }
+
+  async function handleContinue() {
+    if (!runId) return
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+
+    setError(null)
+    setVote(null)
+    setExpandedCol(null)
+
+    const hasGlobal = Object.values(runSettings.global ?? {}).some(v => v != null)
+    const hasPerModel = Object.values(runSettings.perModel ?? {}).some(m => Object.values(m).some(v => v != null))
+    const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
+    const newPromptIndex = turns.length
+
+    setTurns(prev => [...prev, {
+      promptIndex: newPromptIndex,
+      prompt: trimmed,
+      showPromptBubble: true,
+      results: pendingResults(sessionModels),
+    }])
     setScreenState('running')
+    setPrompt('')
+
     try {
-      const { runId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey] })
-      regenEsRef.current?.close()
+      await benchmarkApi.continue(runId, trimmed, effectiveRunSettings)
+      esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${runId}`)
-      regenEsRef.current = es
+      esRef.current = es
       wireSSE(es)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to continue')
+    }
+  }
+
+  async function handleRegenerate(promptIndex: number, modelKey: string) {
+    const turn = turns.find(t => t.promptIndex === promptIndex)
+    if (!turn) return
+    const savedPrompt = turn.prompt
+    setTurns(prev => prev.map(t => t.promptIndex !== promptIndex ? t : {
+      ...t,
+      results: new Map(t.results).set(modelKey, { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending' }),
+    }))
+    try {
+      const { runId: regenRunId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey] })
+      regenEsRef.current?.close()
+      const es = new EventSource(`/api/benchmark/stream/${regenRunId}`)
+      regenEsRef.current = es
+      // Regenerate results land on a throwaway run with its own promptIndex 0 —
+      // remap it onto this turn's promptIndex so wireSSE finds the right cell.
+      es.addEventListener('cell_start', e => {
+        const { model } = JSON.parse((e as MessageEvent).data) as { model: string }
+        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
+      })
+      es.addEventListener('cell_token', e => {
+        const { model, text } = JSON.parse((e as MessageEvent).data) as { model: string; text: string }
+        updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
+      })
+      es.addEventListener('cell_done', e => {
+        const { model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
+          model: string; ttfs: number; totalTime: number
+          usage: { inputTokens: number; outputTokens: number }
+        }
+        updateTurnResult(promptIndex, model, r => ({
+          ...r, status: 'done', ttfs, totalTime,
+          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+        }))
+      })
+      es.addEventListener('cell_error', e => {
+        const { model, error: msg } = JSON.parse((e as MessageEvent).data) as { model: string; error: string }
+        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
+      })
+      es.addEventListener('run_done', () => es.close())
+      es.onerror = () => es.close()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate')
     }
   }
 
-  async function handleCopy(modelKey: string) {
-    const r = results.get(modelKey)
-    if (!r) return
-    await navigator.clipboard.writeText(r.text).catch(() => {})
-    setCopiedCol(modelKey)
-    setTimeout(() => setCopiedCol(prev => prev === modelKey ? null : prev), 1200)
+  async function handleCopy(cellKey: string, text: string) {
+    await navigator.clipboard.writeText(text).catch(() => {})
+    setCopiedCol(cellKey)
+    setTimeout(() => setCopiedCol(prev => prev === cellKey ? null : prev), 1200)
   }
 
-  function handleCloseColumn(modelKey: string) {
-    setResults(prev => {
-      if (!prev.has(modelKey)) return prev
-      const next = new Map(prev)
+  function handleCloseColumn(promptIndex: number, modelKey: string) {
+    setTurns(prev => prev.map(t => {
+      if (t.promptIndex !== promptIndex || !t.results.has(modelKey)) return t
+      const next = new Map(t.results)
       next.delete(modelKey)
+      return { ...t, results: next }
+    }))
+    const cellKey = `${promptIndex}:${modelKey}`
+    setExpandedCol(prev => prev === cellKey ? null : prev)
+  }
+
+  function handleRestartPreview(cellKey: string) {
+    setPreviewNonce(prev => ({ ...prev, [cellKey]: (prev[cellKey] ?? 0) + 1 }))
+  }
+
+  function togglePreviewCell(cellKey: string) {
+    setPreviewCells(prev => {
+      const next = new Set(prev)
+      next.has(cellKey) ? next.delete(cellKey) : next.add(cellKey)
       return next
     })
-    setExpandedCol(prev => prev === modelKey ? null : prev)
-    setVote(prev => prev === modelKey ? null : prev)
   }
 
-  function handleRestartPreview(modelKey: string) {
-    setPreviewNonce(prev => ({ ...prev, [modelKey]: (prev[modelKey] ?? 0) + 1 }))
-  }
-
-  // renderColumn is a function call (not JSX component) — no remount problem
-  function renderColumn(key: string) {
-    const r = results.get(key)
+  // renderCell is a function call (not JSX component) — no remount problem
+  function renderCell(turn: Turn, key: string) {
+    const r = turn.results.get(key)
     if (!r) return null
+    const cellKey = `${turn.promptIndex}:${key}`
     const label = key.split(':').slice(1).join(':')
     const isStreaming = r.status === 'streaming'
     const isDone = r.status === 'done'
     const isError = r.status === 'error'
+    const turnTtfs = [...turn.results.values()].map(x => x.ttfs).filter((t): t is number => t !== null)
+    const minTtfs = turnTtfs.length > 1 ? Math.min(...turnTtfs) : null
     const isFastest = isDone && r.ttfs !== null && minTtfs !== null && r.ttfs === minTtfs
     const artifactHtml = isDone ? extractHtmlArtifact(r.text) : null
-    const showPreview = previewMode && isDone
+    const showPreview = previewCells.has(cellKey) && artifactHtml != null
 
     const dotBg = isDone ? 'var(--success)' : isError ? 'var(--error)' : isStreaming ? 'var(--accent)' : 'var(--border-hover)'
 
@@ -661,13 +855,23 @@ export function NewRun() {
           <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-bright)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {label}
           </span>
-          <button onClick={() => handleRegenerate(key)} title="Regenerate" className="nr-head-btn">↺</button>
-          <button onClick={() => handleCopy(key)} title="Copy" className="nr-head-btn">{copiedCol === key ? '✓' : '⧉'}</button>
-          {showPreview && artifactHtml && (
-            <button onClick={() => handleRestartPreview(key)} title="Restart preview" className="nr-head-btn">▶</button>
+          <button onClick={() => handleRegenerate(turn.promptIndex, key)} title="Regenerate" className="nr-head-btn">↺</button>
+          <button onClick={() => handleCopy(cellKey, r.text)} title="Copy" className="nr-head-btn">{copiedCol === cellKey ? '✓' : '⧉'}</button>
+          {artifactHtml && (
+            <button
+              onClick={() => togglePreviewCell(cellKey)}
+              title={showPreview ? 'Show text' : 'Show preview'}
+              className="nr-head-btn"
+              style={showPreview ? { background: 'var(--accent-bg)', borderColor: 'var(--accent-dim)', color: 'var(--accent)' } : undefined}
+            >
+              {showPreview ? '📝' : '🖼'}
+            </button>
           )}
-          <button onClick={() => setExpandedCol(expandedCol === key ? null : key)} title="Expand" className="nr-head-btn">⤢</button>
-          <button onClick={() => handleCloseColumn(key)} title="Close" className="nr-head-btn">✕</button>
+          {showPreview && (
+            <button onClick={() => handleRestartPreview(cellKey)} title="Restart preview" className="nr-head-btn">▶</button>
+          )}
+          <button onClick={() => setExpandedCol(expandedCol === cellKey ? null : cellKey)} title="Expand" className="nr-head-btn">⤢</button>
+          <button onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close" className="nr-head-btn">✕</button>
         </div>
 
         <div style={{ height: 38, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
@@ -693,15 +897,12 @@ export function NewRun() {
             </div>
           </div>
         ) : showPreview && artifactHtml ? (
-          <ArtifactPreview html={artifactHtml} reloadKey={previewNonce[key] ?? 0} />
+          <ArtifactPreview html={artifactHtml} reloadKey={previewNonce[cellKey] ?? 0} />
         ) : (
           <div
             className="col-body"
             style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
           >
-            {showPreview && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>No HTML artifact detected — showing text</div>
-            )}
             {r.text || (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>Waiting…</span>)}
             {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
           </div>
@@ -730,6 +931,7 @@ export function NewRun() {
     callCount,
     isRunning: screenState === 'running',
     onRun: handleRun,
+    onStop: handleStop,
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
@@ -739,6 +941,7 @@ export function NewRun() {
     models: connectedModels,
     selectedModels,
     onToggle: toggleModel,
+    onToggleAll: toggleAllModels,
     onAdd: () => navigate('/providers'),
   }
 
@@ -771,53 +974,56 @@ export function NewRun() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 16, gap: 12 }}>
       <style>{ANIM_CSS}</style>
 
-      {expandedCol && results.has(expandedCol) && (
-        <div
-          style={{
-            position: 'fixed', top: 20, left: 20, right: 20, bottom: 20, zIndex: 200,
-            background: 'var(--bg-elevated)', border: '0.5px solid var(--accent)',
-            borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          }}
-          onClick={e => { if (e.target === e.currentTarget) setExpandedCol(null) }}
-        >
-          {renderColumn(expandedCol)}
-        </div>
-      )}
+      {expandedCol && (() => {
+        const [expandedPromptIndex, expandedModel] = [expandedCol.slice(0, expandedCol.indexOf(':')), expandedCol.slice(expandedCol.indexOf(':') + 1)]
+        const expandedTurn = turns.find(t => t.promptIndex === Number(expandedPromptIndex))
+        if (!expandedTurn || !expandedTurn.results.has(expandedModel)) return null
+        return (
+          <div
+            style={{
+              position: 'fixed', top: 20, left: 20, right: 20, bottom: 20, zIndex: 200,
+              background: 'var(--bg-elevated)', border: '0.5px solid var(--accent)',
+              borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            }}
+            onClick={e => { if (e.target === e.currentTarget) setExpandedCol(null) }}
+          >
+            {renderCell(expandedTurn, expandedModel)}
+          </div>
+        )
+      })()}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>View:</span>
-        <button
-          onClick={() => setPreviewMode(v => !v)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: previewMode ? 'var(--accent)' : 'var(--bg-base)',
-            border: '0.5px solid var(--border)', borderRadius: 20,
-            padding: '4px 10px', cursor: 'pointer',
-            fontSize: 12, fontFamily: 'var(--font-mono)',
-            color: previewMode ? '#fff' : 'var(--text-muted)',
-            transition: 'background 0.15s',
-          }}
-        >
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: previewMode ? '#fff' : 'var(--text-muted)' }} />
-          {previewMode ? 'Preview' : 'Text'}
-        </button>
-      </div>
-
-      <div style={{
-        flex: 1, minHeight: 0, display: 'grid', gap: 10,
-        gridTemplateColumns: `repeat(${activeRunModels.length || 1}, minmax(0, 1fr))`,
-        overflow: 'hidden',
-      }}>
-        {activeRunModels.map(key => (
-          <div key={key} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-            {renderColumn(key)}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {turns.map(turn => (
+          <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+            {turn.showPromptBubble && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{
+                  maxWidth: '70%', background: 'var(--accent-bg)', border: '0.5px solid var(--accent-dim)',
+                  borderRadius: 10, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {turn.prompt}
+                </div>
+              </div>
+            )}
+            <div style={{
+              minHeight: 360, display: 'grid', gap: 10,
+              gridTemplateColumns: `repeat(${sessionModels.length || 1}, minmax(0, 1fr))`,
+            }}>
+              {sessionModels.map(key => (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+                  {renderCell(turn, key)}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
+        <div ref={bottomRef} />
       </div>
 
       {screenState === 'done' && (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'nowrap', flexShrink: 0, overflowX: 'auto' }}>
-          {activeRunModels.map(key => {
+          {sessionModels.map(key => {
             const label = key.split(':').slice(1).join(':')
             const selected = vote === key
             return (
@@ -863,8 +1069,7 @@ export function NewRun() {
       )}
 
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <ChipsRow {...chipsRowProps} wrap={false} />
-        <Promptbox {...promptboxProps} simplified />
+        <Promptbox {...promptboxProps} onRun={handleContinue} simplified />
         {error && <div style={{ fontSize: 12, color: 'var(--error)', textAlign: 'center' }}>{error}</div>}
       </div>
     </div>

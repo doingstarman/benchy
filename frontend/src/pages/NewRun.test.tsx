@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { NewRun } from './NewRun'
+import { NewRun, __resetNewRunSessionForTests } from './NewRun'
+
+// NewRun persists its session in a module-level variable so it survives
+// React Router navigation (only resets on an actual page reload) — tests
+// import the module once, so each case must reset it manually.
+beforeEach(() => __resetNewRunSessionForTests())
 
 // Mock the API layer — tests don't need real HTTP
 vi.mock('../api', () => ({
@@ -232,6 +237,30 @@ describe('ChipsRow — model selection', () => {
 
     // callCount stays 1 (still one model selected)
     expect(screen.getByText('1')).toBeInTheDocument()
+  })
+})
+
+describe('Session persistence across navigation', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('survives unmount/remount (simulating navigating away and back)', async () => {
+    const user = userEvent.setup()
+    const { unmount } = renderNewRun()
+    const textarea = await waitForProviders()
+
+    await user.type(textarea, 'explain transformers')
+    await user.click(screen.getByRole('button', { name: /▶ run/i }))
+
+    // Run started — screen should have left the idle "Ask anything…" view
+    expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
+
+    unmount()
+    renderNewRun()
+
+    // Re-rendered "in place" (as if navigating back to /run) — still shows
+    // the active session, not a fresh idle screen.
+    expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Follow-up or new prompt…')).toBeInTheDocument()
   })
 })
 

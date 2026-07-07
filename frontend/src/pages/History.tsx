@@ -109,7 +109,7 @@ export function History() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--bg-elevated)' }}>
-              {['ID', 'Prompt', 'Models', 'Calls', 'Date', 'Status', ''].map(h => (
+              {['ID', 'Prompt', 'Models', 'Calls', 'Реплик', 'Date', 'Status', ''].map(h => (
                 <th key={h} style={{
                   padding: '8px 12px', textAlign: 'left',
                   fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em',
@@ -122,14 +122,15 @@ export function History() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>Loading…</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>Loading…</td></tr>
             )}
             {!loading && runs.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No runs yet.</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No runs yet.</td></tr>
             )}
             {runs.map(run => {
               const isHovered = hoveredId === run.id
-              const firstPrompt = run.prompts[0] ?? ''
+              const turnCount = run.prompts.length
+              const previewPrompt = (turnCount > 1 ? run.prompts[turnCount - 1] : run.prompts[0]) ?? ''
               return (
                 <tr
                   key={run.id}
@@ -149,9 +150,8 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px', maxWidth: 280, color: 'var(--text-primary)', fontSize: 12 }}>
                     <span style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {firstPrompt}
+                      {previewPrompt}
                     </span>
-                    {run.prompts.length > 1 && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> +{run.prompts.length - 1}</span>}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -169,6 +169,9 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
                     {run.totalCalls}
+                  </td>
+                  <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {turnCount}
                   </td>
                   <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
                     {formatDate(run.createdAt)}
