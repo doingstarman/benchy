@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { findPidsOnPort } from './ports.js'
 
 describe('npm CLI package wiring', () => {
   const root = process.cwd()
@@ -54,5 +55,26 @@ describe('npm CLI package wiring', () => {
   it('keeps a shebang in the TypeScript CLI for npm bin execution', () => {
     const cliSource = readFileSync(join(root, 'src', 'cli.ts'), 'utf-8')
     expect(cliSource.startsWith('#!/usr/bin/env node')).toBe(true)
+  })
+})
+
+describe('findPidsOnPort', () => {
+  it('parses Windows netstat output, keeping only listeners on the exact port', () => {
+    const netstat = [
+      '  TCP    127.0.0.1:4242         0.0.0.0:0              LISTENING       12345',
+      '  TCP    127.0.0.1:42421        0.0.0.0:0              LISTENING       999',
+      '  TCP    127.0.0.1:4242         127.0.0.1:55555        ESTABLISHED     12345',
+      '  TCP    [::1]:4242             [::]:0                 LISTENING       12345',
+    ].join('\n')
+    expect(findPidsOnPort(4242, 'win32', () => netstat)).toEqual([12345])
+  })
+
+  it('parses lsof output on unix', () => {
+    expect(findPidsOnPort(4242, 'linux', () => '4321\n')).toEqual([4321])
+  })
+
+  it('returns empty when nothing listens', () => {
+    expect(findPidsOnPort(4242, 'win32', () => '')).toEqual([])
+    expect(findPidsOnPort(4242, 'linux', () => '')).toEqual([])
   })
 })

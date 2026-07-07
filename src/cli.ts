@@ -3,6 +3,7 @@ import { program } from 'commander'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { createServer } from './server.js'
+import { findPidsOnPort } from './ports.js'
 
 interface StartOptions {
   port: string
@@ -30,7 +31,14 @@ async function startServer(opts: StartOptions): Promise<void> {
 
   const url = `http://localhost:${port}`
 
-  await createServer(port)
+  try {
+    await createServer(port)
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('EADDRINUSE')) {
+      throw new Error(`benchy is already running at ${url} — stop it with \`benchy stop\` (or \`benchy stop --port ${port}\`)`)
+    }
+    throw err
+  }
   console.log(`benchy running at ${url}`)
 
   if (opts.open) {
@@ -38,6 +46,7 @@ async function startServer(opts: StartOptions): Promise<void> {
     await open(url)
   }
 }
+
 
 program
   .name('benchy')
@@ -52,6 +61,38 @@ program
   .option('--no-open', 'do not open browser on start')
   .action(async (opts: StartOptions) => {
     await startServer(opts)
+  })
+
+program
+  .command('stop')
+  .description('Stop a running benchy server')
+  .option('-p, --port <number>', 'port the server is listening on', '4242')
+  .action(async (opts: { port: string }) => {
+    const port = parseInt(opts.port, 10)
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      throw new Error(`Invalid port: ${opts.port}`)
+    }
+
+    const { execSync } = await import('node:child_process')
+    const exec = (cmd: string): string => {
+      try {
+        return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch {
+        return '' // netstat/findstr/lsof exit non-zero when nothing matches
+      }
+    }
+
+    const pids = findPidsOnPort(port, process.platform, exec)
+    if (pids.length === 0) {
+      console.log(`Nothing is listening on port ${port}.`)
+      return
+    }
+
+    for (const pid of pids) {
+      if (process.platform === 'win32') exec(`taskkill /PID ${pid} /F`)
+      else exec(`kill ${pid}`)
+    }
+    console.log(`Stopped benchy on port ${port} (pid ${pids.join(', ')}).`)
   })
 
 program
