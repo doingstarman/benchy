@@ -138,49 +138,31 @@ export function Sidebar() {
     }}>
       <style>{SIDEBAR_CSS}</style>
 
-      {/* Logo + collapse toggle */}
+      {/* Logo + collapse toggle — same row, same height in both states */}
       <div style={{
         padding: collapsed ? '16px 0 14px' : '16px 14px 14px',
         display: 'flex', alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
         flexShrink: 0,
       }}>
-        <div style={{
-          fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)',
-          color: 'var(--text-bright)', letterSpacing: '-0.02em',
-        }}>
-          {collapsed ? (
-            <span style={{ color: 'var(--accent)' }}>Y</span>
-          ) : (
-            <>bench<span style={{ color: 'var(--accent)' }}>Y</span></>
-          )}
-        </div>
         {!collapsed && (
-          <button
-            className="sidebar-collapse-btn"
-            onClick={() => setCollapsed(true)}
-            title="Collapse sidebar"
-          >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 3L5 8l5 5" />
-            </svg>
-          </button>
+          <div style={{
+            fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)',
+            color: 'var(--text-bright)', letterSpacing: '-0.02em',
+          }}>
+            bench<span style={{ color: 'var(--accent)' }}>Y</span>
+          </div>
         )}
+        <button
+          className="sidebar-collapse-btn"
+          onClick={() => setCollapsed(v => !v)}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d={collapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
+          </svg>
+        </button>
       </div>
-
-      {collapsed && (
-        <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
-          <button
-            className="sidebar-collapse-btn"
-            onClick={() => setCollapsed(false)}
-            title="Expand sidebar"
-          >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 3l5 5-5 5" />
-            </svg>
-          </button>
-        </div>
-      )}
 
       <Divider />
 
