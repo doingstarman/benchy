@@ -1,8 +1,15 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+
+const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
+const EXPANDED_WIDTH = 160
+const COLLAPSED_WIDTH = 52
 
 const SIDEBAR_CSS = `
   .nav-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 9px;
     padding: 7px 14px 7px 16px;
     font-size: 11px;
     font-family: var(--font-mono);
@@ -13,6 +20,10 @@ const SIDEBAR_CSS = `
     transition: color 0.1s, background 0.1s;
     text-decoration: none;
   }
+  .nav-item.collapsed {
+    padding-left: 15px;
+    justify-content: center;
+  }
   .nav-item:hover {
     color: var(--text-secondary);
     background: var(--bg-base);
@@ -21,6 +32,9 @@ const SIDEBAR_CSS = `
     color: var(--text-bright);
     border-left: 2px solid var(--accent);
     padding-left: 12px;
+  }
+  .nav-item.active.collapsed {
+    padding-left: 11px;
   }
   .nav-item.disabled {
     color: var(--border-hover);
@@ -31,104 +45,167 @@ const SIDEBAR_CSS = `
     color: var(--border-hover);
     background: none;
   }
+  .nav-icon { flex-shrink: 0; display: flex; }
+  .sidebar-collapse-btn {
+    background: none; border: 0.5px solid var(--border); border-radius: 5px;
+    color: var(--text-muted); cursor: pointer; padding: 3px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .sidebar-collapse-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
 `
+
+function Icon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg className="nav-icon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  )
+}
+
+const ICONS: Record<string, React.ReactNode> = {
+  test: <Icon><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor" stroke="none" /></Icon>,
+  dashboard: <Icon><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></Icon>,
+  history: <Icon><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 2" /></Icon>,
+  models: <Icon><path d="M8 2l6 3-6 3-6-3 6-3z" /><path d="M2 8l6 3 6-3" /><path d="M2 11l6 3 6-3" /></Icon>,
+  providers: <Icon><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 01-4 4 4 4 0 01-4-4V6z" /><path d="M8 13v2" /></Icon>,
+  datasets: <Icon><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></Icon>,
+  settings: <Icon><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4M12.5 12.5l-1.4-1.4M4.9 4.9L3.5 3.5" /></Icon>,
+}
 
 function Divider() {
   return <div style={{ height: '0.5px', background: 'var(--border)', margin: '6px 14px' }} />
 }
 
-function Item({ to, label, soon }: { to: string; label: string; soon?: boolean }) {
+function Item({ to, label, icon, collapsed, soon }: { to: string; label: string; icon: string; collapsed: boolean; soon?: boolean }) {
   return (
     <NavLink
       to={to}
-      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+      title={collapsed ? label : undefined}
+      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}${collapsed ? ' collapsed' : ''}`}
     >
-      {label}
-      {soon && (
-        <span style={{
-          marginLeft: 6,
-          fontSize: 9,
-          fontFamily: 'var(--font-sans)',
-          color: 'var(--border-hover)',
-          letterSpacing: 0,
-        }}>
-          soon
-        </span>
+      {ICONS[icon]}
+      {!collapsed && (
+        <>
+          {label}
+          {soon && (
+            <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
+              soon
+            </span>
+          )}
+        </>
       )}
     </NavLink>
   )
 }
 
-function DisabledItem({ label, soon }: { label: string; soon?: boolean }) {
+function DisabledItem({ label, icon, collapsed, soon }: { label: string; icon: string; collapsed: boolean; soon?: boolean }) {
   return (
-    <div className="nav-item disabled">
-      {label}
-      {soon && (
-        <span style={{
-          marginLeft: 6,
-          fontSize: 9,
-          fontFamily: 'var(--font-sans)',
-          color: 'var(--border-hover)',
-          letterSpacing: 0,
-        }}>
-          soon
-        </span>
+    <div className={`nav-item disabled${collapsed ? ' collapsed' : ''}`} title={collapsed ? label : undefined}>
+      {ICONS[icon]}
+      {!collapsed && (
+        <>
+          {label}
+          {soon && (
+            <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
+              soon
+            </span>
+          )}
+        </>
       )}
     </div>
   )
 }
 
 export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? '1' : '0')
+  }, [collapsed])
+
   return (
     <nav style={{
-      width: 160,
-      minWidth: 160,
+      width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
+      minWidth: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
       background: 'var(--bg-sidebar)',
       borderRight: '0.5px solid var(--border)',
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
       flexShrink: 0,
+      transition: 'width 0.15s, min-width 0.15s',
+      overflow: 'hidden',
     }}>
       <style>{SIDEBAR_CSS}</style>
 
-      {/* Logo */}
+      {/* Logo + collapse toggle */}
       <div style={{
-        padding: '16px 14px 14px',
-        fontSize: 15,
-        fontWeight: 500,
-        fontFamily: 'var(--font-mono)',
-        color: 'var(--text-bright)',
-        letterSpacing: '-0.02em',
+        padding: collapsed ? '16px 0 14px' : '16px 14px 14px',
+        display: 'flex', alignItems: 'center',
+        justifyContent: collapsed ? 'center' : 'space-between',
         flexShrink: 0,
       }}>
-        bench<span style={{ color: 'var(--accent)' }}>Y</span>
+        <div style={{
+          fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)',
+          color: 'var(--text-bright)', letterSpacing: '-0.02em',
+        }}>
+          {collapsed ? (
+            <span style={{ color: 'var(--accent)' }}>Y</span>
+          ) : (
+            <>bench<span style={{ color: 'var(--accent)' }}>Y</span></>
+          )}
+        </div>
+        {!collapsed && (
+          <button
+            className="sidebar-collapse-btn"
+            onClick={() => setCollapsed(true)}
+            title="Collapse sidebar"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 3L5 8l5 5" />
+            </svg>
+          </button>
+        )}
       </div>
 
+      {collapsed && (
+        <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
+          <button
+            className="sidebar-collapse-btn"
+            onClick={() => setCollapsed(false)}
+            title="Expand sidebar"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 3l5 5-5 5" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <Divider />
 
-      <Item to="/run" label="Тест" />
+      <Item to="/run" label="Тест" icon="test" collapsed={collapsed} />
 
       <Divider />
 
-      <DisabledItem label="Дашборд" soon />
-      <Item to="/history" label="История" />
+      <DisabledItem label="Дашборд" icon="dashboard" collapsed={collapsed} soon />
+      <Item to="/history" label="История" icon="history" collapsed={collapsed} />
 
       <Divider />
 
-      <DisabledItem label="Модели" soon />
-      <Item to="/providers" label="Провайдеры" />
+      <DisabledItem label="Модели" icon="models" collapsed={collapsed} soon />
+      <Item to="/providers" label="Провайдеры" icon="providers" collapsed={collapsed} />
 
       <Divider />
 
-      <DisabledItem label="Датасеты" soon />
+      <DisabledItem label="Датасеты" icon="datasets" collapsed={collapsed} soon />
 
       {/* Push settings to bottom */}
       <div style={{ flex: 1 }} />
 
       <Divider />
 
-      <Item to="/settings" label="Настройки" />
+      <Item to="/settings" label="Настройки" icon="settings" collapsed={collapsed} />
     </nav>
   )
 }

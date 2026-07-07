@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { providersApi, benchmarkApi } from '../api'
+import { extractHtmlArtifact } from '../lib/artifact'
+import { ArtifactPreview } from '../components/ArtifactPreview'
 import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
@@ -357,7 +359,12 @@ export function Promptbox({
             className="nr-ta"
             value={prompt}
             onChange={e => onPromptChange(e.target.value)}
-            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !disabled) onRun() }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!disabled) onRun()
+              }
+            }}
             placeholder={simplified ? 'Follow-up or new prompt…' : 'Ask anything…'}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none',
@@ -437,6 +444,8 @@ export function NewRun() {
   const [expandedCol, setExpandedCol] = useState<string | null>(null)
   const [copiedCol, setCopiedCol] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState(false)
+  const [previewNonce, setPreviewNonce] = useState<Record<string, number>>({})
 
   const esRef = useRef<EventSource | null>(null)
   const regenEsRef = useRef<EventSource | null>(null)
@@ -572,6 +581,8 @@ export function NewRun() {
       }]))
       setResults(initial)
       setScreenState('running')
+      if (effectiveMode === 0) setPrompt('')
+      else setPerModelPrompts({})
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${runId}`)
       esRef.current = es
@@ -608,6 +619,21 @@ export function NewRun() {
     setTimeout(() => setCopiedCol(prev => prev === modelKey ? null : prev), 1200)
   }
 
+  function handleCloseColumn(modelKey: string) {
+    setResults(prev => {
+      if (!prev.has(modelKey)) return prev
+      const next = new Map(prev)
+      next.delete(modelKey)
+      return next
+    })
+    setExpandedCol(prev => prev === modelKey ? null : prev)
+    setVote(prev => prev === modelKey ? null : prev)
+  }
+
+  function handleRestartPreview(modelKey: string) {
+    setPreviewNonce(prev => ({ ...prev, [modelKey]: (prev[modelKey] ?? 0) + 1 }))
+  }
+
   // renderColumn is a function call (not JSX component) — no remount problem
   function renderColumn(key: string) {
     const r = results.get(key)
@@ -617,12 +643,14 @@ export function NewRun() {
     const isDone = r.status === 'done'
     const isError = r.status === 'error'
     const isFastest = isDone && r.ttfs !== null && minTtfs !== null && r.ttfs === minTtfs
+    const artifactHtml = isDone ? extractHtmlArtifact(r.text) : null
+    const showPreview = previewMode && isDone
 
     const dotBg = isDone ? 'var(--success)' : isError ? 'var(--error)' : isStreaming ? 'var(--accent)' : 'var(--border-hover)'
 
     return (
       <div style={{
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: '1 1 auto', minHeight: 0,
         background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 10,
       }}>
         <div style={{
@@ -635,10 +663,14 @@ export function NewRun() {
           </span>
           <button onClick={() => handleRegenerate(key)} title="Regenerate" className="nr-head-btn">↺</button>
           <button onClick={() => handleCopy(key)} title="Copy" className="nr-head-btn">{copiedCol === key ? '✓' : '⧉'}</button>
+          {showPreview && artifactHtml && (
+            <button onClick={() => handleRestartPreview(key)} title="Restart preview" className="nr-head-btn">▶</button>
+          )}
           <button onClick={() => setExpandedCol(expandedCol === key ? null : key)} title="Expand" className="nr-head-btn">⤢</button>
+          <button onClick={() => handleCloseColumn(key)} title="Close" className="nr-head-btn">✕</button>
         </div>
 
-        <div style={{ height: 32, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ height: 38, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
           {[
             { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
             { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
@@ -660,11 +692,16 @@ export function NewRun() {
               {r.error ?? 'Error'}
             </div>
           </div>
+        ) : showPreview && artifactHtml ? (
+          <ArtifactPreview html={artifactHtml} reloadKey={previewNonce[key] ?? 0} />
         ) : (
           <div
             className="col-body"
             style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
           >
+            {showPreview && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>No HTML artifact detected — showing text</div>
+            )}
             {r.text || (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>Waiting…</span>)}
             {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
           </div>
@@ -746,6 +783,25 @@ export function NewRun() {
           {renderColumn(expandedCol)}
         </div>
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>View:</span>
+        <button
+          onClick={() => setPreviewMode(v => !v)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: previewMode ? 'var(--accent)' : 'var(--bg-base)',
+            border: '0.5px solid var(--border)', borderRadius: 20,
+            padding: '4px 10px', cursor: 'pointer',
+            fontSize: 12, fontFamily: 'var(--font-mono)',
+            color: previewMode ? '#fff' : 'var(--text-muted)',
+            transition: 'background 0.15s',
+          }}
+        >
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: previewMode ? '#fff' : 'var(--text-muted)' }} />
+          {previewMode ? 'Preview' : 'Text'}
+        </button>
+      </div>
 
       <div style={{
         flex: 1, minHeight: 0, display: 'grid', gap: 10,
