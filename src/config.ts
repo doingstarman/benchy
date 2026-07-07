@@ -27,6 +27,10 @@ function getConfigPath(): string {
   return join(getBenchyDir(), 'config.json')
 }
 
+function isDevEnvironment(): boolean {
+  return getBenchyDir().endsWith('.benchy-dev')
+}
+
 export async function readConfig(): Promise<Config> {
   try {
     const raw = await readFile(getConfigPath(), 'utf-8')
@@ -43,7 +47,8 @@ export async function writeConfig(config: Config): Promise<void> {
 
 export async function getProviders(): Promise<Provider[]> {
   const config = await readConfig()
-  return config.providers
+  if (isDevEnvironment()) return config.providers
+  return config.providers.filter(p => !p.id.startsWith('mock-'))
 }
 
 export async function upsertProvider(provider: Provider): Promise<void> {

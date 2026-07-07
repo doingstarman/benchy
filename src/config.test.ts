@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readConfig, writeConfig, upsertProvider, removeProvider } from './config.js'
+import { readConfig, writeConfig, upsertProvider, removeProvider, getProviders } from './config.js'
 import type { Provider } from './types.js'
 
 let tempDir: string | null = null
@@ -11,6 +11,13 @@ function useTempBenchyDir(): string {
   tempDir = mkdtempSync(join(tmpdir(), 'benchy-config-'))
   process.env.BENCHY_DIR = tempDir
   return tempDir
+}
+
+function useTempDevBenchyDir(): string {
+  tempDir = mkdtempSync(join(tmpdir(), 'benchy-config-'))
+  const devDir = join(tempDir, '.benchy-dev')
+  process.env.BENCHY_DIR = devDir
+  return devDir
 }
 
 afterEach(() => {
@@ -74,5 +81,31 @@ describe('config file storage', () => {
 
     await removeProvider('p1')
     expect((await readConfig()).providers).toEqual([])
+  })
+
+  it('hides mock- providers from getProviders outside a .benchy-dev directory', async () => {
+    useTempBenchyDir()
+
+    await writeConfig({
+      providers: [
+        { id: 'mock-openai', name: 'Mock OpenAI', type: 'openai', models: ['gpt-4o'], enabled: true },
+        { id: 'real-openai', name: 'OpenAI', type: 'openai', models: ['gpt-4o'], enabled: true },
+      ],
+    })
+
+    expect((await getProviders()).map(p => p.id)).toEqual(['real-openai'])
+  })
+
+  it('keeps mock- providers from getProviders inside a .benchy-dev directory', async () => {
+    useTempDevBenchyDir()
+
+    await writeConfig({
+      providers: [
+        { id: 'mock-openai', name: 'Mock OpenAI', type: 'openai', models: ['gpt-4o'], enabled: true },
+        { id: 'real-openai', name: 'OpenAI', type: 'openai', models: ['gpt-4o'], enabled: true },
+      ],
+    })
+
+    expect((await getProviders()).map(p => p.id)).toEqual(['mock-openai', 'real-openai'])
   })
 })

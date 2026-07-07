@@ -86,12 +86,9 @@ const PRESET_PROVIDERS: PresetProvider[] = [
   { name: 'Webhook', type: 'webhook', placeholderKey: 'Webhook secret (optional)', subtitle: 'Webhook · POST with JSON payload' },
 ]
 
-const SECTIONS = [
-  { title: 'Frontier', names: ['OpenAI', 'Anthropic', 'Google', 'Mistral', 'DeepSeek', 'xAI'] },
-  { title: 'Fast inference', names: ['Groq', 'Together AI', 'OpenRouter'] },
-  { title: 'Local', names: ['Ollama', 'LM Studio'] },
-  { title: 'Custom integrations', names: ['HTTP JSON', 'Script', 'Webhook'] },
-]
+function isProviderActive(provider: Provider): boolean {
+  return provider.enabled && (!!provider.apiKey || !!provider.baseUrl)
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,6 +134,10 @@ const MODAL_CSS = `
   .prov-input:focus { outline: 1.5px solid var(--accent); border-color: transparent; }
   .prov-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: prov-spin .6s linear infinite; }
   @keyframes prov-spin { to { transform: rotate(360deg) } }
+  .prov-slider { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--border); accent-color: var(--accent); cursor: pointer; }
+  .prov-slider:disabled { opacity: .4; cursor: default; }
+  .prov-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  .prov-slider::-moz-range-thumb { width: 13px; height: 13px; border: none; border-radius: 50%; background: var(--accent); cursor: pointer; }
 `
 
 // ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
@@ -371,6 +372,58 @@ function TestSection({ models, testModelId, testing, result, onModelChange, onTe
   )
 }
 
+interface SliderFieldProps {
+  label: string
+  min: number
+  max: number
+  step: number
+  value: number | null
+  onChange: (v: number | null) => void
+  allowAuto?: boolean
+  unit?: string
+  width?: number
+}
+
+function SliderField({ label, min, max, step, value, onChange, allowAuto, unit, width = 160 }: SliderFieldProps) {
+  const fieldLabel = { fontSize: 11, color: 'var(--text-muted)' }
+  const isAuto = value == null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={fieldLabel}>{label}</span>
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+          {isAuto ? 'Auto' : `${value}${unit ?? ''}`}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          className="prov-slider"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          disabled={isAuto}
+          value={value ?? min}
+          onChange={e => onChange(Number(e.target.value))}
+          style={{ flex: 1 }}
+        />
+        {allowAuto && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}>
+            <input
+              type="checkbox"
+              className="prov-checkbox"
+              checked={isAuto}
+              onChange={e => onChange(e.target.checked ? null : min)}
+            />
+            Auto
+          </label>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface AdvancedDefaultsSectionProps {
   open: boolean
   onToggle: () => void
@@ -415,51 +468,36 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
           {/* Generation */}
           <div style={{ paddingTop: 14 }}>
             <div style={groupLabel}>Generation</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Temperature</span>
-                <input className="prov-input" type="number" min={0} max={2} step={0.1}
-                  value={d.temperature ?? ''}
-                  onChange={e => onChange({ temperature: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 80 }} />
-              </div>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Top P</span>
-                <input className="prov-input" type="number" min={0} max={1} step={0.05}
-                  value={d.topP ?? ''}
-                  onChange={e => onChange({ topP: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 80 }} />
-              </div>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Top K</span>
-                <input className="prov-input" type="number" min={1} step={1}
-                  placeholder="Auto"
-                  value={d.topK ?? ''}
-                  onChange={e => onChange({ topK: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 80 }} />
-              </div>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Max output tokens</span>
-                <input className="prov-input" type="number" min={1} step={1}
-                  value={d.maxOutputTokens ?? ''}
-                  onChange={e => onChange({ maxOutputTokens: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 100 }} />
-              </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+              <SliderField label="Temperature" min={0} max={2} step={0.1}
+                value={d.temperature ?? null}
+                onChange={v => onChange({ temperature: v })}
+                width={130} />
+              <SliderField label="Top P" min={0} max={1} step={0.05}
+                value={d.topP ?? null}
+                onChange={v => onChange({ topP: v })}
+                width={130} />
+              <SliderField label="Top K" min={1} max={100} step={1}
+                value={d.topK ?? null}
+                onChange={v => onChange({ topK: v })}
+                allowAuto
+                width={150} />
+              <SliderField label="Max output tokens" min={1} max={32000} step={64}
+                value={d.maxOutputTokens ?? null}
+                onChange={v => onChange({ maxOutputTokens: v })}
+                width={170} />
             </div>
           </div>
 
           {/* Context */}
           <div style={{ paddingTop: 14 }}>
             <div style={groupLabel}>Context</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Context budget</span>
-                <input className="prov-input" type="number" min={1} step={1}
-                  placeholder="Model default"
-                  value={d.contextBudget ?? ''}
-                  onChange={e => onChange({ contextBudget: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 140 }} />
-              </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+              <SliderField label="Context budget" min={1} max={200000} step={1000}
+                value={d.contextBudget ?? null}
+                onChange={v => onChange({ contextBudget: v })}
+                allowAuto
+                width={180} />
               <div style={fieldRow}>
                 <span style={fieldLabel}>Truncation</span>
                 <select className="prov-select"
@@ -478,24 +516,16 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
           {/* Reliability */}
           <div style={{ paddingTop: 14 }}>
             <div style={groupLabel}>Reliability</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Timeout</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <input className="prov-input" type="number" min={1} max={600} step={1}
-                    value={d.timeoutMs != null ? Math.round(d.timeoutMs / 1000) : ''}
-                    onChange={e => onChange({ timeoutMs: e.target.value === '' ? null : Number(e.target.value) * 1000 })}
-                    style={{ width: 70 }} />
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>s</span>
-                </div>
-              </div>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Retries</span>
-                <input className="prov-input" type="number" min={0} max={10} step={1}
-                  value={d.retries ?? ''}
-                  onChange={e => onChange({ retries: e.target.value === '' ? null : Number(e.target.value) })}
-                  style={{ width: 70 }} />
-              </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
+              <SliderField label="Timeout" min={1} max={120} step={1}
+                value={d.timeoutMs != null ? Math.round(d.timeoutMs / 1000) : null}
+                onChange={v => onChange({ timeoutMs: v == null ? null : v * 1000 })}
+                unit="s"
+                width={130} />
+              <SliderField label="Retries" min={0} max={10} step={1}
+                value={d.retries ?? null}
+                onChange={v => onChange({ retries: v })}
+                width={130} />
               <div style={fieldRow}>
                 <span style={fieldLabel}>Streaming</span>
                 <button
@@ -765,6 +795,49 @@ export function Providers() {
   }
 
   const providerMap = new Map(providers.map(p => [p.name, p]))
+  const presetNames = new Set(PRESET_PROVIDERS.map(p => p.name))
+
+  interface Tile { key: string; provider: Provider; onClick: () => void }
+
+  function stub(preset: PresetProvider): Provider {
+    return { id: '', name: preset.name, type: preset.type, models: [], enabled: false }
+  }
+
+  const presetTiles = PRESET_PROVIDERS.map(preset => {
+    const connected = providerMap.get(preset.name)
+    return { preset, connected, active: !!connected && isProviderActive(connected) }
+  })
+  const customProviders = providers.filter(p => !presetNames.has(p.name))
+
+  const activeTiles: Tile[] = [
+    ...presetTiles.filter(t => t.active).map(t => ({ key: t.preset.name, provider: t.connected!, onClick: () => openPreset(t.preset) })),
+    ...customProviders.filter(isProviderActive).map(p => ({ key: p.id, provider: p, onClick: () => openExistingCustom(p) })),
+  ]
+  const localTiles: Tile[] = presetTiles
+    .filter(t => !t.active && t.preset.type === 'local')
+    .map(t => ({ key: t.preset.name, provider: t.connected ?? stub(t.preset), onClick: () => openPreset(t.preset) }))
+  const otherTiles: Tile[] = presetTiles
+    .filter(t => !t.active && t.preset.type !== 'local')
+    .map(t => ({ key: t.preset.name, provider: t.connected ?? stub(t.preset), onClick: () => openPreset(t.preset) }))
+  const inactiveCustomProviders = customProviders.filter(p => !isProviderActive(p))
+
+  function TileGrid({ title, tiles, trailingButton }: { title: string; tiles: Tile[]; trailingButton?: React.ReactNode }) {
+    if (tiles.length === 0 && !trailingButton) return null
+    return (
+      <div>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
+          {title}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
+          {tiles.map(tile => (
+            <ProviderTile key={tile.key} provider={tile.provider} onClick={tile.onClick} />
+          ))}
+          {trailingButton}
+        </div>
+      </div>
+    )
+  }
+
   const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
   const isLocal = modal?.provider.type === 'local'
   const isScript = modal?.provider.type === 'script'
@@ -791,43 +864,21 @@ export function Providers() {
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
       <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>Providers</h1>
 
-      {SECTIONS.map(section => (
-        <div key={section.title}>
-          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
-            {section.title}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
-            {section.names.map(name => {
-              const preset = PRESET_PROVIDERS.find(p => p.name === name)!
-              const connected = providerMap.get(name)
-              return (
-                <ProviderTile
-                  key={name}
-                  provider={connected ?? { id: '', name, type: preset.type, models: [], enabled: false }}
-                  onClick={() => openPreset(preset)}
-                />
-              )
-            })}
-          </div>
-        </div>
-      ))}
-
-      <div>
-        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
-          Custom
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
-          {providers.filter(p => !SECTIONS.flatMap(s => s.names).includes(p.name)).map(p => (
-            <ProviderTile key={p.id} provider={p} onClick={() => openExistingCustom(p)} />
-          ))}
+      <TileGrid title="Active" tiles={activeTiles} />
+      <TileGrid title="Local" tiles={localTiles} />
+      <TileGrid
+        title="Custom"
+        tiles={inactiveCustomProviders.map(p => ({ key: p.id, provider: p, onClick: () => openExistingCustom(p) }))}
+        trailingButton={
           <button
             onClick={openCustom}
             style={{ background: 'none', border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: 16, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}
           >
             + custom endpoint
           </button>
-        </div>
-      </div>
+        }
+      />
+      <TileGrid title="Other" tiles={otherTiles} />
 
       {/* Modal */}
       {modal && (
