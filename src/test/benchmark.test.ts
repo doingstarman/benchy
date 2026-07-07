@@ -10,10 +10,12 @@ import type { Run } from '../types.js'
 // Only the external HTTP calls to providers are mocked — everything else is real
 // slowMode adds a delay so SSE clients can connect before run_done fires
 let slowMode = false
+let capturedMessages: { role: string; content: string }[][] = []
 
 vi.mock('../adapters/openai.js', () => ({
   openaiAdapter: {
-    async *stream(_messages: unknown, config: { model: string }) {
+    async *stream(messages: { role: string; content: string }[], config: { model: string }) {
+      capturedMessages.push(messages)
       if (slowMode) await new Promise(r => setTimeout(r, 80))
       yield { type: 'token', text: `Hello from ${config.model}` }
       yield { type: 'token', text: '!' }
@@ -212,5 +214,50 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(events.some(e => e.event === 'cell_done')).toBe(true)
     expect(events.some(e => e.event === 'run_done')).toBe(true)
     slowMode = false
+  })
+
+  it('POST /api/runs/:id/continue chains conversation history per model', async () => {
+    capturedMessages = []
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+
+    const { data } = await startBenchmark(['Turn one'], [`${pid}:gpt-4o-mini`])
+    const runId = data!.runId
+    await waitForRun(runId)
+
+    expect(capturedMessages).toHaveLength(1)
+    expect(capturedMessages[0]).toEqual([{ role: 'user', content: 'Turn one' }])
+
+    const res = await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Turn two' }),
+    })
+    expect(res.status).toBe(202)
+    const body = await res.json() as { data: { runId: string; promptIndex: number } }
+    expect(body.data.promptIndex).toBe(1)
+
+    const run = await waitForRun(runId)
+    expect(run.results).toHaveLength(2)
+
+    expect(capturedMessages).toHaveLength(2)
+    expect(capturedMessages[1]).toEqual([
+      { role: 'user', content: 'Turn one' },
+      { role: 'assistant', content: 'Hello from gpt-4o-mini!' },
+      { role: 'user', content: 'Turn two' },
+    ])
+
+    const rows = getDb().prepare('SELECT prompt_index FROM results WHERE run_id = ? ORDER BY prompt_index')
+      .all(runId) as { prompt_index: number }[]
+    expect(rows.map(r => r.prompt_index)).toEqual([0, 1])
+  })
+
+  it('POST /api/runs/:id/continue returns 404 for unknown run', async () => {
+    const res = await fetch(`${base}/api/runs/does-not-exist/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hi' }),
+    })
+    expect(res.status).toBe(404)
   })
 })

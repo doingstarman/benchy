@@ -74,6 +74,11 @@ export interface BenchmarkRequest {
 export const benchmarkApi = {
   start: (req: BenchmarkRequest) =>
     apiFetch<{ runId: string }>('/api/benchmark', { method: 'POST', body: JSON.stringify(req) }),
+  continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings) =>
+    apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/continue`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt, runSettings }),
+    }),
 }
 
 // ─── SSE hook ────────────────────────────────────────────────────────────────

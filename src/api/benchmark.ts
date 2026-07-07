@@ -8,7 +8,7 @@ import { googleAdapter } from '../adapters/google.js'
 import { httpJsonAdapter } from '../adapters/http-json.js'
 import { scriptAdapter } from '../adapters/script.js'
 import { webhookAdapter } from '../adapters/webhook.js'
-import type { Adapter } from '../adapters/base.js'
+import type { Adapter, Message } from '../adapters/base.js'
 import type { ProviderType, BenchmarkRequest, RunSettings } from '../types.js'
 
 export function getAdapter(type: ProviderType): Adapter {
@@ -39,6 +39,7 @@ async function runCell(
   modelKey: string,
   providers: Awaited<ReturnType<typeof getProviders>>,
   runSettings?: RunSettings,
+  history: Message[] = [],
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
@@ -73,7 +74,7 @@ async function runCell(
       ...(runSettings?.perModel?.[modelKey] ?? {}),
     }
     const stream = adapter.stream(
-      [{ role: 'user', content: promptText }],
+      [...history, { role: 'user', content: promptText }],
       { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings },
     )
 
@@ -110,6 +111,52 @@ async function runCell(
   }
 }
 
+function finalizeRun(runId: string, tasks: Promise<void>[]): void {
+  const db = getDb()
+  Promise.all(tasks)
+    .then(() => {
+      db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId)
+      broadcast(runId, 'run_done', { runId })
+      sseConnections.delete(runId)
+    })
+    .catch(() => {
+      db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId)
+      sseConnections.delete(runId)
+    })
+}
+
+interface RunRow {
+  id: string
+  prompts: string
+  models: string
+  status: string
+  saved: number
+  total_calls: number
+  completed_calls: number
+  created_at: number
+  run_settings: string | null
+}
+
+interface ResultHistoryRow {
+  prompt_index: number
+  text: string
+}
+
+// Reconstructs one model's own conversation branch from prior turns —
+// failed turns (error IS NOT NULL) are skipped entirely rather than
+// injected as broken/empty assistant messages.
+function buildHistory(runId: string, model: string, prompts: string[]): Message[] {
+  const db = getDb()
+  const rows = db.prepare(
+    'SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index'
+  ).all(runId, model) as ResultHistoryRow[]
+
+  return rows.flatMap(row => [
+    { role: 'user' as const, content: prompts[row.prompt_index] },
+    { role: 'assistant' as const, content: row.text },
+  ])
+}
+
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
     const { prompts, models, pairs, runSettings } = req.body
@@ -139,19 +186,44 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
       : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings)))
 
-    Promise.all(tasks)
-      .then(() => {
-        db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId)
-        broadcast(runId, 'run_done', { runId })
-        sseConnections.delete(runId)
-      })
-      .catch(() => {
-        db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId)
-        sseConnections.delete(runId)
-      })
+    finalizeRun(runId, tasks)
 
     return reply.code(202).send({ data: { runId } })
   })
+
+  app.post<{ Params: { id: string }; Body: { prompt: string; runSettings?: RunSettings } }>(
+    '/api/runs/:id/continue',
+    async (req, reply) => {
+      const { prompt, runSettings } = req.body
+      if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' })
+
+      const db = getDb()
+      const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(req.params.id) as RunRow | undefined
+      if (!run) return reply.code(404).send({ error: 'Run not found' })
+
+      const prompts = JSON.parse(run.prompts) as string[]
+      const models = JSON.parse(run.models) as string[]
+      const newPromptIndex = prompts.length
+      const updatedPrompts = [...prompts, prompt]
+
+      const effectiveRunSettings = runSettings ?? (run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined)
+      const runSettingsJson = effectiveRunSettings ? JSON.stringify(effectiveRunSettings) : run.run_settings
+
+      db.prepare(
+        "UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?"
+      ).run(JSON.stringify(updatedPrompts), models.length, runSettingsJson, req.params.id)
+
+      const providers = await getProviders()
+      const tasks = models.map(model => {
+        const history = buildHistory(req.params.id, model, prompts)
+        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history)
+      })
+
+      finalizeRun(req.params.id, tasks)
+
+      return reply.code(202).send({ data: { runId: req.params.id, promptIndex: newPromptIndex } })
+    }
+  )
 
   app.get<{ Params: { runId: string } }>(
     '/api/benchmark/stream/:runId',

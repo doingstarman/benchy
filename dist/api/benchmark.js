@@ -34,7 +34,7 @@ function broadcast(runId, event, data) {
         catch { /* client disconnected */ }
     }
 }
-async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings) {
+async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = []) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
     const provider = providers.find(p => p.id === providerId);
@@ -60,7 +60,7 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
             ...(runSettings?.global ?? {}),
             ...(runSettings?.perModel?.[modelKey] ?? {}),
         };
-        const stream = adapter.stream([{ role: 'user', content: promptText }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings });
+        const stream = adapter.stream([...history, { role: 'user', content: promptText }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings });
         for await (const chunk of stream) {
             if (chunk.type === 'token') {
                 if (ttfs === null)
@@ -94,6 +94,30 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
         db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId);
     }
 }
+function finalizeRun(runId, tasks) {
+    const db = getDb();
+    Promise.all(tasks)
+        .then(() => {
+        db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId);
+        broadcast(runId, 'run_done', { runId });
+        sseConnections.delete(runId);
+    })
+        .catch(() => {
+        db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId);
+        sseConnections.delete(runId);
+    });
+}
+// Reconstructs one model's own conversation branch from prior turns —
+// failed turns (error IS NOT NULL) are skipped entirely rather than
+// injected as broken/empty assistant messages.
+function buildHistory(runId, model, prompts) {
+    const db = getDb();
+    const rows = db.prepare('SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index').all(runId, model);
+    return rows.flatMap(row => [
+        { role: 'user', content: prompts[row.prompt_index] },
+        { role: 'assistant', content: row.text },
+    ]);
+}
 export async function registerBenchmarkRoutes(app) {
     app.post('/api/benchmark', async (req, reply) => {
         const { prompts, models, pairs, runSettings } = req.body;
@@ -114,17 +138,31 @@ export async function registerBenchmarkRoutes(app) {
         const tasks = pairs
             ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
             : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings)));
-        Promise.all(tasks)
-            .then(() => {
-            db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId);
-            broadcast(runId, 'run_done', { runId });
-            sseConnections.delete(runId);
-        })
-            .catch(() => {
-            db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId);
-            sseConnections.delete(runId);
-        });
+        finalizeRun(runId, tasks);
         return reply.code(202).send({ data: { runId } });
+    });
+    app.post('/api/runs/:id/continue', async (req, reply) => {
+        const { prompt, runSettings } = req.body;
+        if (!prompt?.trim())
+            return reply.code(400).send({ error: 'prompt is required' });
+        const db = getDb();
+        const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(req.params.id);
+        if (!run)
+            return reply.code(404).send({ error: 'Run not found' });
+        const prompts = JSON.parse(run.prompts);
+        const models = JSON.parse(run.models);
+        const newPromptIndex = prompts.length;
+        const updatedPrompts = [...prompts, prompt];
+        const effectiveRunSettings = runSettings ?? (run.run_settings ? JSON.parse(run.run_settings) : undefined);
+        const runSettingsJson = effectiveRunSettings ? JSON.stringify(effectiveRunSettings) : run.run_settings;
+        db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?").run(JSON.stringify(updatedPrompts), models.length, runSettingsJson, req.params.id);
+        const providers = await getProviders();
+        const tasks = models.map(model => {
+            const history = buildHistory(req.params.id, model, prompts);
+            return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history);
+        });
+        finalizeRun(req.params.id, tasks);
+        return reply.code(202).send({ data: { runId: req.params.id, promptIndex: newPromptIndex } });
     });
     app.get('/api/benchmark/stream/:runId', async (req, reply) => {
         const { runId } = req.params;
