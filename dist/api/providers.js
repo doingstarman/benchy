@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getProviders, upsertProvider, removeProvider } from '../config.js';
+import { humanizeNetworkError, describeHttpError } from '../errors.js';
 // Static model lists for providers without a /models endpoint
 const STATIC_MODELS = {
     anthropic: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-3-5-haiku-20241022'],
@@ -46,14 +47,16 @@ export async function registerProvidersRoutes(app) {
             const res = await fetch(`${baseUrl}/models`, {
                 headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
             });
-            if (!res.ok)
-                return reply.code(502).send({ error: `/models returned HTTP ${res.status}` });
+            if (!res.ok) {
+                const text = await res.text().catch(() => res.statusText);
+                return reply.code(502).send({ error: `/models: ${describeHttpError(res.status, text)}` });
+            }
             const json = await res.json();
             const ids = (json.data ?? []).map((m) => m.id).sort();
             return { data: ids };
         }
         catch (err) {
-            return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
+            return reply.code(502).send({ error: humanizeNetworkError(err, baseUrl) });
         }
     });
     // POST /api/providers/:id/test?model=<id>
@@ -72,11 +75,13 @@ export async function registerProvidersRoutes(app) {
                 const r = await fetch(`${provider.baseUrl}/models`, {
                     headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
                 });
-                if (!r.ok)
-                    return { data: { ok: false, error: `/models returned HTTP ${r.status}` } };
+                if (!r.ok) {
+                    const text = await r.text().catch(() => r.statusText);
+                    return { data: { ok: false, error: `/models: ${describeHttpError(r.status, text)}` } };
+                }
             }
             catch (err) {
-                return { data: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+                return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } };
             }
         }
         try {
@@ -95,7 +100,7 @@ export async function registerProvidersRoutes(app) {
             return { data: { ok: false, error: 'No response from provider' } };
         }
         catch (err) {
-            return { data: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+            return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } };
         }
     });
 }

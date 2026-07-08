@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
+import { humanizeNetworkError } from '../errors.js'
 
 export const googleAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -54,7 +55,7 @@ export const googleAdapter: Adapter = {
 
       yield { type: 'done', usage: { inputTokens, outputTokens } }
     } catch (err) {
-      yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      yield { type: 'error', message: humanizeNetworkError(err, config.baseUrl) }
     }
   },
 }

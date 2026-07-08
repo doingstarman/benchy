@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { humanizeNetworkError } from '../errors.js';
 export const googleAdapter = {
     async *stream(messages, config) {
         try {
@@ -45,7 +46,7 @@ export const googleAdapter = {
             yield { type: 'done', usage: { inputTokens, outputTokens } };
         }
         catch (err) {
-            yield { type: 'error', message: err instanceof Error ? err.message : String(err) };
+            yield { type: 'error', message: humanizeNetworkError(err, config.baseUrl) };
         }
     },
 };

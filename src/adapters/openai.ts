@@ -1,4 +1,5 @@
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
+import { humanizeNetworkError, describeHttpError } from '../errors.js'
 
 export const openaiAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -8,26 +9,32 @@ export const openaiAdapter: Adapter = {
     const t0 = Date.now()
     let firstToken = true
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey ?? ''}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        stream: true,
-        stream_options: { include_usage: true },
-        ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
-        ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
-        ...(config.settings?.maxOutputTokens != null ? { max_tokens: config.settings.maxOutputTokens } : {}),
-      }),
-    })
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey ?? ''}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          stream: true,
+          stream_options: { include_usage: true },
+          ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+          ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
+          ...(config.settings?.maxOutputTokens != null ? { max_tokens: config.settings.maxOutputTokens } : {}),
+        }),
+      })
+    } catch (err) {
+      yield { type: 'error', message: humanizeNetworkError(err, baseUrl) }
+      return
+    }
 
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => response.statusText)
-      yield { type: 'error', message: `HTTP ${response.status}: ${text}` }
+      yield { type: 'error', message: describeHttpError(response.status, text) }
       return
     }
 

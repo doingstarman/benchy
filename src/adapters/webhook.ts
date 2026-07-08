@@ -1,4 +1,5 @@
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
+import { humanizeNetworkError, describeHttpError } from '../errors.js'
 
 export const webhookAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -16,13 +17,13 @@ export const webhookAdapter: Adapter = {
         body: JSON.stringify({ model: config.model, messages, timestamp: Date.now() }),
       })
     } catch (err) {
-      yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      yield { type: 'error', message: humanizeNetworkError(err, url) }
       return
     }
 
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText)
-      yield { type: 'error', message: `Webhook returned HTTP ${response.status}: ${text}` }
+      yield { type: 'error', message: `Webhook: ${describeHttpError(response.status, text)}` }
       return
     }
 

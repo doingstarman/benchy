@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { humanizeNetworkError } from '../errors.js';
 export const anthropicAdapter = {
     async *stream(messages, config) {
         const client = new Anthropic({
@@ -35,7 +36,7 @@ export const anthropicAdapter = {
             };
         }
         catch (err) {
-            yield { type: 'error', message: err instanceof Error ? err.message : String(err) };
+            yield { type: 'error', message: humanizeNetworkError(err, config.baseUrl) };
         }
     },
 };

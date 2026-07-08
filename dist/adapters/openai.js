@@ -1,28 +1,36 @@
+import { humanizeNetworkError, describeHttpError } from '../errors.js';
 export const openaiAdapter = {
     async *stream(messages, config) {
         const baseUrl = config.baseUrl ?? 'https://api.openai.com/v1';
         const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
         const t0 = Date.now();
         let firstToken = true;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${config.apiKey ?? ''}`,
-            },
-            body: JSON.stringify({
-                model: config.model,
-                messages,
-                stream: true,
-                stream_options: { include_usage: true },
-                ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
-                ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
-                ...(config.settings?.maxOutputTokens != null ? { max_tokens: config.settings.maxOutputTokens } : {}),
-            }),
-        });
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${config.apiKey ?? ''}`,
+                },
+                body: JSON.stringify({
+                    model: config.model,
+                    messages,
+                    stream: true,
+                    stream_options: { include_usage: true },
+                    ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+                    ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
+                    ...(config.settings?.maxOutputTokens != null ? { max_tokens: config.settings.maxOutputTokens } : {}),
+                }),
+            });
+        }
+        catch (err) {
+            yield { type: 'error', message: humanizeNetworkError(err, baseUrl) };
+            return;
+        }
         if (!response.ok || !response.body) {
             const text = await response.text().catch(() => response.statusText);
-            yield { type: 'error', message: `HTTP ${response.status}: ${text}` };
+            yield { type: 'error', message: describeHttpError(response.status, text) };
             return;
         }
         const reader = response.body.getReader();

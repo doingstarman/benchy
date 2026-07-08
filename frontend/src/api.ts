@@ -4,12 +4,17 @@ import type { Provider, Run, Result } from '../../src/types'
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  })
-  const json = (await res.json()) as { data?: T; error?: string }
-  if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`)
+  let res: Response
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      ...init,
+    })
+  } catch {
+    throw new Error('Cannot reach the benchy server — is it still running?')
+  }
+  const json = (await res.json().catch(() => ({}))) as { data?: T; error?: string }
+  if (!res.ok || json.error) throw new Error(json.error ?? `Server error (HTTP ${res.status})`)
   return json.data as T
 }
 

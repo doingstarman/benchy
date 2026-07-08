@@ -1,4 +1,5 @@
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
+import { humanizeNetworkError, describeHttpError } from '../errors.js'
 
 export const httpJsonAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -16,13 +17,13 @@ export const httpJsonAdapter: Adapter = {
         body: JSON.stringify({ messages, model: config.model }),
       })
     } catch (err) {
-      yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
+      yield { type: 'error', message: humanizeNetworkError(err, url) }
       return
     }
 
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText)
-      yield { type: 'error', message: `HTTP ${response.status}: ${text}` }
+      yield { type: 'error', message: describeHttpError(response.status, text) }
       return
     }
 

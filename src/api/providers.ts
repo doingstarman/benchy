@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getProviders, upsertProvider, removeProvider } from '../config.js'
+import { humanizeNetworkError, describeHttpError } from '../errors.js'
 import type { Provider, ProviderType, ProviderDefaults } from '../types.js'
 
 interface ProviderBody {
@@ -66,12 +67,15 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
       const res = await fetch(`${baseUrl}/models`, {
         headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
       })
-      if (!res.ok) return reply.code(502).send({ error: `/models returned HTTP ${res.status}` })
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        return reply.code(502).send({ error: `/models: ${describeHttpError(res.status, text)}` })
+      }
       const json = await res.json() as { data?: { id: string }[] }
       const ids = (json.data ?? []).map((m: { id: string }) => m.id).sort()
       return { data: ids }
     } catch (err) {
-      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) })
+      return reply.code(502).send({ error: humanizeNetworkError(err, baseUrl) })
     }
   })
 
@@ -94,9 +98,12 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
           const r = await fetch(`${provider.baseUrl}/models`, {
             headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
           })
-          if (!r.ok) return { data: { ok: false, error: `/models returned HTTP ${r.status}` } }
+          if (!r.ok) {
+            const text = await r.text().catch(() => r.statusText)
+            return { data: { ok: false, error: `/models: ${describeHttpError(r.status, text)}` } }
+          }
         } catch (err) {
-          return { data: { ok: false, error: err instanceof Error ? err.message : String(err) } }
+          return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } }
         }
       }
 
@@ -118,7 +125,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
         }
         return { data: { ok: false, error: 'No response from provider' } }
       } catch (err) {
-        return { data: { ok: false, error: err instanceof Error ? err.message : String(err) } }
+        return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } }
       }
     }
   )

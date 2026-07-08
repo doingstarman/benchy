@@ -1,3 +1,4 @@
+import { humanizeNetworkError, describeHttpError } from '../errors.js';
 export const webhookAdapter = {
     async *stream(messages, config) {
         const url = config.baseUrl;
@@ -17,12 +18,12 @@ export const webhookAdapter = {
             });
         }
         catch (err) {
-            yield { type: 'error', message: err instanceof Error ? err.message : String(err) };
+            yield { type: 'error', message: humanizeNetworkError(err, url) };
             return;
         }
         if (!response.ok) {
             const text = await response.text().catch(() => response.statusText);
-            yield { type: 'error', message: `Webhook returned HTTP ${response.status}: ${text}` };
+            yield { type: 'error', message: `Webhook: ${describeHttpError(response.status, text)}` };
             return;
         }
         const contentType = response.headers.get('content-type') ?? '';
