@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS runs (
   completed_calls INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   settings_overrides TEXT,
-  run_settings TEXT
+  run_settings TEXT,
+  title TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -60,6 +61,7 @@ export async function initDb(path) {
     for (const sql of [
         'ALTER TABLE runs ADD COLUMN settings_overrides TEXT',
         'ALTER TABLE runs ADD COLUMN run_settings TEXT',
+        'ALTER TABLE runs ADD COLUMN title TEXT',
     ]) {
         try {
             db.exec(sql);

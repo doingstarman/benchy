@@ -146,6 +146,18 @@ describe('Runs API — real SQLite', () => {
     expect(b2.data.saved).toBe(false)
   })
 
+  it('PATCH /api/runs/:id renames run and clears title on empty string', async () => {
+    const id = seed()
+    const { body } = await patch<{ data: Run }>(`/api/runs/${id}`, { title: '  Мой тест UI  ' })
+    expect(body.data.title).toBe('Мой тест UI')
+
+    const { body: list } = await get<{ data: Run[] }>('/api/runs')
+    expect(list.data.find(r => r.id === id)?.title).toBe('Мой тест UI')
+
+    const { body: cleared } = await patch<{ data: Run }>(`/api/runs/${id}`, { title: '' })
+    expect(cleared.data.title).toBeUndefined()
+  })
+
   it('feedback patch updates result row in DB', async () => {
     const runId = seed()
     const resultId = randomUUID()

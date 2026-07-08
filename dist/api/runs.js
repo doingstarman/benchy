@@ -14,6 +14,7 @@ function rowToRun(row) {
         completedCalls: row.completed_calls,
         createdAt: row.created_at,
         ...(runSettings ? { runSettings } : {}),
+        ...(row.title != null ? { title: row.title } : {}),
     };
 }
 function rowToResult(row) {
@@ -101,9 +102,13 @@ export async function registerRunsRoutes(app) {
     });
     app.patch('/api/runs/:id', async (req, reply) => {
         const db = getDb();
-        const { saved } = req.body;
+        const { saved, title } = req.body;
         if (saved !== undefined) {
             db.prepare('UPDATE runs SET saved = ? WHERE id = ?').run(saved ? 1 : 0, req.params.id);
+        }
+        if (title !== undefined) {
+            const trimmed = typeof title === 'string' ? title.trim() : null;
+            db.prepare('UPDATE runs SET title = ? WHERE id = ?').run(trimmed || null, req.params.id);
         }
         const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(req.params.id);
         if (!run)

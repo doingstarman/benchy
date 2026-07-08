@@ -27,6 +27,10 @@ vi.mock('../api', () => ({
   benchmarkApi: {
     start: vi.fn().mockResolvedValue({ runId: 'run-test-1' }),
   },
+  runsApi: {
+    list: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockResolvedValue({ id: 'x', prompts: [], models: [], results: [] }),
+  },
 }))
 
 // EventSource is not available in jsdom — stub it so run flow doesn't throw
@@ -194,6 +198,25 @@ describe('Promptbox — mode switching', () => {
     await user.click(screen.getByText('one prompt → all models'))
 
     expect(screen.getByPlaceholderText('Ask anything…')).toBeInTheDocument()
+  })
+
+  it('"many prompts" mode shows a prompt list and runs all filled prompts', async () => {
+    const { benchmarkApi } = await import('../api')
+    const user = userEvent.setup()
+    renderNewRun()
+    await waitForProviders()
+
+    await user.click(screen.getByText('many prompts → all models'))
+    expect(screen.getByPlaceholderText('Prompt 1…')).toBeInTheDocument()
+
+    await user.click(screen.getByText('+ add prompt'))
+    await user.type(screen.getByPlaceholderText('Prompt 1…'), 'first')
+    await user.type(screen.getByPlaceholderText('Prompt 2…'), 'second')
+    await user.click(screen.getByRole('button', { name: /▶ run/i }))
+
+    expect(benchmarkApi.start).toHaveBeenCalledWith(
+      expect.objectContaining({ prompts: ['first', 'second'] })
+    )
   })
 })
 

@@ -54,6 +54,8 @@ export const runsApi = {
   fork: (id: string) => apiFetch<Run>(`/api/runs/${id}/fork`, { method: 'POST' }),
   save: (id: string, saved: boolean) =>
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ saved }) }),
+  rename: (id: string, title: string | null) =>
+    apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   setFeedback: (runId: string, resultId: string, feedback: 'up' | 'down' | null) =>
     fetch(`/api/runs/${runId}/results/${resultId}/feedback`, {
       method: 'PATCH',

@@ -14,6 +14,7 @@ interface RunRow {
   created_at: number
   settings_overrides: string | null
   run_settings: string | null
+  title: string | null
 }
 
 interface ResultRow {
@@ -47,6 +48,7 @@ function rowToRun(row: RunRow): Run {
     completedCalls: row.completed_calls,
     createdAt: row.created_at,
     ...(runSettings ? { runSettings } : {}),
+    ...(row.title != null ? { title: row.title } : {}),
   }
 }
 
@@ -137,11 +139,15 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ data: rowToRun(newRun) })
   })
 
-  app.patch<{ Params: { id: string }; Body: { saved?: boolean } }>('/api/runs/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { saved?: boolean; title?: string | null } }>('/api/runs/:id', async (req, reply) => {
     const db = getDb()
-    const { saved } = req.body
+    const { saved, title } = req.body
     if (saved !== undefined) {
       db.prepare('UPDATE runs SET saved = ? WHERE id = ?').run(saved ? 1 : 0, req.params.id)
+    }
+    if (title !== undefined) {
+      const trimmed = typeof title === 'string' ? title.trim() : null
+      db.prepare('UPDATE runs SET title = ? WHERE id = ?').run(trimmed || null, req.params.id)
     }
     const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(req.params.id) as RunRow | undefined
     if (!run) return reply.code(404).send({ error: 'Run not found' })

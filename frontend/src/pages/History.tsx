@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { runsApi } from '../api'
+import { RUNS_CHANGED_EVENT } from './NewRun'
 import type { Run } from '../../../src/types'
 
 export function History() {
@@ -11,6 +12,8 @@ export function History() {
   const [dateFilter, setDateFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -31,7 +34,22 @@ export function History() {
     e.stopPropagation()
     if (!confirm('Delete this run?')) return
     await runsApi.remove(id)
+    window.dispatchEvent(new Event(RUNS_CHANGED_EVENT))
     load()
+  }
+
+  function startRename(e: React.MouseEvent, run: Run) {
+    e.stopPropagation()
+    setRenamingId(run.id)
+    setRenameValue(run.title ?? '')
+  }
+
+  async function commitRename(id: string) {
+    const title = renameValue.trim()
+    setRenamingId(null)
+    const updated = await runsApi.rename(id, title || null)
+    setRuns(prev => prev.map(r => r.id === id ? updated : r))
+    window.dispatchEvent(new Event(RUNS_CHANGED_EVENT))
   }
 
   function formatDate(ts: number) {
@@ -149,9 +167,42 @@ export function History() {
                     {run.saved && <span style={{ marginLeft: 6, color: 'var(--accent)', fontSize: 10 }}>●</span>}
                   </td>
                   <td style={{ padding: '10px 12px', maxWidth: 280, color: 'var(--text-primary)', fontSize: 12 }}>
-                    <span style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {previewPrompt}
-                    </span>
+                    {renamingId === run.id ? (
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') void commitRename(run.id)
+                          if (e.key === 'Escape') setRenamingId(null)
+                        }}
+                        onBlur={() => void commitRename(run.id)}
+                        placeholder="Название теста…"
+                        style={{
+                          width: '100%', background: 'var(--bg-base)', border: '0.5px solid var(--accent-dim)',
+                          borderRadius: 5, padding: '3px 7px', fontSize: 12,
+                          color: 'var(--text-primary)', outline: 'none',
+                        }}
+                      />
+                    ) : (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: run.title ? 'var(--text-bright)' : 'var(--text-primary)' }}>
+                          {run.title || previewPrompt}
+                        </span>
+                        <button
+                          onClick={e => startRename(e, run)}
+                          title="Rename"
+                          style={{
+                            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                            color: 'var(--text-muted)', fontSize: 11, lineHeight: 1, flexShrink: 0,
+                            opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s',
+                          }}
+                        >
+                          ✎
+                        </button>
+                      </span>
+                    )}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>

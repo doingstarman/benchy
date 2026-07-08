@@ -79,6 +79,7 @@ export interface Run {
   completedCalls: number
   createdAt: number
   runSettings?: RunSettings
+  title?: string | null
 }
 
 export interface BenchmarkRequest {

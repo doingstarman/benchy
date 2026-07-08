@@ -1,7 +1,12 @@
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { runsApi } from '../api'
+import { getActiveNewRunRunId, RUNS_CHANGED_EVENT } from '../pages/NewRun'
+import type { Run } from '../../../src/types'
 
 const EXPANDED_WIDTH = 160
 const COLLAPSED_WIDTH = 52
+const RECENT_DIALOGS_COUNT = 5
 
 const SIDEBAR_CSS = `
   .nav-item {
@@ -59,6 +64,22 @@ const SIDEBAR_CSS = `
   .sidebar-logo-btn:hover { border: 0.5px solid var(--border-hover); }
   .sidebar-logo-btn:hover .logo-mark { display: none; }
   .sidebar-logo-btn:hover .logo-expand { display: flex; }
+  .dialog-item {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; border-left: 2px solid transparent;
+    padding: 4px 10px 4px 26px;
+    font-size: 11px; font-family: var(--font-sans);
+    color: var(--text-muted); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color 0.1s, background 0.1s;
+  }
+  .dialog-item:hover { color: var(--text-secondary); background: var(--bg-base); }
+  .dialog-item.active {
+    color: var(--text-bright);
+    border-left: 2px solid var(--accent);
+    padding-left: 24px;
+    background: var(--bg-base);
+  }
 `
 
 function Icon({ children }: { children: React.ReactNode }) {
@@ -119,6 +140,44 @@ function DisabledItem({ label, icon, collapsed, soon }: { label: string; icon: s
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function RecentDialogs() {
+  const [runs, setRuns] = useState<Run[]>([])
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const refresh = () => {
+      runsApi.list().then(rs => setRuns(rs.slice(0, RECENT_DIALOGS_COUNT))).catch(() => {})
+    }
+    refresh()
+    window.addEventListener(RUNS_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(RUNS_CHANGED_EVENT, refresh)
+    // Re-fetch on navigation too — renames/deletes elsewhere become visible on return
+  }, [location.pathname])
+
+  if (runs.length === 0) return null
+  const activeId = getActiveNewRunRunId()
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 2 }}>
+      {runs.map(run => {
+        const label = run.title?.trim() || run.prompts[0] || run.id.slice(0, 8)
+        const active = run.id === activeId
+        return (
+          <button
+            key={run.id}
+            className={`dialog-item${active ? ' active' : ''}`}
+            title={label}
+            onClick={() => navigate(active ? '/run' : `/run?session=${run.id}`)}
+          >
+            {label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -188,11 +247,12 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
       <Divider />
 
       <Item to="/run" label="Тест" icon="test" collapsed={collapsed} />
+      {!collapsed && <RecentDialogs />}
+      <Item to="/history" label="История" icon="history" collapsed={collapsed} />
 
       <Divider />
 
       <DisabledItem label="Дашборд" icon="dashboard" collapsed={collapsed} soon />
-      <Item to="/history" label="История" icon="history" collapsed={collapsed} />
 
       <Divider />
 

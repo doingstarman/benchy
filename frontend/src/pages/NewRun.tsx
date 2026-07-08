@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { providersApi, benchmarkApi } from '../api'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { providersApi, benchmarkApi, runsApi } from '../api'
 import { extractHtmlArtifact } from '../lib/artifact'
 import { ArtifactPreview } from '../components/ArtifactPreview'
 import { SliderField } from '../components/SliderField'
@@ -144,16 +144,24 @@ export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd,
 
 // ─── Promptbox ────────────────────────────────────────────────────────────
 
+// 0: one prompt → all models · 1: prompt per model · 2: many prompts → all models
+type PromptMode = 0 | 1 | 2
+
 interface PromptboxProps {
   simplified: boolean
-  mode: 0 | 1
-  onModeChange: (m: 0 | 1) => void
+  mode: PromptMode
+  onModeChange: (m: PromptMode) => void
   selectedCount: number
   selectedModels: string[]
   prompt: string
   onPromptChange: (v: string) => void
   perModelPrompts: Record<string, string>
   onPerModelPromptChange: (key: string, v: string) => void
+  batchPrompts: string[]
+  onBatchPromptsChange: (prompts: string[]) => void
+  // Rendered inside the box in multi-prompt mode — the "send to" model picker
+  // moves in here and the external chips row is hidden.
+  modelsSlot?: React.ReactNode
   callCount: number
   isRunning: boolean
   onRun: () => void
@@ -166,6 +174,7 @@ interface PromptboxProps {
 export function Promptbox({
   simplified, mode, onModeChange, selectedCount, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
+  batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
 }: PromptboxProps) {
@@ -354,14 +363,14 @@ export function Promptbox({
       <div style={{ borderRadius: 10, overflow: 'hidden' }}>
       {!simplified && (
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
-          {(['one prompt → all models', 'prompt per model'] as const).map((label, i) => (
+          {(['one prompt → all models', 'prompt per model', 'many prompts → all models'] as const).map((label, i, arr) => (
             <button
               key={i}
-              onClick={() => onModeChange(i as 0 | 1)}
+              onClick={() => onModeChange(i as PromptMode)}
               style={{
                 flex: 1, padding: '9px 14px', fontSize: 11, fontFamily: 'var(--font-mono)',
                 cursor: 'pointer', textAlign: 'left', background: 'none', border: 'none',
-                borderRight: i === 0 ? '0.5px solid var(--border)' : 'none',
+                borderRight: i < arr.length - 1 ? '0.5px solid var(--border)' : 'none',
                 borderBottom: mode === i ? '1.5px solid var(--accent)' : '1.5px solid transparent',
                 marginBottom: -0.5,
                 color: mode === i ? 'var(--accent)' : 'var(--text-muted)',
@@ -393,6 +402,51 @@ export function Promptbox({
               />
             </div>
           ))}
+        </div>
+      ) : !simplified && mode === 2 ? (
+        <div>
+          {batchPrompts.map((p, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '0.5px solid var(--border)' }}>
+              <div style={{ padding: '10px 0 0 14px', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0, width: 26 }}>
+                {i + 1}
+              </div>
+              <textarea
+                className="nr-ta"
+                value={p}
+                onChange={e => onBatchPromptsChange(batchPrompts.map((bp, bi) => bi === i ? e.target.value : bp))}
+                placeholder={`Prompt ${i + 1}…`}
+                rows={2}
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', resize: 'none', lineHeight: 1.65, padding: '8px 8px 10px 0' }}
+              />
+              {batchPrompts.length > 1 && (
+                <button
+                  onClick={() => onBatchPromptsChange(batchPrompts.filter((_, bi) => bi !== i))}
+                  title="Remove prompt"
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: '10px 14px 0 4px', lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={() => onBatchPromptsChange([...batchPrompts, ''])}
+            style={{
+              margin: '8px 14px', padding: '4px 10px',
+              background: 'none', border: '0.5px dashed var(--border)', borderRadius: 6,
+              fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', cursor: 'pointer',
+            }}
+          >
+            + add prompt
+          </button>
+          {modelsSlot && (
+            <div style={{ borderTop: '0.5px solid var(--border)', padding: '10px 14px 2px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
+                Send to
+              </span>
+              {modelsSlot}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ padding: '12px 14px 0' }}>
@@ -493,9 +547,10 @@ interface SavedSession {
   sessionModels: string[]
   runId: string | null
   selectedModels: Set<string>
-  mode: 0 | 1
+  mode: PromptMode
   prompt: string
   perModelPrompts: Record<string, string>
+  batchPrompts: string[]
   runSettings: RunSettings
   vote: string | null
   previewCells: Set<string>
@@ -517,14 +572,28 @@ export function hasActiveNewRunSession(): boolean {
   return savedSession != null && savedSession.turns.length > 0
 }
 
+// The run currently open on /run — lets the sidebar highlight it in the
+// recent-dialogs list.
+export function getActiveNewRunRunId(): string | null {
+  return savedSession?.runId ?? null
+}
+
+// Sidebar listens for this to refresh its recent-dialogs list without polling.
+export const RUNS_CHANGED_EVENT = 'benchy:runs-changed'
+function notifyRunsChanged() {
+  window.dispatchEvent(new Event(RUNS_CHANGED_EVENT))
+}
+
 export function NewRun() {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
-  const [mode, setMode] = useState<0 | 1>(() => savedSession?.mode ?? 0)
+  const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
+  const [batchPrompts, setBatchPrompts] = useState<string[]>(() => savedSession?.batchPrompts ?? [''])
 
   const [runSettings, setRunSettings] = useState<RunSettings>(() => savedSession?.runSettings ?? {})
 
@@ -547,7 +616,7 @@ export function NewRun() {
   useEffect(() => {
     savedSession = {
       screenState, turns, sessionModels, runId, selectedModels,
-      mode, prompt, perModelPrompts, runSettings, vote, previewCells,
+      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, previewCells,
     }
   })
 
@@ -557,6 +626,42 @@ export function NewRun() {
     esRef.current?.close()
     regenEsRef.current?.close()
   }, [])
+
+  // Opening a past dialog from the sidebar: /run?session=<runId> rebuilds the
+  // whole conversation from the stored run and makes it the active session.
+  useEffect(() => {
+    const sessionId = new URLSearchParams(location.search).get('session')
+    if (!sessionId) return
+    navigate('/run', { replace: true })
+    if (sessionId === runId) return
+    runsApi.get(sessionId).then(run => {
+      const restored: Turn[] = run.prompts.map((p, i) => ({
+        promptIndex: i,
+        prompt: p,
+        showPromptBubble: true,
+        results: new Map(run.results.filter(res => res.promptIndex === i).map(res => [res.model, {
+          text: res.text,
+          ttfs: res.metrics.ttfs,
+          totalTime: res.metrics.totalTime,
+          inputTokens: res.metrics.inputTokens,
+          outputTokens: res.metrics.outputTokens,
+          status: (res.error ? 'error' : 'done') as UIResult['status'],
+          ...(res.error ? { error: res.error } : {}),
+        }])),
+      }))
+      esRef.current?.close()
+      regenEsRef.current?.close()
+      setTurns(restored)
+      setSessionModels(run.models)
+      setRunId(run.id)
+      setScreenState('done')
+      setVote(null)
+      setExpandedCol(null)
+      setPreviewCells(new Set())
+      setError(null)
+    }).catch(() => setError('Failed to load dialog'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search])
 
   useEffect(() => {
     providersApi.list().then(ps => {
@@ -579,9 +684,9 @@ export function NewRun() {
 
   useEffect(() => {
     if (screenState !== 'running') return
-    const lastTurn = turns[turns.length - 1]
-    if (!lastTurn) return
-    const all = [...lastTurn.results.values()]
+    // Batch runs stream several turns concurrently, so "run finished" means
+    // every cell in every turn has settled — not just the last turn's.
+    const all = turns.flatMap(t => [...t.results.values()])
     if (all.length > 0 && all.every(r => r.status === 'done' || r.status === 'error')) {
       setScreenState('done')
     }
@@ -617,10 +722,14 @@ export function NewRun() {
     .filter(k => perModelPrompts[k]?.trim())
     .map(k => ({ prompt: perModelPrompts[k].trim(), model: k }))
 
+  const filledBatchPrompts = batchPrompts.map(p => p.trim()).filter(Boolean)
+
   const effectiveMode = screenState === 'idle' ? mode : 0
   const callCount = effectiveMode === 0
     ? (prompt.trim() ? selectedModels.size : 0)
-    : filledPairs.length
+    : effectiveMode === 1
+      ? filledPairs.length
+      : filledBatchPrompts.length * selectedModels.size
 
   function updateTurnResult(promptIndex: number, model: string, updater: (r: UIResult) => UIResult) {
     setTurns(prev => prev.map(turn => {
@@ -663,10 +772,12 @@ export function NewRun() {
     setVote(null)
     setExpandedCol(null)
 
-    const activeModels = effectiveMode === 0
-      ? [...selectedModels]
-      : filledPairs.map(p => p.model)
-    if (!activeModels.length || (effectiveMode === 0 && !prompt.trim())) return
+    const activeModels = effectiveMode === 1
+      ? filledPairs.map(p => p.model)
+      : [...selectedModels]
+    if (!activeModels.length) return
+    if (effectiveMode === 0 && !prompt.trim()) return
+    if (effectiveMode === 2 && filledBatchPrompts.length === 0) return
 
     const sharedPrompt = prompt.trim()
 
@@ -676,21 +787,35 @@ export function NewRun() {
 
     const req = effectiveMode === 0
       ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings }
-      : { pairs: filledPairs, runSettings: effectiveRunSettings }
+      : effectiveMode === 1
+        ? { pairs: filledPairs, runSettings: effectiveRunSettings }
+        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
-      setTurns([{
-        promptIndex: 0,
-        prompt: sharedPrompt,
-        showPromptBubble: effectiveMode === 0,
-        results: pendingResults(activeModels),
-      }])
+      // Batch prompts land as one turn per prompt — the backend already keys
+      // each prompt by its own promptIndex, so SSE events route themselves.
+      const initialTurns: Turn[] = effectiveMode === 2
+        ? filledBatchPrompts.map((p, i) => ({
+            promptIndex: i,
+            prompt: p,
+            showPromptBubble: true,
+            results: pendingResults(activeModels),
+          }))
+        : [{
+            promptIndex: 0,
+            prompt: sharedPrompt,
+            showPromptBubble: effectiveMode === 0,
+            results: pendingResults(activeModels),
+          }]
+      setTurns(initialTurns)
       setSessionModels(activeModels)
       setRunId(newRunId)
       setScreenState('running')
+      notifyRunsChanged()
       if (effectiveMode === 0) setPrompt('')
-      else setPerModelPrompts({})
+      else if (effectiveMode === 1) setPerModelPrompts({})
+      else setBatchPrompts([''])
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${newRunId}`)
       esRef.current = es
@@ -826,7 +951,7 @@ export function NewRun() {
   }
 
   // renderCell is a function call (not JSX component) — no remount problem
-  function renderCell(turn: Turn, key: string) {
+  function renderCell(turn: Turn, key: string, isExpanded = false) {
     const r = turn.results.get(key)
     if (!r) return null
     const cellKey = `${turn.promptIndex}:${key}`
@@ -870,8 +995,19 @@ export function NewRun() {
           {showPreview && (
             <button onClick={() => handleRestartPreview(cellKey)} title="Restart preview" className="nr-head-btn">▶</button>
           )}
-          <button onClick={() => setExpandedCol(expandedCol === cellKey ? null : cellKey)} title="Expand" className="nr-head-btn">⤢</button>
-          <button onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close" className="nr-head-btn">✕</button>
+          {isExpanded ? (
+            <button onClick={() => setExpandedCol(null)} title="Collapse" className="nr-head-btn">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <path d="M14 2L9.5 6.5M9.5 6.5V3.5M9.5 6.5h3" />
+                <path d="M2 14l4.5-4.5M6.5 9.5v3M6.5 9.5h-3" />
+              </svg>
+            </button>
+          ) : (
+            <>
+              <button onClick={() => setExpandedCol(cellKey)} title="Expand" className="nr-head-btn">⤢</button>
+              <button onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close" className="nr-head-btn">✕</button>
+            </>
+          )}
         </div>
 
         <div style={{ height: 38, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
@@ -919,6 +1055,14 @@ export function NewRun() {
     if (provider?.defaults) providerDefaultsByModel[modelKey] = provider.defaults
   }
 
+  const chipsRowProps: Omit<ChipsRowProps, 'wrap'> = {
+    models: connectedModels,
+    selectedModels,
+    onToggle: toggleModel,
+    onToggleAll: toggleAllModels,
+    onAdd: () => navigate('/providers'),
+  }
+
   const promptboxProps: Omit<PromptboxProps, 'simplified'> = {
     mode,
     onModeChange: setMode,
@@ -928,6 +1072,9 @@ export function NewRun() {
     onPromptChange: setPrompt,
     perModelPrompts,
     onPerModelPromptChange: (key, v) => setPerModelPrompts(prev => ({ ...prev, [key]: v })),
+    batchPrompts,
+    onBatchPromptsChange: setBatchPrompts,
+    modelsSlot: <ChipsRow {...chipsRowProps} wrap={false} />,
     callCount,
     isRunning: screenState === 'running',
     onRun: handleRun,
@@ -935,14 +1082,6 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
-  }
-
-  const chipsRowProps: Omit<ChipsRowProps, 'wrap'> = {
-    models: connectedModels,
-    selectedModels,
-    onToggle: toggleModel,
-    onToggleAll: toggleAllModels,
-    onAdd: () => navigate('/providers'),
   }
 
   // ─── Idle state ───────────────────────────────────────────────────────────
@@ -958,7 +1097,7 @@ export function NewRun() {
           <div style={{ fontSize: 24, color: 'var(--text-primary)', fontWeight: 400, letterSpacing: -0.4, textAlign: 'center' }}>
             What would you like to benchmark?
           </div>
-          <ChipsRow {...chipsRowProps} wrap />
+          {mode !== 2 && <ChipsRow {...chipsRowProps} wrap />}
           <div style={{ width: '100%', maxWidth: 640 }}>
             <Promptbox {...promptboxProps} simplified={false} />
           </div>
@@ -987,7 +1126,7 @@ export function NewRun() {
             }}
             onClick={e => { if (e.target === e.currentTarget) setExpandedCol(null) }}
           >
-            {renderCell(expandedTurn, expandedModel)}
+            {renderCell(expandedTurn, expandedModel, true)}
           </div>
         )
       })()}
