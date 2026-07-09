@@ -71,3 +71,7 @@ export function IconPencil(p: IconProps) {
 export function IconPaperclip(p: IconProps) {
   return <Svg {...p}><path d="M13 7.5l-5.2 5.2a3.2 3.2 0 0 1-4.5-4.5L8.8 2.7a2.1 2.1 0 0 1 3 3l-5.4 5.5a1 1 0 0 1-1.5-1.5L9.5 5" /></Svg>
 }
+
+export function IconFile(p: IconProps) {
+  return <Svg {...p}><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z" /><path d="M9 1.5V5h3.5" /></Svg>
+}

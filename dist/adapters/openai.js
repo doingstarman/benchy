@@ -1,8 +1,32 @@
 import { humanizeNetworkError, describeHttpError } from '../errors.js';
+// The chat completions API takes images as data-URL content parts; PDFs are
+// not accepted there at all.
+function toOpenAIMessage(msg) {
+    if (!msg.attachments?.length)
+        return { role: msg.role, content: msg.content };
+    return {
+        role: msg.role,
+        content: [
+            { type: 'text', text: msg.content },
+            ...msg.attachments.map(a => ({
+                type: 'image_url',
+                image_url: { url: `data:${a.mimeType};base64,${a.data}` },
+            })),
+        ],
+    };
+}
 export const openaiAdapter = {
     async *stream(messages, config) {
         const baseUrl = config.baseUrl ?? 'https://api.openai.com/v1';
         const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+        const unsupported = messages.flatMap(m => m.attachments ?? []).find(a => !a.mimeType.startsWith('image/'));
+        if (unsupported) {
+            yield {
+                type: 'error',
+                message: `"${unsupported.name}" (${unsupported.mimeType}) is not supported by this provider's chat completions API — only images can be attached. See your provider's docs for supported input formats (OpenAI: https://platform.openai.com/docs/guides/images-vision)`,
+            };
+            return;
+        }
         const t0 = Date.now();
         let firstToken = true;
         let response;
@@ -15,7 +39,7 @@ export const openaiAdapter = {
                 },
                 body: JSON.stringify({
                     model: config.model,
-                    messages,
+                    messages: messages.map(toOpenAIMessage),
                     stream: true,
                     stream_options: { include_usage: true },
                     ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),

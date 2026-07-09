@@ -16,9 +16,16 @@ export interface AdapterConfig {
   settings?: import('../types.js').ProviderDefaults
 }
 
+export interface MessageAttachment {
+  mimeType: string
+  data: string // base64
+  name: string
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
+  attachments?: MessageAttachment[]
 }
 
 export interface Adapter {

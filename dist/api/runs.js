@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
+import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js';
 function rowToRun(row) {
     const runSettings = row.run_settings
         ? JSON.parse(row.run_settings)
@@ -82,10 +83,17 @@ export async function registerRunsRoutes(app) {
             return reply.code(404).send({ error: 'Run not found' });
         const results = db.prepare('SELECT * FROM results WHERE run_id = ? ORDER BY prompt_index, model')
             .all(req.params.id);
-        return { data: { ...rowToRun(run), results: results.map(rowToResult) } };
+        const attachmentRows = db.prepare('SELECT id, prompt_index, mime_type, name, size FROM attachments WHERE run_id = ? ORDER BY created_at').all(req.params.id);
+        const attachments = attachmentRows.map(a => ({
+            id: a.id, promptIndex: a.prompt_index, mimeType: a.mime_type, name: a.name, size: a.size,
+        }));
+        return { data: { ...rowToRun(run), results: results.map(rowToResult), attachments } };
     });
     app.delete('/api/runs/:id', async (req, reply) => {
         const db = getDb();
+        // results cascade via FK; attachments have no FK (they exist before the
+        // run when unbound) so their files + rows are removed explicitly.
+        await deleteAttachmentsForRun(req.params.id);
         db.prepare('DELETE FROM runs WHERE id = ?').run(req.params.id);
         return reply.code(204).send();
     });
@@ -97,6 +105,9 @@ export async function registerRunsRoutes(app) {
         const newId = randomUUID();
         db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now());
         // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
+        // Attachments are copied (own files + rows) so the fork re-runs with the
+        // same media instead of silently dropping it.
+        await cloneAttachmentsForRun(req.params.id, newId);
         const newRun = db.prepare('SELECT * FROM runs WHERE id = ?').get(newId);
         return reply.code(201).send({ data: rowToRun(newRun) });
     });

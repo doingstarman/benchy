@@ -1,5 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { humanizeNetworkError } from '../errors.js';
+// Images become image blocks, PDFs become document blocks — both native here.
+function toAnthropicContent(msg) {
+    if (!msg.attachments?.length)
+        return msg.content;
+    const blocks = msg.attachments.map(a => a.mimeType === 'application/pdf'
+        ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.data } }
+        : { type: 'image', source: { type: 'base64', media_type: a.mimeType, data: a.data } });
+    blocks.push({ type: 'text', text: msg.content });
+    return blocks;
+}
 export const anthropicAdapter = {
     async *stream(messages, config) {
         const client = new Anthropic({
@@ -18,7 +28,7 @@ export const anthropicAdapter = {
                 ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
                 messages: chatMessages.map(m => ({
                     role: m.role,
-                    content: m.content,
+                    content: toAnthropicContent(m),
                 })),
             });
             for await (const event of stream) {

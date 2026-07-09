@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../server.js'
 import { closeDb, getDb } from '../db/index.js'
+import { uploadPath } from '../api/uploads.js'
 import type { FastifyInstance } from 'fastify'
 import type { Run } from '../types.js'
 
@@ -296,6 +297,175 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     // The re-run got NO history (nothing precedes turn 0)
     expect(capturedMessages).toHaveLength(1)
     expect(capturedMessages[0]).toEqual([{ role: 'user', content: 'First edited' }])
+  })
+
+  it('attachments flow into the adapter, persist through history, and die with edit-turn', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    // Upload a small "PNG"
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9])
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: 'image/png' }), 'screen.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    // Turn 0 with the attachment
+    capturedMessages = []
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['what is this?'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const firstMsg = capturedMessages[0][0] as { content: string; attachments?: { mimeType: string; data: string; name: string }[] }
+    expect(firstMsg.attachments).toHaveLength(1)
+    expect(firstMsg.attachments![0].mimeType).toBe('image/png')
+    expect(firstMsg.attachments![0].name).toBe('screen.png')
+    expect(Buffer.from(firstMsg.attachments![0].data, 'base64').equals(bytes)).toBe(true)
+
+    // Continue — history's turn-0 user message must carry the attachment again
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'and now?' }),
+    })
+    await waitForRun(data.runId)
+    const history = capturedMessages[0] as Array<{ role: string; attachments?: unknown[] }>
+    expect(history[0].attachments).toHaveLength(1)
+    expect(history[2].attachments).toBeUndefined()
+
+    // Edit turn 0 without re-sending the attachment — row and file must be gone
+    await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'edited' }),
+    })
+    await waitForRun(data.runId)
+    const row = getDb().prepare('SELECT COUNT(*) AS n FROM attachments WHERE id = ?').get(att.id) as { n: number }
+    expect(row.n).toBe(0)
+    const fileRes = await fetch(`${base}/api/uploads/${att.id}`)
+    expect(fileRes.status).toBe(404)
+  })
+
+  it('deleting a run removes its attachment rows AND files from disk', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: 'image/png' }), 'del.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['what is this?'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const filePath = uploadPath(att.id, 'image/png')
+    expect(existsSync(filePath)).toBe(true)
+
+    const del = await fetch(`${base}/api/runs/${data.runId}`, { method: 'DELETE' })
+    expect(del.status).toBe(204)
+
+    const row = getDb().prepare('SELECT COUNT(*) AS n FROM attachments WHERE id = ?').get(att.id) as { n: number }
+    expect(row.n).toBe(0)
+    expect(existsSync(filePath)).toBe(false)
+    expect((await fetch(`${base}/api/uploads/${att.id}`)).status).toBe(404)
+  })
+
+  it('forking a run copies its attachments as independent files', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 4, 5, 6])
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: 'image/png' }), 'fork.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['orig'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const forkRes = await fetch(`${base}/api/runs/${data.runId}/fork`, { method: 'POST' })
+    const { data: fork } = await forkRes.json() as { data: { id: string } }
+
+    const forkRun = await fetch(`${base}/api/runs/${fork.id}`).then(r => r.json()) as {
+      data: { attachments: Array<{ id: string; promptIndex: number; name: string }> }
+    }
+    expect(forkRun.data.attachments).toHaveLength(1)
+    const copy = forkRun.data.attachments[0]
+    expect(copy.id).not.toBe(att.id)
+    expect(copy.promptIndex).toBe(0)
+    expect(copy.name).toBe('fork.png')
+    expect(existsSync(uploadPath(copy.id, 'image/png'))).toBe(true)
+
+    // The copy is independent — deleting the original leaves the fork's file intact.
+    await fetch(`${base}/api/runs/${data.runId}`, { method: 'DELETE' })
+    expect(existsSync(uploadPath(copy.id, 'image/png'))).toBe(true)
+    const copyRes = await fetch(`${base}/api/uploads/${copy.id}`)
+    expect(copyRes.status).toBe(200)
+    await copyRes.arrayBuffer() // drain the stream so it doesn't hold a file handle
+  })
+
+  it('DELETE /api/uploads/:id removes an unbound upload but refuses a bound one', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    // Unbound → 204 and gone from disk
+    const f1 = new FormData()
+    f1.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 7])], { type: 'image/png' }), 'chip.png')
+    const up1 = await fetch(`${base}/api/uploads`, { method: 'POST', body: f1 })
+    const { data: unbound } = await up1.json() as { data: { id: string } }
+    const p1 = uploadPath(unbound.id, 'image/png')
+    expect(existsSync(p1)).toBe(true)
+    const rm = await fetch(`${base}/api/uploads/${unbound.id}`, { method: 'DELETE' })
+    expect(rm.status).toBe(204)
+    expect(existsSync(p1)).toBe(false)
+
+    // Bound to a run → refused (409), file untouched
+    const f2 = new FormData()
+    f2.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 8])], { type: 'image/png' }), 'bound.png')
+    const up2 = await fetch(`${base}/api/uploads`, { method: 'POST', body: f2 })
+    const { data: bound } = await up2.json() as { data: { id: string } }
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['keep it'], models: [model], attachments: [bound.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+    const refused = await fetch(`${base}/api/uploads/${bound.id}`, { method: 'DELETE' })
+    expect(refused.status).toBe(409)
+    expect(existsSync(uploadPath(bound.id, 'image/png'))).toBe(true)
+  })
+
+  it('rejects attachments with multiple prompts or unknown ids', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const multi = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['a', 'b'], models: [model], attachments: ['whatever'] }),
+    })
+    expect(multi.status).toBe(400)
+
+    const unknown = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['a'], models: [model], attachments: ['nope'] }),
+    })
+    expect(unknown.status).toBe(400)
   })
 
   it('POST /api/runs/:id/edit-turn rejects out-of-range promptIndex', async () => {

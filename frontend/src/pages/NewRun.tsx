@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { providersApi, benchmarkApi, runsApi } from '../api'
+import { providersApi, benchmarkApi, runsApi, uploadsApi } from '../api'
 import { splitFencedSegments } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
 import { Button, IconButton } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
-  IconPlay, IconStop, IconPaperclip, IconPencil,
+  IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
 } from '../components/icons'
-import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
+import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   temperature: 0.7,
@@ -41,6 +41,53 @@ interface Turn {
   // always a shared prompt, so this is only ever false on turn 0.
   showPromptBubble: boolean
   results: Map<string, UIResult>
+  attachments?: AttachmentMeta[]
+}
+
+// Shared chip/thumbnail strip for attachments — used both in the promptbox
+// (pending, removable) and in the user bubble (read-only, clickable).
+function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMeta[]; onRemove?: (id: string) => void }) {
+  if (attachments.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {attachments.map(a => (
+        <div
+          key={a.id}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', padding: 4, maxWidth: 220,
+          }}
+        >
+          {a.mimeType.startsWith('image/') ? (
+            <a href={uploadsApi.url(a.id)} target="_blank" rel="noreferrer" style={{ display: 'flex' }}>
+              <img
+                src={uploadsApi.url(a.id)}
+                alt={a.name}
+                style={{ height: 44, maxWidth: 88, objectFit: 'cover', borderRadius: 4, display: 'block' }}
+              />
+            </a>
+          ) : (
+            <a href={uploadsApi.url(a.id)} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', padding: '0 2px' }}>
+              <IconFile size={14} />
+              <span style={{ fontSize: 'var(--fs-sm)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+                {a.name}
+              </span>
+            </a>
+          )}
+          {onRemove && (
+            <button
+              onClick={() => onRemove(a.id)}
+              title="Remove"
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
+            >
+              <IconClose size={11} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function pendingResults(models: string[]): Map<string, UIResult> {
@@ -172,6 +219,11 @@ interface PromptboxProps {
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
+  // Attachments — only offered in single-prompt flows (mode 0 and follow-ups)
+  pendingAttachments: AttachmentMeta[]
+  uploading: boolean
+  onFilesPicked: (files: File[]) => void
+  onRemoveAttachment: (id: string) => void
 }
 
 export function Promptbox({
@@ -180,11 +232,32 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
+  pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('all')
+  const [dragOver, setDragOver] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
-  const disabled = callCount === 0 || isRunning
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachEnabled = simplified || mode === 0
+  const disabled = callCount === 0 || isRunning || uploading
+
+  function handlePaste(e: React.ClipboardEvent) {
+    if (!attachEnabled) return
+    const images = [...e.clipboardData.items]
+      .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+      .map(item => item.getAsFile())
+      .filter((f): f is File => f != null)
+    if (images.length) onFilesPicked(images)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    if (!attachEnabled) return
+    const files = [...e.dataTransfer.files]
+    if (files.length) onFilesPicked(files)
+  }
 
   // Clamp active tab to valid options
   const validTab = activeTab === 'all' || selectedModels.includes(activeTab) ? activeTab : 'all'
@@ -286,7 +359,16 @@ export function Promptbox({
   const showTabs = selectedModels.length > 1 || Object.keys(runSettings.perModel ?? {}).length > 0
 
   return (
-    <div style={{ position: 'relative', background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 10, overflow: 'visible', flexShrink: 0 }}>
+    <div
+      onDragOver={e => { if (attachEnabled) { e.preventDefault(); setDragOver(true) } }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      style={{
+        position: 'relative', background: 'var(--bg-elevated)', borderRadius: 10, overflow: 'visible', flexShrink: 0,
+        border: `0.5px solid ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+        transition: 'border-color 0.15s',
+      }}
+    >
 
       {/* Settings popover */}
       {settingsOpen && (
@@ -453,10 +535,16 @@ export function Promptbox({
         </div>
       ) : (
         <div style={{ padding: '12px 14px 0' }}>
+          {attachEnabled && pendingAttachments.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <AttachmentStrip attachments={pendingAttachments} onRemove={onRemoveAttachment} />
+            </div>
+          )}
           <textarea
             className="nr-ta"
             value={prompt}
             onChange={e => onPromptChange(e.target.value)}
+            onPaste={handlePaste}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -474,7 +562,26 @@ export function Promptbox({
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 8 }}>
-        <span style={{ color: 'var(--text-muted)', display: 'flex' }} title="Attachments (soon)"><IconPaperclip size={15} /></span>
+        {attachEnabled ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf"
+              style={{ display: 'none' }}
+              onChange={e => {
+                if (e.target.files?.length) onFilesPicked([...e.target.files])
+                e.target.value = ''
+              }}
+            />
+            <IconButton onClick={() => fileInputRef.current?.click()} title="Attach files (PNG, JPEG, WebP, GIF, PDF — up to 10 MB)">
+              {uploading ? <span className="ui-spinner" /> : <IconPaperclip size={14} />}
+            </IconButton>
+          </>
+        ) : (
+          <span style={{ color: 'var(--text-muted)', display: 'flex', opacity: 0.4 }} title="Attachments work in single-prompt mode"><IconPaperclip size={15} /></span>
+        )}
         <button
           onClick={() => setSettingsOpen(v => !v)}
           title="Run settings"
@@ -545,6 +652,7 @@ interface SavedSession {
   batchPrompts: string[]
   runSettings: RunSettings
   vote: string | null
+  pendingAttachments: AttachmentMeta[]
 }
 
 let savedSession: SavedSession | null = null
@@ -599,6 +707,8 @@ export function NewRun() {
   const [error, setError] = useState<string | null>(null)
   // Inline edit of a past user message: which turn and the draft text
   const [editingTurn, setEditingTurn] = useState<{ promptIndex: number; value: string } | null>(null)
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentMeta[]>(() => savedSession?.pendingAttachments ?? [])
+  const [uploading, setUploading] = useState(false)
 
   const esRef = useRef<EventSource | null>(null)
   const regenEsRef = useRef<EventSource | null>(null)
@@ -607,9 +717,31 @@ export function NewRun() {
   useEffect(() => {
     savedSession = {
       screenState, turns, sessionModels, runId, selectedModels,
-      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote,
+      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
+
+  async function handleFilesPicked(files: File[]) {
+    setError(null)
+    setUploading(true)
+    try {
+      for (const file of files) {
+        const meta = await uploadsApi.upload(file)
+        setPendingAttachments(prev => [...prev, meta])
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function handleRemoveAttachment(id: string) {
+    setPendingAttachments(prev => prev.filter(a => a.id !== id))
+    // Drop the still-unbound file server-side too, so removing a chip doesn't
+    // leak it on disk until the startup sweep.
+    void uploadsApi.remove(id).catch(() => {})
+  }
 
   // Streams are tied to this component instance's closures — don't let them
   // keep writing into a stale instance after navigating away.
@@ -651,6 +783,9 @@ export function NewRun() {
         promptIndex: i,
         prompt: p,
         showPromptBubble: true,
+        ...(run.attachments?.some(a => a.promptIndex === i)
+          ? { attachments: run.attachments.filter(a => a.promptIndex === i).map(({ promptIndex: _, ...meta }) => meta) }
+          : {}),
         results: new Map(run.results.filter(res => res.promptIndex === i).map(res => [res.model, {
           text: res.text,
           ttfs: res.metrics.ttfs,
@@ -797,8 +932,9 @@ export function NewRun() {
     const hasPerModel = Object.values(runSettings.perModel ?? {}).some(m => Object.values(m).some(v => v != null))
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
 
+    const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
     const req = effectiveMode === 0
-      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id) }
       : effectiveMode === 1
         ? { pairs: filledPairs, runSettings: effectiveRunSettings }
         : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings }
@@ -819,13 +955,14 @@ export function NewRun() {
             prompt: sharedPrompt,
             showPromptBubble: effectiveMode === 0,
             results: pendingResults(activeModels),
+            ...(turnAttachments ? { attachments: turnAttachments } : {}),
           }]
       setTurns(initialTurns)
       setSessionModels(activeModels)
       setRunId(newRunId)
       setScreenState('running')
       notifyRunsChanged()
-      if (effectiveMode === 0) setPrompt('')
+      if (effectiveMode === 0) { setPrompt(''); setPendingAttachments([]) }
       else if (effectiveMode === 1) setPerModelPrompts({})
       else setBatchPrompts([''])
       esRef.current?.close()
@@ -869,17 +1006,20 @@ export function NewRun() {
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
     const newPromptIndex = turns.length
 
+    const turnAttachments = pendingAttachments.length ? pendingAttachments : undefined
     setTurns(prev => [...prev, {
       promptIndex: newPromptIndex,
       prompt: trimmed,
       showPromptBubble: true,
       results: pendingResults(sessionModels),
+      ...(turnAttachments ? { attachments: turnAttachments } : {}),
     }])
     setScreenState('running')
     setPrompt('')
+    setPendingAttachments([])
 
     try {
-      await benchmarkApi.continue(runId, trimmed, effectiveRunSettings)
+      await benchmarkApi.continue(runId, trimmed, effectiveRunSettings, turnAttachments?.map(a => a.id))
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${runId}`)
       esRef.current = es
@@ -959,17 +1099,21 @@ export function NewRun() {
     setVote(null)
     setExpandedCol(null)
 
-    // Fork semantics — everything after the edited turn is discarded
+    // Fork semantics — everything after the edited turn is discarded.
+    // The edited turn keeps its own attachments (ids re-sent so the backend
+    // doesn't garbage-collect them).
+    const keptAttachments = turns.find(t => t.promptIndex === promptIndex)?.attachments
     setTurns(prev => [...prev.slice(0, promptIndex), {
       promptIndex,
       prompt: trimmed,
       showPromptBubble: true,
       results: pendingResults(sessionModels),
+      ...(keptAttachments?.length ? { attachments: keptAttachments } : {}),
     }])
     setScreenState('running')
 
     try {
-      await benchmarkApi.editTurn(runId, promptIndex, trimmed)
+      await benchmarkApi.editTurn(runId, promptIndex, trimmed, keptAttachments?.map(a => a.id))
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${runId}`)
       esRef.current = es
@@ -1107,6 +1251,10 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
+    pendingAttachments,
+    uploading,
+    onFilesPicked: handleFilesPicked,
+    onRemoveAttachment: handleRemoveAttachment,
   }
 
   // ─── Idle state ───────────────────────────────────────────────────────────
@@ -1194,6 +1342,11 @@ export function NewRun() {
                       borderRadius: 10, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)',
                       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                     }}>
+                      {turn.attachments && turn.attachments.length > 0 && (
+                        <div style={{ marginBottom: turn.prompt ? 8 : 0 }}>
+                          <AttachmentStrip attachments={turn.attachments} />
+                        </div>
+                      )}
                       {turn.prompt}
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>

@@ -8,7 +8,9 @@ import { googleAdapter } from '../adapters/google.js'
 import { httpJsonAdapter } from '../adapters/http-json.js'
 import { scriptAdapter } from '../adapters/script.js'
 import { webhookAdapter } from '../adapters/webhook.js'
-import type { Adapter, Message } from '../adapters/base.js'
+import { readFile, unlink } from 'node:fs/promises'
+import { getAttachmentRow, uploadPath } from './uploads.js'
+import type { Adapter, Message, MessageAttachment } from '../adapters/base.js'
 import type { ProviderType, BenchmarkRequest, RunSettings } from '../types.js'
 
 export function getAdapter(type: ProviderType): Adapter {
@@ -73,8 +75,9 @@ async function runCell(
       ...(runSettings?.global ?? {}),
       ...(runSettings?.perModel?.[modelKey] ?? {}),
     }
+    const attachments = await loadAttachments(runId, promptIndex)
     const stream = adapter.stream(
-      [...history, { role: 'user', content: promptText }],
+      [...history, { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) }],
       { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings },
     )
 
@@ -142,26 +145,79 @@ interface ResultHistoryRow {
   text: string
 }
 
+// Binds freshly-uploaded attachments to a specific turn. Rejects ids that
+// don't exist or already belong to a different turn.
+function bindAttachments(ids: string[], runId: string, promptIndex: number): string | null {
+  const db = getDb()
+  for (const id of ids) {
+    const row = getAttachmentRow(id)
+    if (!row) return `Attachment ${id} not found — upload it first`
+    if (row.run_id && (row.run_id !== runId || row.prompt_index !== promptIndex)) {
+      return `Attachment ${id} already belongs to another message`
+    }
+  }
+  const bind = db.prepare('UPDATE attachments SET run_id = ?, prompt_index = ? WHERE id = ?')
+  for (const id of ids) bind.run(runId, promptIndex, id)
+  return null
+}
+
+// Reads a turn's attachments from disk into adapter-ready base64 payloads.
+async function loadAttachments(runId: string, promptIndex: number): Promise<MessageAttachment[]> {
+  const rows = getDb().prepare(
+    'SELECT id, mime_type, name FROM attachments WHERE run_id = ? AND prompt_index = ? ORDER BY created_at'
+  ).all(runId, promptIndex) as { id: string; mime_type: string; name: string }[]
+
+  const out: MessageAttachment[] = []
+  for (const row of rows) {
+    try {
+      const buf = await readFile(uploadPath(row.id, row.mime_type))
+      out.push({ mimeType: row.mime_type, data: buf.toString('base64'), name: row.name })
+    } catch { /* file vanished from disk — skip rather than fail the whole call */ }
+  }
+  return out
+}
+
+async function deleteAttachmentsFrom(runId: string, promptIndex: number): Promise<void> {
+  const db = getDb()
+  const rows = db.prepare(
+    'SELECT id, mime_type FROM attachments WHERE run_id = ? AND prompt_index >= ?'
+  ).all(runId, promptIndex) as { id: string; mime_type: string }[]
+  for (const row of rows) {
+    await unlink(uploadPath(row.id, row.mime_type)).catch(() => {})
+  }
+  db.prepare('DELETE FROM attachments WHERE run_id = ? AND prompt_index >= ?').run(runId, promptIndex)
+}
+
 // Reconstructs one model's own conversation branch from prior turns —
 // failed turns (error IS NOT NULL) are skipped entirely rather than
 // injected as broken/empty assistant messages.
-function buildHistory(runId: string, model: string, prompts: string[]): Message[] {
+async function buildHistory(runId: string, model: string, prompts: string[]): Promise<Message[]> {
   const db = getDb()
   const rows = db.prepare(
     'SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index'
   ).all(runId, model) as ResultHistoryRow[]
 
-  return rows.flatMap(row => [
-    { role: 'user' as const, content: prompts[row.prompt_index] },
-    { role: 'assistant' as const, content: row.text },
-  ])
+  const history: Message[] = []
+  for (const row of rows) {
+    const attachments = await loadAttachments(runId, row.prompt_index)
+    history.push({
+      role: 'user',
+      content: prompts[row.prompt_index],
+      ...(attachments.length ? { attachments } : {}),
+    })
+    history.push({ role: 'assistant', content: row.text })
+  }
+  return history
 }
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models, pairs, runSettings } = req.body
+    const { prompts, models, pairs, runSettings, attachments } = req.body
     if (!pairs?.length && (!prompts?.length || !models?.length)) {
       return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
+    }
+    if (attachments?.length && (pairs?.length || (prompts?.length ?? 0) > 1)) {
+      return reply.code(400).send({ error: 'attachments are only supported with a single prompt' })
     }
 
     const runId = randomUUID()
@@ -175,6 +231,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       Object.keys(runSettings.perModel ?? {}).length > 0
     )
     const runSettingsJson = hasSettings ? JSON.stringify(runSettings) : null
+
+    if (attachments?.length) {
+      const bindError = bindAttachments(attachments, runId, 0)
+      if (bindError) return reply.code(400).send({ error: bindError })
+    }
 
     db.prepare(
       'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -191,10 +252,10 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     return reply.code(202).send({ data: { runId } })
   })
 
-  app.post<{ Params: { id: string }; Body: { prompt: string; runSettings?: RunSettings } }>(
+  app.post<{ Params: { id: string }; Body: { prompt: string; runSettings?: RunSettings; attachments?: string[] } }>(
     '/api/runs/:id/continue',
     async (req, reply) => {
-      const { prompt, runSettings } = req.body
+      const { prompt, runSettings, attachments } = req.body
       if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' })
 
       const db = getDb()
@@ -206,6 +267,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const newPromptIndex = prompts.length
       const updatedPrompts = [...prompts, prompt]
 
+      if (attachments?.length) {
+        const bindError = bindAttachments(attachments, req.params.id, newPromptIndex)
+        if (bindError) return reply.code(400).send({ error: bindError })
+      }
+
       const effectiveRunSettings = runSettings ?? (run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined)
       const runSettingsJson = effectiveRunSettings ? JSON.stringify(effectiveRunSettings) : run.run_settings
 
@@ -214,8 +280,8 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       ).run(JSON.stringify(updatedPrompts), models.length, runSettingsJson, req.params.id)
 
       const providers = await getProviders()
-      const tasks = models.map(model => {
-        const history = buildHistory(req.params.id, model, prompts)
+      const tasks = models.map(async model => {
+        const history = await buildHistory(req.params.id, model, prompts)
         return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history)
       })
 
@@ -227,10 +293,10 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
   // Edit a past user message — ChatGPT fork semantics: everything after the
   // edited turn is discarded and the turn re-runs with the new prompt.
-  app.post<{ Params: { id: string }; Body: { promptIndex: number; prompt: string } }>(
+  app.post<{ Params: { id: string }; Body: { promptIndex: number; prompt: string; attachments?: string[] } }>(
     '/api/runs/:id/edit-turn',
     async (req, reply) => {
-      const { promptIndex, prompt } = req.body
+      const { promptIndex, prompt, attachments } = req.body
       if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' })
 
       const db = getDb()
@@ -243,6 +309,22 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
         return reply.code(400).send({ error: `promptIndex out of range (0..${prompts.length - 1})` })
       }
 
+      // Discarded turns take their attachments (rows + files) with them; on
+      // the edited turn itself, only the re-sent ids survive.
+      await deleteAttachmentsFrom(req.params.id, promptIndex + 1)
+      const keep = new Set(attachments ?? [])
+      const ownRows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id = ? AND prompt_index = ?')
+        .all(req.params.id, promptIndex) as { id: string; mime_type: string }[]
+      for (const row of ownRows) {
+        if (keep.has(row.id)) continue
+        await unlink(uploadPath(row.id, row.mime_type)).catch(() => {})
+        db.prepare('DELETE FROM attachments WHERE id = ?').run(row.id)
+      }
+      if (attachments?.length) {
+        const bindError = bindAttachments(attachments, req.params.id, promptIndex)
+        if (bindError) return reply.code(400).send({ error: bindError })
+      }
+
       const updatedPrompts = [...prompts.slice(0, promptIndex), prompt]
       const dropped = db.prepare('SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?')
         .get(req.params.id, promptIndex) as { n: number }
@@ -253,8 +335,8 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
-      const tasks = models.map(model => {
-        const history = buildHistory(req.params.id, model, prompts)
+      const tasks = models.map(async model => {
+        const history = await buildHistory(req.params.id, model, prompts)
         return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history)
       })
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, Run, Result } from '../../src/types'
+import type { Provider, Run, Result, AttachmentMeta } from '../../src/types'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -37,10 +37,35 @@ export const providersApi = {
   fetchModels: (id: string) => apiFetch<string[]>(`/api/providers/${id}/models`),
 }
 
+// ─── uploads ─────────────────────────────────────────────────────────────────
+
+export const uploadsApi = {
+  // Dedicated fetch — FormData must NOT get a JSON Content-Type (the browser
+  // sets the multipart boundary itself).
+  upload: async (file: File): Promise<AttachmentMeta> => {
+    const form = new FormData()
+    form.append('file', file)
+    let res: Response
+    try {
+      res = await fetch('/api/uploads', { method: 'POST', body: form })
+    } catch {
+      throw new Error('Cannot reach the benchy server — is it still running?')
+    }
+    const json = (await res.json().catch(() => ({}))) as { data?: AttachmentMeta; error?: string }
+    if (!res.ok || json.error) throw new Error(json.error ?? `Upload failed (HTTP ${res.status})`)
+    return json.data as AttachmentMeta
+  },
+  url: (id: string) => `/api/uploads/${id}`,
+  // Removing a chip before send — only unbound uploads; fire-and-forget so the
+  // UI never blocks on cleanup. A bound attachment is refused by the server.
+  remove: (id: string) => fetch(`/api/uploads/${id}`, { method: 'DELETE' }),
+}
+
 // ─── runs ────────────────────────────────────────────────────────────────────
 
 export interface RunWithResults extends Run {
   results: Result[]
+  attachments?: (AttachmentMeta & { promptIndex: number })[]
 }
 
 export interface RunsQuery {
@@ -79,20 +104,21 @@ export interface BenchmarkRequest {
   models?: string[]
   pairs?: { prompt: string; model: string }[]
   runSettings?: import('../../src/types').RunSettings
+  attachments?: string[]
 }
 
 export const benchmarkApi = {
   start: (req: BenchmarkRequest) =>
     apiFetch<{ runId: string }>('/api/benchmark', { method: 'POST', body: JSON.stringify(req) }),
-  continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings) =>
+  continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings, attachments?: string[]) =>
     apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/continue`, {
       method: 'POST',
-      body: JSON.stringify({ prompt, runSettings }),
+      body: JSON.stringify({ prompt, runSettings, attachments }),
     }),
-  editTurn: (runId: string, promptIndex: number, prompt: string) =>
+  editTurn: (runId: string, promptIndex: number, prompt: string, attachments?: string[]) =>
     apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/edit-turn`, {
       method: 'POST',
-      body: JSON.stringify({ promptIndex, prompt }),
+      body: JSON.stringify({ promptIndex, prompt, attachments }),
     }),
 }
 

@@ -1,5 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { humanizeNetworkError } from '../errors.js';
+// Gemini takes both images and PDFs as inlineData parts.
+function toGeminiParts(msg) {
+    const parts = [{ text: msg.content }];
+    for (const a of msg.attachments ?? []) {
+        parts.push({ inlineData: { mimeType: a.mimeType, data: a.data } });
+    }
+    return parts;
+}
 export const googleAdapter = {
     async *stream(messages, config) {
         try {
@@ -14,7 +22,7 @@ export const googleAdapter = {
             // Build history (all but last message)
             const history = chatMessages.slice(0, -1).map(m => ({
                 role: m.role === 'user' ? 'user' : 'model',
-                parts: [{ text: m.content }],
+                parts: toGeminiParts(m),
             }));
             const lastMessage = chatMessages.at(-1);
             if (!lastMessage) {
@@ -31,7 +39,7 @@ export const googleAdapter = {
                 history,
                 ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
             });
-            const result = await chat.sendMessageStream(lastMessage.content);
+            const result = await chat.sendMessageStream(toGeminiParts(lastMessage));
             let inputTokens = 0;
             let outputTokens = 0;
             for await (const chunk of result.stream) {

@@ -102,6 +102,15 @@ function getTtfsMs(model) {
     }
     return 400;
 }
+// The openai adapter sends attachment messages as content-part arrays —
+// pull out the text and count the images so mocks can acknowledge them.
+function flattenContent(content) {
+    if (typeof content === 'string')
+        return { text: content, imageCount: 0 };
+    const text = content.filter((p) => p.type === 'text').map(p => p.text).join('\n');
+    const imageCount = content.filter(p => p.type === 'image_url').length;
+    return { text, imageCount };
+}
 export async function registerMockRoutes(app) {
     // OpenAI-compatible chat completions — streaming only
     app.post('/api/mock/chat/completions', async (req, reply) => {
@@ -109,8 +118,14 @@ export async function registerMockRoutes(app) {
         if (!stream) {
             return reply.code(400).send({ error: { message: 'mock adapter requires stream: true' } });
         }
-        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content;
-        const text = getResponse(model, lastUserMsg);
+        const lastUserContent = [...messages].reverse().find(m => m.role === 'user')?.content;
+        const { text: lastUserMsg, imageCount } = lastUserContent != null
+            ? flattenContent(lastUserContent)
+            : { text: undefined, imageCount: 0 };
+        const ack = imageCount > 0
+            ? `Вижу ${imageCount} ${imageCount === 1 ? 'вложение' : 'вложения'} — принял. `
+            : '';
+        const text = ack + getResponse(model, lastUserMsg);
         const words = text.split(' ');
         const ttfsDelay = getTtfsMs(model);
         const wordDelay = Math.max(20, Math.min(60, (3000 - ttfsDelay) / words.length));

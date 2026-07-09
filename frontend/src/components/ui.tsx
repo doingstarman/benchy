@@ -48,6 +48,9 @@ const UI_CSS = `
   .ui-pill.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .ui-pill .ui-pill-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
   .ui-pill.on .ui-pill-dot { background: var(--on-accent); }
+
+  .ui-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: ui-spin .6s linear infinite; }
+  @keyframes ui-spin { to { transform: rotate(360deg) } }
 `
 
 export function UiStyles() {

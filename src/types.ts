@@ -46,6 +46,13 @@ export interface Message {
   content: string
 }
 
+export interface AttachmentMeta {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+}
+
 export interface Metrics {
   ttfs: number | null
   totalTime: number | null
@@ -87,4 +94,7 @@ export interface BenchmarkRequest {
   models?: string[]
   pairs?: { prompt: string; model: string }[]
   runSettings?: RunSettings
+  // Upload ids attached to the (single) prompt — v1 supports attachments only
+  // in single-prompt mode, not pairs/batch
+  attachments?: string[]
 }

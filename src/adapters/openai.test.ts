@@ -1,5 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { openaiAdapter } from './openai.js'
+
+// Tests assign global.fetch directly; the suite runs singleFork, so without
+// this restore the mock leaks into whichever test file runs next.
+const realFetch = global.fetch
+afterAll(() => { global.fetch = realFetch })
 
 function makeSseStream(lines: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()

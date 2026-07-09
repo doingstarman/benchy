@@ -9,11 +9,18 @@ import { registerProvidersRoutes } from './api/providers.js'
 import { registerRunsRoutes } from './api/runs.js'
 import { registerBenchmarkRoutes } from './api/benchmark.js'
 import { registerMockRoutes } from './api/mock.js'
+import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+const UNBOUND_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
+
 export async function createServer(port: number, dbPath?: string) {
   await initDb(dbPath)
+
+  // Sweep uploads that were attached but never sent (chip removed / tab closed).
+  // Fire-and-forget — a cleanup failure must never block server startup.
+  void gcUnboundUploads(UNBOUND_UPLOAD_TTL_MS).catch(() => {})
 
   const app = Fastify({ logger: false })
 
@@ -21,6 +28,7 @@ export async function createServer(port: number, dbPath?: string) {
   await app.register(fastifyCors, { origin: true })
 
   // API routes
+  await registerUploadsRoutes(app)
   await registerProvidersRoutes(app)
   await registerRunsRoutes(app)
   await registerBenchmarkRoutes(app)

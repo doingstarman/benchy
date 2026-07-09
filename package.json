@@ -26,8 +26,9 @@
     "seed": "tsx src/seed.ts --config-dir ~/.benchy-dev --port 4243"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
+    "@anthropic-ai/sdk": "^0.110.0",
     "@fastify/cors": "^10.0.0",
+    "@fastify/multipart": "^10.1.0",
     "@fastify/static": "^8.0.0",
     "@google/generative-ai": "^0.21.0",
     "better-sqlite3": "^11.5.0",

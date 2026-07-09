@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS results (
 
 CREATE INDEX IF NOT EXISTS idx_results_run_id ON results(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
+  prompt_index INTEGER,
+  mime_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_run ON attachments(run_id, prompt_index);
 `
 
 let db: Database.Database | null = null

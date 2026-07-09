@@ -114,10 +114,21 @@ function getTtfsMs(model: string): number {
   return 400
 }
 
+type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
 interface ChatBody {
   model: string
-  messages: { role: string; content: string }[]
+  messages: { role: string; content: string | ContentPart[] }[]
   stream?: boolean
+}
+
+// The openai adapter sends attachment messages as content-part arrays —
+// pull out the text and count the images so mocks can acknowledge them.
+function flattenContent(content: string | ContentPart[]): { text: string; imageCount: number } {
+  if (typeof content === 'string') return { text: content, imageCount: 0 }
+  const text = content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text').map(p => p.text).join('\n')
+  const imageCount = content.filter(p => p.type === 'image_url').length
+  return { text, imageCount }
 }
 
 export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
@@ -131,8 +142,14 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: { message: 'mock adapter requires stream: true' } })
       }
 
-      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content
-      const text = getResponse(model, lastUserMsg)
+      const lastUserContent = [...messages].reverse().find(m => m.role === 'user')?.content
+      const { text: lastUserMsg, imageCount } = lastUserContent != null
+        ? flattenContent(lastUserContent)
+        : { text: undefined, imageCount: 0 }
+      const ack = imageCount > 0
+        ? `Вижу ${imageCount} ${imageCount === 1 ? 'вложение' : 'вложения'} — принял. `
+        : ''
+      const text = ack + getResponse(model, lastUserMsg)
       const words = text.split(' ')
       const ttfsDelay = getTtfsMs(model)
       const wordDelay = Math.max(20, Math.min(60, (3000 - ttfsDelay) / words.length))
