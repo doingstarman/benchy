@@ -6,8 +6,11 @@ import type { Provider, Run, Result } from '../../src/types'
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
+    // Content-Type only when there's a body — Fastify rejects an empty body
+    // that claims to be JSON with 400 FST_ERR_CTP_EMPTY_JSON_BODY (broke
+    // body-less POSTs like provider test and run fork).
     res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      headers: { ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
       ...init,
     })
   } catch {
