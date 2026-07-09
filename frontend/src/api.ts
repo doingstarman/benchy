@@ -105,6 +105,7 @@ export interface BenchmarkRequest {
   pairs?: { prompt: string; model: string }[]
   runSettings?: import('../../src/types').RunSettings
   attachments?: string[]
+  cloneAttachmentsFrom?: { runId: string; promptIndex: number }
 }
 
 export const benchmarkApi = {

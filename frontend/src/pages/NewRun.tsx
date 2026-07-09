@@ -1038,7 +1038,10 @@ export function NewRun() {
       results: new Map(t.results).set(modelKey, { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending' }),
     }))
     try {
-      const { runId: regenRunId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey] })
+      // Carry the turn's attachments onto the throwaway regenerate run so a
+      // vision cell re-runs with its image instead of a blank prompt.
+      const cloneAttachmentsFrom = runId && turn.attachments?.length ? { runId, promptIndex } : undefined
+      const { runId: regenRunId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey], cloneAttachmentsFrom })
       regenEsRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${regenRunId}`)
       regenEsRef.current = es
@@ -1066,7 +1069,16 @@ export function NewRun() {
         const { model, error: msg } = JSON.parse((e as MessageEvent).data) as { model: string; error: string }
         updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
       })
-      es.addEventListener('run_done', () => es.close())
+      // The regenerate run is a throwaway — its tokens are already remapped onto
+      // the visible turn. Reap it on clean completion (row + any cloned
+      // attachment files, via the delete cascade) so repeated regeneration
+      // doesn't leak runs and disk. Only on run_done: on a transient onerror the
+      // run may still be completing server-side, so deleting it then would drop
+      // in-flight results.
+      es.addEventListener('run_done', () => {
+        es.close()
+        void runsApi.remove(regenRunId).then(() => notifyRunsChanged()).catch(() => {})
+      })
       es.onerror = () => es.close()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate')

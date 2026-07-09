@@ -8,7 +8,7 @@ import { httpJsonAdapter } from '../adapters/http-json.js';
 import { scriptAdapter } from '../adapters/script.js';
 import { webhookAdapter } from '../adapters/webhook.js';
 import { readFile, unlink } from 'node:fs/promises';
-import { getAttachmentRow, uploadPath } from './uploads.js';
+import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js';
 export function getAdapter(type) {
     if (type === 'anthropic')
         return anthropicAdapter;
@@ -114,6 +114,9 @@ function finalizeRun(runId, tasks) {
 // don't exist or already belong to a different turn.
 function bindAttachments(ids, runId, promptIndex) {
     const db = getDb();
+    if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) {
+        return 'attachments must be an array of upload id strings';
+    }
     for (const id of ids) {
         const row = getAttachmentRow(id);
         if (!row)
@@ -128,7 +131,12 @@ function bindAttachments(ids, runId, promptIndex) {
     return null;
 }
 // Reads a turn's attachments from disk into adapter-ready base64 payloads.
-async function loadAttachments(runId, promptIndex) {
+// Strict by default: a bound attachment whose file is gone throws, so the
+// current call surfaces an honest per-cell error instead of silently answering
+// as if no file was attached (capability differences are the benchmark signal).
+// History reconstruction passes lenient — a vanished older file shouldn't sink
+// a fresh turn — but still warns rather than dropping in silence.
+async function loadAttachments(runId, promptIndex, lenient = false) {
     const rows = getDb().prepare('SELECT id, mime_type, name FROM attachments WHERE run_id = ? AND prompt_index = ? ORDER BY created_at').all(runId, promptIndex);
     const out = [];
     for (const row of rows) {
@@ -136,7 +144,11 @@ async function loadAttachments(runId, promptIndex) {
             const buf = await readFile(uploadPath(row.id, row.mime_type));
             out.push({ mimeType: row.mime_type, data: buf.toString('base64'), name: row.name });
         }
-        catch { /* file vanished from disk — skip rather than fail the whole call */ }
+        catch {
+            if (!lenient)
+                throw new Error(`Attachment "${row.name}" is missing on disk — re-upload it`);
+            console.warn(`benchy: history attachment "${row.name}" (${row.id}) missing on disk, skipping`);
+        }
     }
     return out;
 }
@@ -156,7 +168,7 @@ async function buildHistory(runId, model, prompts) {
     const rows = db.prepare('SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index').all(runId, model);
     const history = [];
     for (const row of rows) {
-        const attachments = await loadAttachments(runId, row.prompt_index);
+        const attachments = await loadAttachments(runId, row.prompt_index, true);
         history.push({
             role: 'user',
             content: prompts[row.prompt_index],
@@ -168,12 +180,22 @@ async function buildHistory(runId, model, prompts) {
 }
 export async function registerBenchmarkRoutes(app) {
     app.post('/api/benchmark', async (req, reply) => {
-        const { prompts, models, pairs, runSettings, attachments } = req.body;
+        const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom } = req.body;
         if (!pairs?.length && (!prompts?.length || !models?.length)) {
             return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' });
         }
-        if (attachments?.length && (pairs?.length || (prompts?.length ?? 0) > 1)) {
+        if ((attachments?.length || cloneAttachmentsFrom) && (pairs?.length || (prompts?.length ?? 0) > 1)) {
             return reply.code(400).send({ error: 'attachments are only supported with a single prompt' });
+        }
+        if (cloneAttachmentsFrom && attachments?.length) {
+            return reply.code(400).send({ error: 'cannot combine attachments with cloneAttachmentsFrom' });
+        }
+        // Validate the clone source shape at the boundary: a non-primitive runId or
+        // promptIndex would otherwise throw inside better-sqlite3 AFTER the run row
+        // is inserted, stranding a zombie run stuck in 'running'.
+        if (cloneAttachmentsFrom &&
+            (typeof cloneAttachmentsFrom.runId !== 'string' || !Number.isInteger(cloneAttachmentsFrom.promptIndex))) {
+            return reply.code(400).send({ error: 'cloneAttachmentsFrom needs a string runId and an integer promptIndex' });
         }
         const runId = randomUUID();
         const totalCalls = pairs ? pairs.length : prompts.length * models.length;
@@ -189,6 +211,11 @@ export async function registerBenchmarkRoutes(app) {
                 return reply.code(400).send({ error: bindError });
         }
         db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson);
+        // Regenerate copies the source turn's attachments onto this run so the
+        // re-run sees the same media. Done after the INSERT (rows FK-reference it).
+        if (cloneAttachmentsFrom) {
+            await cloneAttachmentsForTurn(cloneAttachmentsFrom.runId, cloneAttachmentsFrom.promptIndex, runId, 0);
+        }
         // Fire and forget — SSE stream delivers results
         const providers = await getProviders();
         const tasks = pairs

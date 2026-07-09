@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../server.js'
 import { closeDb, getDb } from '../db/index.js'
-import { gcUnboundUploads, uploadPath } from '../api/uploads.js'
+import { gcUnboundUploads, uploadPath, getUploadsDir } from '../api/uploads.js'
 import type { FastifyInstance } from 'fastify'
 
 let server: FastifyInstance
@@ -63,10 +63,45 @@ describe('Uploads API', () => {
     expect(error).toContain('application/pdf')
   })
 
-  it('rejects files over the 10 MB limit with 413', async () => {
-    const big = Buffer.alloc(10 * 1024 * 1024 + 1, 7)
+  it('rejects a file whose bytes do not match its declared image type', async () => {
+    // Allowlisted mime, but the content is plain text — the magic-byte sniff
+    // must catch it (a valid Content-Type is client-controlled).
+    const res = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(Buffer.from('not a real png'), 'fake.png', 'image/png') })
+    expect(res.status).toBe(400)
+    const { error } = await res.json() as { error: string }
+    expect(error).toContain("doesn't match")
+  })
+
+  it('rejects files over the 10 MB limit with 413 and persists nothing', async () => {
+    const uploadsDir = getUploadsDir()
+    const before = existsSync(uploadsDir) ? readdirSync(uploadsDir).length : 0
+    // Valid PNG signature so a silent truncation would still pass the sniff —
+    // the size guard (throw OR truncated flag) must be what rejects it.
+    const big = Buffer.concat([PNG_BYTES, Buffer.alloc(10 * 1024 * 1024 + 1, 7)])
     const res = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(big, 'big.png', 'image/png') })
     expect(res.status).toBe(413)
+    const after = existsSync(uploadsDir) ? readdirSync(uploadsDir).length : 0
+    expect(after).toBe(before)
+  })
+
+  it('accepts valid PDF and GIF signatures, including a PDF header near the 1 KB scan boundary', async () => {
+    const pdf = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n'), 'doc.pdf', 'application/pdf') })
+    expect(pdf.status).toBe(201)
+
+    // Marker straddling the old 1024-byte cutoff (offset 1020) must still pass.
+    const straddling = Buffer.concat([Buffer.alloc(1020, 0x20), Buffer.from('%PDF-1.7\n')])
+    const pdf2 = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(straddling, 'late.pdf', 'application/pdf') })
+    expect(pdf2.status).toBe(201)
+
+    const gif = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(Buffer.from('GIF89a\x01\x00\x01\x00'), 'a.gif', 'image/gif') })
+    expect(gif.status).toBe(201)
+  })
+
+  it('rejects a truncated container magic (4-byte "GIF8" without the full header)', async () => {
+    const res = await fetch(`${base}/api/uploads`, { method: 'POST', body: makeForm(Buffer.from([0x47, 0x49, 0x46, 0x38, 1, 2, 3]), 'trunc.gif', 'image/gif') })
+    expect(res.status).toBe(400)
+    const { error } = await res.json() as { error: string }
+    expect(error).toContain("doesn't match")
   })
 
   it('404s on unknown attachment id', async () => {

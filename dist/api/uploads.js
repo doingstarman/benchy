@@ -11,6 +11,27 @@ export const ALLOWED_MIME_TYPES = {
     'application/pdf': '.pdf',
 };
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+// The declared Content-Type is client-controlled, so also sniff the leading
+// bytes: a valid mime on a garbage/renamed file would otherwise be shipped to
+// providers. Images must carry their signature at offset 0; a PDF header may
+// sit behind a small amount of leading junk that real readers tolerate.
+export function contentMatchesMime(mimeType, buf) {
+    const startsWith = (...sig) => sig.length <= buf.length && sig.every((b, i) => buf[i] === b);
+    switch (mimeType) {
+        case 'image/png': return startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+        case 'image/jpeg': return startsWith(0xff, 0xd8, 0xff);
+        case 'image/gif': // full "GIF87a" / "GIF89a" header, not just "GIF8"
+            return startsWith(0x47, 0x49, 0x46, 0x38, 0x37, 0x61) || startsWith(0x47, 0x49, 0x46, 0x38, 0x39, 0x61);
+        case 'image/webp': // "RIFF"...."WEBP"
+            return buf.length >= 12 &&
+                startsWith(0x52, 0x49, 0x46, 0x46) &&
+                buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+        // Scan the first ~1 KB; the 1029 window (1024 + the 5-byte marker) keeps a
+        // header that straddles the 1024-byte boundary from being falsely rejected.
+        case 'application/pdf': return buf.subarray(0, 1029).includes(Buffer.from('%PDF-'));
+        default: return false;
+    }
+}
 export function getUploadsDir() {
     return join(getBenchyDir(), 'uploads');
 }
@@ -44,6 +65,19 @@ export async function cloneAttachmentsForRun(sourceRunId, targetRunId) {
         const newId = randomUUID();
         await copyFile(uploadPath(row.id, row.mime_type), uploadPath(newId, row.mime_type)).catch(() => { });
         insert.run(newId, targetRunId, row.prompt_index, row.mime_type, row.name, row.size, Date.now());
+    }
+}
+// Copies one turn's attachments onto a target turn (independent files). Used by
+// regenerate, which re-runs a single cell on a throwaway run — without this the
+// re-run loses the turn's image and answers as if nothing was attached.
+export async function cloneAttachmentsForTurn(sourceRunId, sourcePromptIndex, targetRunId, targetPromptIndex) {
+    const db = getDb();
+    const rows = db.prepare('SELECT id, mime_type, name, size FROM attachments WHERE run_id = ? AND prompt_index = ? ORDER BY created_at').all(sourceRunId, sourcePromptIndex);
+    const insert = db.prepare('INSERT INTO attachments (id, run_id, prompt_index, mime_type, name, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+        const newId = randomUUID();
+        await copyFile(uploadPath(row.id, row.mime_type), uploadPath(newId, row.mime_type)).catch(() => { });
+        insert.run(newId, targetRunId, targetPromptIndex, row.mime_type, row.name, row.size, Date.now());
     }
 }
 // Sweeps abandoned uploads: rows never bound to a run (user attached then
@@ -83,6 +117,17 @@ export async function registerUploadsRoutes(app) {
             // @fastify/multipart throws when the stream exceeds the fileSize limit
             return reply.code(413).send({ error: `File is too large — the limit is ${MAX_FILE_SIZE / 1024 / 1024} MB` });
         }
+        // toBuffer() doesn't always throw at the limit — @fastify/multipart can
+        // silently truncate the stream and set `truncated`. Reject those too (before
+        // writing) so a corrupted 10 MB file never gets persisted and served.
+        if (file.file.truncated) {
+            return reply.code(413).send({ error: `File is too large — the limit is ${MAX_FILE_SIZE / 1024 / 1024} MB` });
+        }
+        if (!contentMatchesMime(mimeType, buf)) {
+            return reply.code(400).send({
+                error: `File content doesn't match its declared type "${mimeType}" — the bytes aren't a valid ${mimeType}`,
+            });
+        }
         const id = randomUUID();
         await mkdir(getUploadsDir(), { recursive: true });
         await writeFile(uploadPath(id, mimeType), buf);
@@ -103,6 +148,7 @@ export async function registerUploadsRoutes(app) {
         }
         reply.header('Content-Type', row.mime_type);
         reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(row.name)}"`);
+        reply.header('X-Content-Type-Options', 'nosniff');
         return reply.send(createReadStream(path));
     });
     // Only unbound uploads can be deleted this way — removing a chip before send.

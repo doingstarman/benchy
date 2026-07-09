@@ -97,4 +97,7 @@ export interface BenchmarkRequest {
   // Upload ids attached to the (single) prompt — v1 supports attachments only
   // in single-prompt mode, not pairs/batch
   attachments?: string[]
+  // Regenerate: re-run a cell on a throwaway run that copies another turn's
+  // attachments (single-prompt only), so a vision re-run keeps its image.
+  cloneAttachmentsFrom?: { runId: string; promptIndex: number }
 }

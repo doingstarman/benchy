@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../server.js'
@@ -7,6 +8,9 @@ import { closeDb, getDb } from '../db/index.js'
 import { uploadPath } from '../api/uploads.js'
 import type { FastifyInstance } from 'fastify'
 import type { Run } from '../types.js'
+
+// The upload endpoint sniffs magic bytes — fixtures need a real PNG signature.
+const pngBytes = (...tail: number[]): Buffer => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...tail])
 
 // Only the external HTTP calls to providers are mocked — everything else is real
 // slowMode adds a delay so SSE clients can connect before run_done fires
@@ -304,7 +308,7 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     const model = `${providers.data[0].id}:gpt-4o-mini`
 
     // Upload a small "PNG"
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9])
+    const bytes = pngBytes(9, 9, 9)
     const form = new FormData()
     form.append('file', new Blob([bytes], { type: 'image/png' }), 'screen.png')
     const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
@@ -355,7 +359,7 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`
 
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+    const bytes = pngBytes(1, 2, 3)
     const form = new FormData()
     form.append('file', new Blob([bytes], { type: 'image/png' }), 'del.png')
     const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
@@ -384,7 +388,7 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`
 
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 4, 5, 6])
+    const bytes = pngBytes(4, 5, 6)
     const form = new FormData()
     form.append('file', new Blob([bytes], { type: 'image/png' }), 'fork.png')
     const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
@@ -424,7 +428,7 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
 
     // Unbound → 204 and gone from disk
     const f1 = new FormData()
-    f1.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 7])], { type: 'image/png' }), 'chip.png')
+    f1.append('file', new Blob([pngBytes(7)], { type: 'image/png' }), 'chip.png')
     const up1 = await fetch(`${base}/api/uploads`, { method: 'POST', body: f1 })
     const { data: unbound } = await up1.json() as { data: { id: string } }
     const p1 = uploadPath(unbound.id, 'image/png')
@@ -435,7 +439,7 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
 
     // Bound to a run → refused (409), file untouched
     const f2 = new FormData()
-    f2.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 8])], { type: 'image/png' }), 'bound.png')
+    f2.append('file', new Blob([pngBytes(8)], { type: 'image/png' }), 'bound.png')
     const up2 = await fetch(`${base}/api/uploads`, { method: 'POST', body: f2 })
     const { data: bound } = await up2.json() as { data: { id: string } }
     const startRes = await fetch(`${base}/api/benchmark`, {
@@ -447,6 +451,111 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     const refused = await fetch(`${base}/api/uploads/${bound.id}`, { method: 'DELETE' })
     expect(refused.status).toBe(409)
     expect(existsSync(uploadPath(bound.id, 'image/png'))).toBe(true)
+  })
+
+  it('surfaces an honest per-cell error when a bound attachment file is gone', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const form = new FormData()
+    form.append('file', new Blob([pngBytes(3, 3, 3)], { type: 'image/png' }), 'gone.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['see this?'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // Corrupt storage: delete the file but keep the DB row bound to turn 0.
+    await unlink(uploadPath(att.id, 'image/png'))
+
+    // Re-run turn 0 (re-sending the id keeps it bound) — the vanished file must
+    // become a per-cell error, not a silent answer as if nothing was attached.
+    await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'see this now?', attachments: [att.id] }),
+    })
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { results: Array<{ promptIndex: number; error: string | null }> }
+    }
+    const cell = run.data.results.find(r => r.promptIndex === 0)
+    expect(cell?.error).toMatch(/missing on disk/)
+  })
+
+  it('regenerate clones the turn attachments so the re-run keeps the image', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const form = new FormData()
+    form.append('file', new Blob([pngBytes(2, 2, 2)], { type: 'image/png' }), 'regen.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['orig prompt'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // Regenerate = throwaway run that clones turn 0's attachments onto itself.
+    capturedMessages = []
+    const regen = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['orig prompt'], models: [model], cloneAttachmentsFrom: { runId: data.runId, promptIndex: 0 } }),
+    })
+    const { data: regenData } = await regen.json() as { data: { runId: string } }
+    await waitForRun(regenData.runId)
+
+    const msg = capturedMessages[0][0] as { attachments?: Array<{ name: string }> }
+    expect(msg.attachments).toHaveLength(1)
+    expect(msg.attachments![0].name).toBe('regen.png')
+
+    // The copy is an independent new row bound to the regen run at turn 0.
+    const regenRun = await fetch(`${base}/api/runs/${regenData.runId}`).then(r => r.json()) as {
+      data: { attachments: Array<{ id: string; promptIndex: number }> }
+    }
+    expect(regenRun.data.attachments).toHaveLength(1)
+    expect(regenRun.data.attachments[0].id).not.toBe(att.id)
+    expect(regenRun.data.attachments[0].promptIndex).toBe(0)
+
+    // Reap: the frontend DELETEs the throwaway run on run_done — that must take
+    // the cloned file with it (no per-regenerate disk leak).
+    const copyId = regenRun.data.attachments[0].id
+    expect(existsSync(uploadPath(copyId, 'image/png'))).toBe(true)
+    await fetch(`${base}/api/runs/${regenData.runId}`, { method: 'DELETE' })
+    expect(existsSync(uploadPath(copyId, 'image/png'))).toBe(false)
+    // The original run's attachment is untouched by reaping the regen copy.
+    expect(existsSync(uploadPath(att.id, 'image/png'))).toBe(true)
+  })
+
+  it('rejects a malformed cloneAttachmentsFrom at the boundary without stranding a zombie run', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+    const db = getDb()
+    const runsBefore = (db.prepare('SELECT COUNT(*) AS n FROM runs').get() as { n: number }).n
+
+    // Non-integer promptIndex would throw inside better-sqlite3 after the INSERT.
+    const bad = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['x'], models: [model], cloneAttachmentsFrom: { runId: 'nope', promptIndex: { evil: 1 } } }),
+    })
+    expect(bad.status).toBe(400)
+    // No run row created, so nothing is stuck in 'running'.
+    const runsAfter = (db.prepare('SELECT COUNT(*) AS n FROM runs').get() as { n: number }).n
+    expect(runsAfter).toBe(runsBefore)
+
+    // Belt-and-suspenders: attachments + cloneAttachmentsFrom together is rejected.
+    const combo = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['x'], models: [model], attachments: ['a'], cloneAttachmentsFrom: { runId: 'r', promptIndex: 0 } }),
+    })
+    expect(combo.status).toBe(400)
   })
 
   it('rejects attachments with multiple prompts or unknown ids', async () => {
