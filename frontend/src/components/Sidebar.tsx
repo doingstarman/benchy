@@ -93,6 +93,7 @@ function Icon({ children }: { children: React.ReactNode }) {
 const ICONS: Record<string, React.ReactNode> = {
   test: <Icon><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor" stroke="none" /></Icon>,
   dashboard: <Icon><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></Icon>,
+  results: <Icon><path d="M2 13.5h12" /><rect x="3" y="8" width="2.6" height="5.5" rx="0.5" /><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5" /><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5" /></Icon>,
   history: <Icon><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 2" /></Icon>,
   models: <Icon><path d="M8 2l6 3-6 3-6-3 6-3z" /><path d="M2 8l6 3 6-3" /><path d="M2 11l6 3 6-3" /></Icon>,
   providers: <Icon><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 01-4 4 4 4 0 01-4-4V6z" /><path d="M8 13v2" /></Icon>,
@@ -254,6 +255,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
       <Divider />
 
       <DisabledItem label="Дашборд" icon="dashboard" collapsed={collapsed} soon />
+      <DisabledItem label="Результаты" icon="results" collapsed={collapsed} soon />
 
       <Divider />
 
