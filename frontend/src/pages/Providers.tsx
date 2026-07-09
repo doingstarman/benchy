@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { providersApi } from '../api'
 import { ProviderTile } from '../components/ProviderTile'
+import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
 import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
 
@@ -338,19 +339,9 @@ function TestSection({ models, testModelId, testing, result, onModelChange, onTe
           {models.map(m => <option key={m} value={m}>{m}</option>)}
           {models.length === 0 && <option value="">— select a model —</option>}
         </select>
-        <button
-          onClick={onTest}
-          disabled={disabled}
-          style={{
-            padding: '6px 14px', border: 'none', borderRadius: 'var(--radius-sm)',
-            background: disabled ? 'var(--accent-bg)' : 'var(--accent)',
-            color: disabled ? 'var(--text-muted)' : '#fff',
-            fontSize: 12, fontFamily: 'var(--font-mono)', cursor: disabled ? 'default' : 'pointer',
-            whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}
-        >
+        <Button variant="primary" small onClick={onTest} disabled={disabled} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
           {testing ? <><span className="prov-spinner" />Testing…</> : 'Test connection'}
-        </button>
+        </Button>
       </div>
       {result && (
         <div style={{
@@ -469,24 +460,12 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
                 onChange={v => onChange({ retries: v })} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={inlineLabel}>Streaming</span>
-                <button
-                  onClick={() => onChange({ streaming: !d.streaming })}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    background: d.streaming ? 'var(--accent)' : 'var(--bg-base)',
-                    border: '0.5px solid var(--border)', borderRadius: 20,
-                    padding: '4px 10px', cursor: 'pointer',
-                    fontSize: 12, fontFamily: 'var(--font-mono)',
-                    color: d.streaming ? '#fff' : 'var(--text-muted)',
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  <span style={{
-                    width: 10, height: 10, borderRadius: '50%',
-                    background: d.streaming ? '#fff' : 'var(--text-muted)',
-                  }} />
-                  {d.streaming ? 'On' : 'Off'}
-                </button>
+                <PillToggle
+                  on={!!d.streaming}
+                  onToggle={() => onChange({ streaming: !d.streaming })}
+                  labelOn="On"
+                  labelOff="Off"
+                />
               </div>
             </div>
           </div>
@@ -505,19 +484,10 @@ interface ModalFooterProps {
 function ModalFooter({ onCancel, onSave, saving }: ModalFooterProps) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <button
-        onClick={onCancel}
-        style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '7px 16px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}
-      >
-        Cancel
-      </button>
-      <button
-        onClick={onSave}
-        disabled={saving}
-        style={{ background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '7px 18px', fontSize: 12, color: '#fff', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1 }}
-      >
+      <Button onClick={onCancel}>Cancel</Button>
+      <Button variant="primary" onClick={onSave} disabled={saving}>
         {saving ? 'Saving…' : 'Save provider'}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -531,12 +501,9 @@ function DangerZone({ onDisconnect }: DangerZoneProps) {
         <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--error)', marginBottom: 3 }}>Danger zone</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Disconnecting will remove this provider and stop any in-flight requests.</div>
       </div>
-      <button
-        onClick={onDisconnect}
-        style={{ flexShrink: 0, background: 'none', border: '0.5px solid var(--error)', borderRadius: 'var(--radius-sm)', padding: '7px 14px', fontSize: 12, color: 'var(--error)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-      >
+      <Button variant="danger" small onClick={onDisconnect} style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
         Disconnect provider
-      </button>
+      </Button>
     </div>
   )
 }
@@ -825,7 +792,7 @@ export function Providers() {
       {modal && (
         <div
           onClick={e => { if (e.target === e.currentTarget) setModal(null) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}
         >
           <div style={{
             background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',

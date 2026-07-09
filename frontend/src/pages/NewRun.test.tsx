@@ -102,7 +102,7 @@ describe('Promptbox — run button state', () => {
   it('run button is disabled when prompt is empty', async () => {
     renderNewRun()
     await waitForProviders()
-    const btn = screen.getByRole('button', { name: /▶ run/i })
+    const btn = screen.getByRole('button', { name: /^run$/i })
     expect(btn).toBeDisabled()
   })
 
@@ -113,7 +113,7 @@ describe('Promptbox — run button state', () => {
 
     await user.type(textarea, 'test prompt')
 
-    const btn = screen.getByRole('button', { name: /▶ run/i })
+    const btn = screen.getByRole('button', { name: /^run$/i })
     expect(btn).not.toBeDisabled()
   })
 
@@ -124,7 +124,7 @@ describe('Promptbox — run button state', () => {
 
     await user.type(textarea, '   ')
 
-    const btn = screen.getByRole('button', { name: /▶ run/i })
+    const btn = screen.getByRole('button', { name: /^run$/i })
     expect(btn).toBeDisabled()
   })
 })
@@ -139,7 +139,7 @@ describe('Promptbox — run trigger', () => {
     const textarea = await waitForProviders()
 
     await user.type(textarea, 'explain transformers')
-    await user.click(screen.getByRole('button', { name: /▶ run/i }))
+    await user.click(screen.getByRole('button', { name: /^run$/i }))
 
     expect(benchmarkApi.start).toHaveBeenCalledOnce()
     expect(benchmarkApi.start).toHaveBeenCalledWith(
@@ -212,7 +212,7 @@ describe('Promptbox — mode switching', () => {
     await user.click(screen.getByText('+ add prompt'))
     await user.type(screen.getByPlaceholderText('Prompt 1…'), 'first')
     await user.type(screen.getByPlaceholderText('Prompt 2…'), 'second')
-    await user.click(screen.getByRole('button', { name: /▶ run/i }))
+    await user.click(screen.getByRole('button', { name: /^run$/i }))
 
     expect(benchmarkApi.start).toHaveBeenCalledWith(
       expect.objectContaining({ prompts: ['first', 'second'] })
@@ -272,7 +272,7 @@ describe('Session persistence across navigation', () => {
     const textarea = await waitForProviders()
 
     await user.type(textarea, 'explain transformers')
-    await user.click(screen.getByRole('button', { name: /▶ run/i }))
+    await user.click(screen.getByRole('button', { name: /^run$/i }))
 
     // Run started — screen should have left the idle "Ask anything…" view
     expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()

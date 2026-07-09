@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { runsApi } from '../api'
 import { RUNS_CHANGED_EVENT } from './NewRun'
+import { Button, Input } from '../components/ui'
+import { IconPencil } from '../components/icons'
 import type { Run } from '../../../src/types'
 
 export function History() {
@@ -70,29 +72,19 @@ export function History() {
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>History</h1>
-        <button
-          onClick={() => navigate('/run')}
-          style={{
-            background: 'var(--accent)', color: '#fff', border: 'none',
-            borderRadius: 'var(--radius-sm)', padding: '6px 14px', fontSize: 12, cursor: 'pointer',
-          }}
-        >
+        <Button variant="primary" small onClick={() => navigate('/run')}>
           + new run
-        </button>
+        </Button>
       </div>
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input
+        <Input
           type="text"
           placeholder="Search prompts…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{
-            flex: 1, background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
-            borderRadius: 'var(--radius-sm)', padding: '7px 10px',
-            color: 'var(--text-primary)', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: 12,
-          }}
+          style={{ flex: 1, width: 'auto', background: 'var(--bg-elevated)' }}
         />
         <select
           value={dateFilter}
@@ -195,11 +187,11 @@ export function History() {
                           title="Rename"
                           style={{
                             background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                            color: 'var(--text-muted)', fontSize: 11, lineHeight: 1, flexShrink: 0,
+                            color: 'var(--text-muted)', lineHeight: 1, flexShrink: 0, display: 'inline-flex',
                             opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s',
                           }}
                         >
-                          ✎
+                          <IconPencil size={12} />
                         </button>
                       </span>
                     )}
@@ -255,26 +247,8 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 6, opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s' }}>
-                      <button
-                        onClick={e => handleFork(e, run.id)}
-                        style={{
-                          background: 'none', border: '0.5px solid var(--border)',
-                          borderRadius: 'var(--radius-sm)', padding: '3px 8px',
-                          fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer',
-                        }}
-                      >
-                        fork
-                      </button>
-                      <button
-                        onClick={e => handleDelete(e, run.id)}
-                        style={{
-                          background: 'none', border: '0.5px solid var(--border)',
-                          borderRadius: 'var(--radius-sm)', padding: '3px 8px',
-                          fontSize: 11, color: 'var(--error)', cursor: 'pointer',
-                        }}
-                      >
-                        delete
-                      </button>
+                      <Button small onClick={e => handleFork(e, run.id)}>fork</Button>
+                      <Button variant="danger" small onClick={e => handleDelete(e, run.id)}>delete</Button>
                     </div>
                   </td>
                 </tr>

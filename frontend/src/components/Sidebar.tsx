@@ -101,7 +101,7 @@ const ICONS: Record<string, React.ReactNode> = {
 }
 
 function Divider() {
-  return <div style={{ height: '0.5px', background: 'var(--border)', margin: '6px 14px' }} />
+  return <div style={{ height: 1, background: 'var(--hairline)', margin: '6px 10px' }} />
 }
 
 function Item({ to, label, icon, collapsed, soon }: { to: string; label: string; icon: string; collapsed: boolean; soon?: boolean }) {

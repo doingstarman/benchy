@@ -4,6 +4,11 @@ import { providersApi, benchmarkApi, runsApi } from '../api'
 import { extractHtmlArtifact } from '../lib/artifact'
 import { ArtifactPreview } from '../components/ArtifactPreview'
 import { SliderField } from '../components/SliderField'
+import { Button, IconButton } from '../components/ui'
+import {
+  IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
+  IconPlay, IconStop, IconEye, IconText, IconPaperclip,
+} from '../components/icons'
 import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
@@ -56,8 +61,6 @@ const ANIM_CSS = `
   .col-body::-webkit-scrollbar-track { background: transparent }
   .col-body::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 2px }
   .nr-ta::placeholder { color: var(--text-muted); }
-  .nr-head-btn { background: none; border: 0.5px solid var(--border); border-radius: 5px; padding: 3px 7px; color: var(--text-secondary); font-size: 13px; cursor: pointer; line-height: 1; }
-  .nr-head-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
   .settings-tab { background: none; border: 0.5px solid transparent; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-family: var(--font-mono); cursor: pointer; color: var(--text-muted); white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   .settings-tab:hover { color: var(--text-secondary); border-color: var(--border); }
   .settings-tab.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-dim); }
@@ -471,7 +474,7 @@ export function Promptbox({
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 8 }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}>📎</span>
+        <span style={{ color: 'var(--text-muted)', display: 'flex' }} title="Attachments (soon)"><IconPaperclip size={15} /></span>
         <button
           onClick={() => setSettingsOpen(v => !v)}
           title="Run settings"
@@ -506,27 +509,16 @@ export function Promptbox({
             title="Stop run"
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 32, height: 32, border: 'none', borderRadius: 7,
-              background: 'var(--accent)', cursor: 'pointer', flexShrink: 0,
+              width: 36, height: 36, border: 'none', borderRadius: 7,
+              background: 'var(--accent)', color: 'var(--on-accent)', cursor: 'pointer', flexShrink: 0,
             }}
           >
-            <span style={{ width: 10, height: 10, background: '#fff', borderRadius: 2 }} />
+            <IconStop size={12} />
           </button>
         ) : (
-          <button
-            onClick={onRun}
-            disabled={disabled}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 16px', border: 'none', borderRadius: 7,
-              background: disabled ? 'var(--accent-bg)' : 'var(--accent)',
-              color: disabled ? 'var(--text-muted)' : '#fff',
-              fontSize: 13, fontFamily: 'var(--font-mono)',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-            }}
-          >
-            ▶ run
-          </button>
+          <Button variant="primary" onClick={onRun} disabled={disabled}>
+            <IconPlay size={11} /> run
+          </Button>
         )}
       </div>
       </div>
@@ -970,42 +962,48 @@ export function NewRun() {
     return (
       <div style={{
         display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: '1 1 auto', minHeight: 0,
-        background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 10,
+        background: 'var(--bg-elevated)', borderRadius: 10,
+        border: `0.5px solid ${isFastest ? 'var(--accent-dim)' : 'var(--border)'}`,
       }}>
         <div style={{
           height: 36, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px',
           borderBottom: '0.5px solid var(--border)', background: 'var(--bg-base)', flexShrink: 0,
         }}>
           <span className={isStreaming ? 'bp' : undefined} style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: dotBg }} />
-          <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-bright)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {label}
+          <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-bright)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+            {isFastest && (
+              <span style={{
+                flexShrink: 0, fontSize: 'var(--fs-xs)', fontFamily: 'var(--font-mono)',
+                color: 'var(--accent)', background: 'var(--accent-bg)',
+                border: '0.5px solid var(--accent-dim)', borderRadius: 8, padding: '1px 6px',
+              }}>
+                ⚡ fastest
+              </span>
+            )}
           </span>
-          <button onClick={() => handleRegenerate(turn.promptIndex, key)} title="Regenerate" className="nr-head-btn">↺</button>
-          <button onClick={() => handleCopy(cellKey, r.text)} title="Copy" className="nr-head-btn">{copiedCol === cellKey ? '✓' : '⧉'}</button>
+          <IconButton onClick={() => handleRegenerate(turn.promptIndex, key)} title="Regenerate"><IconRefresh /></IconButton>
+          <IconButton onClick={() => handleCopy(cellKey, r.text)} title="Copy">
+            {copiedCol === cellKey ? <IconCheck /> : <IconCopy />}
+          </IconButton>
           {artifactHtml && (
-            <button
+            <IconButton
               onClick={() => togglePreviewCell(cellKey)}
               title={showPreview ? 'Show text' : 'Show preview'}
-              className="nr-head-btn"
-              style={showPreview ? { background: 'var(--accent-bg)', borderColor: 'var(--accent-dim)', color: 'var(--accent)' } : undefined}
+              active={showPreview}
             >
-              {showPreview ? '📝' : '🖼'}
-            </button>
+              {showPreview ? <IconText /> : <IconEye />}
+            </IconButton>
           )}
           {showPreview && (
-            <button onClick={() => handleRestartPreview(cellKey)} title="Restart preview" className="nr-head-btn">▶</button>
+            <IconButton onClick={() => handleRestartPreview(cellKey)} title="Restart preview"><IconPlay /></IconButton>
           )}
           {isExpanded ? (
-            <button onClick={() => setExpandedCol(null)} title="Collapse" className="nr-head-btn">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                <path d="M14 2L9.5 6.5M9.5 6.5V3.5M9.5 6.5h3" />
-                <path d="M2 14l4.5-4.5M6.5 9.5v3M6.5 9.5h-3" />
-              </svg>
-            </button>
+            <IconButton onClick={() => setExpandedCol(null)} title="Collapse"><IconCollapse /></IconButton>
           ) : (
             <>
-              <button onClick={() => setExpandedCol(cellKey)} title="Expand" className="nr-head-btn">⤢</button>
-              <button onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close" className="nr-head-btn">✕</button>
+              <IconButton onClick={() => setExpandedCol(cellKey)} title="Expand"><IconExpand /></IconButton>
+              <IconButton onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close"><IconClose /></IconButton>
             </>
           )}
         </div>
@@ -1132,8 +1130,9 @@ export function NewRun() {
       })()}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {turns.map(turn => (
+        {turns.map((turn, ti) => (
           <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+            {ti > 0 && <div style={{ height: 1, background: 'var(--hairline)', margin: '4px 24px' }} />}
             {turn.showPromptBubble && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <div style={{

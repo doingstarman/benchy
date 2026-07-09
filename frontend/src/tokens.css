@@ -3,15 +3,18 @@
   --bg-base:        #0a0a0b;
   --bg-elevated:    #111113;
   --border:         #1e1e22;
-  --border-hover:   #2a2a30;
-  --text-muted:     #555;
-  --text-secondary: #888;
-  --text-primary:   #c8c8c8;
-  --text-bright:    #e8e8e8;
+  --border-hover:   #2e2e36;
+
+  /* Text — contrast bumped so labels stay readable on both bg-base and bg-elevated */
+  --text-muted:     #71717c;
+  --text-secondary: #9b9ba6;
+  --text-primary:   #d6d6de;
+  --text-bright:    #f2f2f6;
 
   --accent:         #7F77DD;
-  --accent-dim:     #3a3470;
+  --accent-dim:     #4a4390;
   --accent-bg:      #1e1a3a;
+  --on-accent:      #ffffff;
 
   --success:        #5ab87a;
   --success-bg:     #132018;
@@ -21,6 +24,13 @@
   --warning-bg:     #251d0e;
   --info:           #5b9bd5;
   --info-bg:        #0e1825;
+
+  /* Modal / expanded-view backdrop */
+  --overlay:        rgba(0, 0, 0, 0.55);
+
+  /* Gradient hairline — divider that fades at the edges */
+  --hairline: linear-gradient(90deg, transparent, var(--border-hover) 20%, var(--border-hover) 80%, transparent);
+  --hairline-accent: linear-gradient(90deg, transparent, var(--accent-dim) 20%, var(--accent-dim) 80%, transparent);
 }
 
 [data-theme="light"] {
@@ -28,31 +38,45 @@
   --bg-base:        #f4f4f7;
   --bg-elevated:    #ffffff;
   --border:         #dddde2;
-  --border-hover:   #c4c4cc;
+  --border-hover:   #bcbcc6;
 
-  --text-muted:     #b0b0bc;
-  --text-secondary: #70707c;
-  --text-primary:   #1c1c28;
+  --text-muted:     #82828e;
+  --text-secondary: #5b5b68;
+  --text-primary:   #26262f;
   --text-bright:    #0a0a12;
 
-  --accent:         #7F77DD;
-  --accent-dim:     #bdbaf0;
+  --accent:         #6a61d0;
+  --accent-dim:     #b3aeea;
   --accent-bg:      #eeedf9;
+  --on-accent:      #ffffff;
 
-  --success:        #3a9a5c;
-  --success-bg:     #ecf7f1;
-  --error:          #c94040;
-  --error-bg:       #fdf0f0;
-  --warning:        #a06828;
-  --warning-bg:     #fdf5ec;
-  --info:           #4080c0;
-  --info-bg:        #edf3fb;
+  --success:        #2f8a4f;
+  --success-bg:     #e8f5ee;
+  --error:          #c23636;
+  --error-bg:       #fdeeee;
+  --warning:        #96601f;
+  --warning-bg:     #fbf3e7;
+  --info:           #3572b0;
+  --info-bg:        #eaf2fa;
+
+  --overlay:        rgba(30, 30, 45, 0.35);
 }
 
 :root {
 
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
   --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Type scale — use these instead of ad-hoc pixel sizes.
+     xs: micro-labels/badges · sm: table meta, chips · md: UI controls
+     base: body/response text · lg: card titles · xl: page headings · 2xl: hero */
+  --fs-xs:   10px;
+  --fs-sm:   11px;
+  --fs-md:   12px;
+  --fs-base: 13px;
+  --fs-lg:   15px;
+  --fs-xl:   20px;
+  --fs-2xl:  24px;
 
   --radius-sm:  6px;
   --radius-md:  8px;
@@ -85,6 +109,9 @@ html, body, #root {
 
 /* Monospace utility */
 .mono { font-family: var(--font-mono); }
+
+/* Gradient hairline divider */
+.hairline { height: 1px; border: none; background: var(--hairline); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

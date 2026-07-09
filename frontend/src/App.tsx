@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
+import { UiStyles } from './components/ui'
 import { hasActiveNewRunSession } from './pages/NewRun'
 
 const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
@@ -20,6 +21,7 @@ export function App() {
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
+      <UiStyles />
       <Sidebar collapsed={collapsed} onCollapsedChange={setCollapsed} />
       <main style={{
         flex: 1,

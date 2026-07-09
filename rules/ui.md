@@ -3,7 +3,22 @@
 ## Design Aesthetic
 
 Langfuse / LangSmith — dense, dark, developer-tool. Not a marketing site.  
-Data-first: the content is the design. No decorative elements, gradients, animations, or illustrations.
+Data-first: the content is the design. No decorative elements or illustrations. The one sanctioned decorative device: gradient hairline dividers (`var(--hairline)`) that fade at the edges — use them for section/turn separators instead of plain border lines.
+
+## Primitives — use these, don't re-style
+
+Shared components in `frontend/src/components/`:
+
+| Component | File | Replaces |
+|---|---|---|
+| `Button` (primary/ghost/danger, `small`) | `ui.tsx` | all inline-styled buttons |
+| `IconButton` (with `active` state) | `ui.tsx` | card-header glyph buttons |
+| `Input` | `ui.tsx` | ad-hoc styled text inputs |
+| `PillToggle` | `ui.tsx` | on/off pill switches |
+| `SliderField` | `SliderField.tsx` | numeric range settings |
+| `Icon*` set | `icons.tsx` | **all emoji/unicode glyphs in controls** |
+
+`<UiStyles />` is mounted once in `App.tsx`. Never use emoji (🖼 ✎ ⧉ …) as button icons — add an SVG to `icons.tsx` instead (16-grid, stroke 1.4, round caps), matching the sidebar icon style.
 
 ## Fonts
 
@@ -42,9 +57,18 @@ var(--text-muted)    /* placeholders, timestamps, disabled */
 /* Accent — purple, used sparingly */
 var(--accent)        /* primary buttons, active nav bar, focus ring, selected chips */
 var(--accent-bg)     /* selected chip background, active item bg */
+var(--on-accent)     /* text/icons sitting on an accent background — never hardcode #fff */
+
+/* Overlays */
+var(--overlay)       /* modal / expanded-view backdrop — theme-aware, never rgba literals */
 ```
 
-**Rule**: purple (`--accent`) appears only on interactive states. Everything else is grayscale.
+**Rule**: purple (`--accent`) appears only on interactive states and the "fastest" highlight. Everything else is grayscale.
+
+## Type Scale
+
+Use `--fs-*` tokens instead of ad-hoc pixel sizes:
+`--fs-xs` 10 (micro-labels/badges) · `--fs-sm` 11 (table meta, chips) · `--fs-md` 12 (UI controls) · `--fs-base` 13 (body/responses) · `--fs-lg` 15 (card titles) · `--fs-xl` 20 (page headings) · `--fs-2xl` 24 (hero).
 
 ## Borders
 
