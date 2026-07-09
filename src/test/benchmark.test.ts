@@ -558,6 +558,59 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(combo.status).toBe(400)
   })
 
+  it('handles many concurrent uploads without id or file collision', async () => {
+    const uploads = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => {
+        const f = new FormData()
+        f.append('file', new Blob([pngBytes(i, i, i)], { type: 'image/png' }), `conc-${i}.png`)
+        return fetch(`${base}/api/uploads`, { method: 'POST', body: f }).then(r => r.json() as Promise<{ data: { id: string } }>)
+      }),
+    )
+    const ids = uploads.map(u => u.data.id)
+    expect(new Set(ids).size).toBe(12)
+    for (const id of ids) expect(existsSync(uploadPath(id, 'image/png'))).toBe(true)
+  })
+
+  it('two concurrent regenerates of the same source turn get independent, separately-reapable clones', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const form = new FormData()
+    form.append('file', new Blob([pngBytes(6, 6, 6)], { type: 'image/png' }), 'shared.png')
+    const up = await fetch(`${base}/api/uploads`, { method: 'POST', body: form })
+    const { data: att } = await up.json() as { data: { id: string } }
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['source'], models: [model], attachments: [att.id] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // Fire both regenerates at once — they read the same source rows and must
+    // each produce an independent copy (source file is only read, never mutated).
+    const regenBody = JSON.stringify({ prompts: ['source'], models: [model], cloneAttachmentsFrom: { runId: data.runId, promptIndex: 0 } })
+    const [g1, g2] = await Promise.all([
+      fetch(`${base}/api/benchmark`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: regenBody }).then(r => r.json() as Promise<{ data: { runId: string } }>),
+      fetch(`${base}/api/benchmark`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: regenBody }).then(r => r.json() as Promise<{ data: { runId: string } }>),
+    ])
+    await Promise.all([waitForRun(g1.data.runId), waitForRun(g2.data.runId)])
+
+    const attsOf = async (runId: string) => (await fetch(`${base}/api/runs/${runId}`).then(r => r.json()) as { data: { attachments: Array<{ id: string }> } }).data.attachments
+    const [a1, a2] = await Promise.all([attsOf(g1.data.runId), attsOf(g2.data.runId)])
+    expect(a1).toHaveLength(1)
+    expect(a2).toHaveLength(1)
+    expect(a1[0].id).not.toBe(a2[0].id)
+    expect(a1[0].id).not.toBe(att.id)
+    expect(a2[0].id).not.toBe(att.id)
+
+    // Reaping one clone leaves the other clone AND the source file intact.
+    await fetch(`${base}/api/runs/${g1.data.runId}`, { method: 'DELETE' })
+    expect(existsSync(uploadPath(a1[0].id, 'image/png'))).toBe(false)
+    expect(existsSync(uploadPath(a2[0].id, 'image/png'))).toBe(true)
+    expect(existsSync(uploadPath(att.id, 'image/png'))).toBe(true)
+  })
+
   it('rejects attachments with multiple prompts or unknown ids', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`
