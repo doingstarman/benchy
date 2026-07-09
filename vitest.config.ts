@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       'src/**/*.test.ts',
       'src/test/**/*.test.ts',
+      'frontend/src/**/*.test.ts',
       'frontend/src/**/*.test.tsx',
     ],
     environmentMatchGlobs: [
