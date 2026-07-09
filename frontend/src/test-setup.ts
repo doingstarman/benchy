@@ -1,8 +1,7 @@
-import { expect, afterEach } from 'vitest'
-import * as matchers from '@testing-library/jest-dom/matchers'
+import { afterEach } from 'vitest'
+// The /vitest entry both extends expect and augments vitest's Assertion types
+import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-
-expect.extend(matchers)
 
 // @testing-library/react auto-cleanup only works with globals:true.
 // With globals:false we wire it manually.

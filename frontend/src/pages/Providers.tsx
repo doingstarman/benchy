@@ -67,7 +67,7 @@ interface PresetProvider {
   type: ProviderType
   baseUrl?: string
   placeholderKey?: string
-  docsUrl: string
+  docsUrl?: string
   subtitle: string
 }
 

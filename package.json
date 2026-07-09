@@ -20,7 +20,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json && vite build --config frontend/vite.config.ts",
     "start": "node dist/cli.js",
     "prepack": "npm run build",
-    "lint": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.frontend.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/seed.ts --config-dir ~/.benchy-dev --port 4243"
