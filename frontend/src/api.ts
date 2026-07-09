@@ -86,6 +86,11 @@ export const benchmarkApi = {
       method: 'POST',
       body: JSON.stringify({ prompt, runSettings }),
     }),
+  editTurn: (runId: string, promptIndex: number, prompt: string) =>
+    apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/edit-turn`, {
+      method: 'POST',
+      body: JSON.stringify({ promptIndex, prompt }),
+    }),
 }
 
 // ─── SSE hook ────────────────────────────────────────────────────────────────

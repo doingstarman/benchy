@@ -225,6 +225,45 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     }
   )
 
+  // Edit a past user message — ChatGPT fork semantics: everything after the
+  // edited turn is discarded and the turn re-runs with the new prompt.
+  app.post<{ Params: { id: string }; Body: { promptIndex: number; prompt: string } }>(
+    '/api/runs/:id/edit-turn',
+    async (req, reply) => {
+      const { promptIndex, prompt } = req.body
+      if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' })
+
+      const db = getDb()
+      const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(req.params.id) as RunRow | undefined
+      if (!run) return reply.code(404).send({ error: 'Run not found' })
+
+      const prompts = JSON.parse(run.prompts) as string[]
+      const models = JSON.parse(run.models) as string[]
+      if (!Number.isInteger(promptIndex) || promptIndex < 0 || promptIndex >= prompts.length) {
+        return reply.code(400).send({ error: `promptIndex out of range (0..${prompts.length - 1})` })
+      }
+
+      const updatedPrompts = [...prompts.slice(0, promptIndex), prompt]
+      const dropped = db.prepare('SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?')
+        .get(req.params.id, promptIndex) as { n: number }
+      db.prepare('DELETE FROM results WHERE run_id = ? AND prompt_index >= ?').run(req.params.id, promptIndex)
+      db.prepare(
+        "UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls - ? + ?, completed_calls = completed_calls - ? WHERE id = ?"
+      ).run(JSON.stringify(updatedPrompts), dropped.n, models.length, dropped.n, req.params.id)
+
+      const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
+      const providers = await getProviders()
+      const tasks = models.map(model => {
+        const history = buildHistory(req.params.id, model, prompts)
+        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history)
+      })
+
+      finalizeRun(req.params.id, tasks)
+
+      return reply.code(202).send({ data: { runId: req.params.id, promptIndex } })
+    }
+  )
+
   app.get<{ Params: { runId: string } }>(
     '/api/benchmark/stream/:runId',
     async (req: FastifyRequest<{ Params: { runId: string } }>, reply: FastifyReply) => {

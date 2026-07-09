@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { providersApi, benchmarkApi, runsApi } from '../api'
-import { extractHtmlArtifact } from '../lib/artifact'
-import { ArtifactPreview } from '../components/ArtifactPreview'
+import { splitFencedSegments } from '../lib/artifact'
+import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
 import { Button, IconButton } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
-  IconPlay, IconStop, IconEye, IconText, IconPaperclip,
+  IconPlay, IconStop, IconPaperclip, IconPencil,
 } from '../components/icons'
 import type { Provider, RunSettings, RunSettingsOverrides } from '../../../src/types'
 
@@ -545,7 +545,6 @@ interface SavedSession {
   batchPrompts: string[]
   runSettings: RunSettings
   vote: string | null
-  previewCells: Set<string>
 }
 
 let savedSession: SavedSession | null = null
@@ -594,12 +593,12 @@ export function NewRun() {
   const [sessionModels, setSessionModels] = useState<string[]>(() => savedSession?.sessionModels ?? [])
   const [runId, setRunId] = useState<string | null>(() => savedSession?.runId ?? null)
   const [vote, setVote] = useState<string | null>(() => savedSession?.vote ?? null)
-  // expandedCol / copiedCol / previewNonce / previewCells are keyed by `${promptIndex}:${modelKey}`
+  // expandedCol / copiedCol are keyed by `${promptIndex}:${modelKey}`
   const [expandedCol, setExpandedCol] = useState<string | null>(null)
   const [copiedCol, setCopiedCol] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [previewCells, setPreviewCells] = useState<Set<string>>(() => savedSession?.previewCells ?? new Set())
-  const [previewNonce, setPreviewNonce] = useState<Record<string, number>>({})
+  // Inline edit of a past user message: which turn and the draft text
+  const [editingTurn, setEditingTurn] = useState<{ promptIndex: number; value: string } | null>(null)
 
   const esRef = useRef<EventSource | null>(null)
   const regenEsRef = useRef<EventSource | null>(null)
@@ -608,7 +607,7 @@ export function NewRun() {
   useEffect(() => {
     savedSession = {
       screenState, turns, sessionModels, runId, selectedModels,
-      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, previewCells,
+      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote,
     }
   })
 
@@ -618,6 +617,27 @@ export function NewRun() {
     esRef.current?.close()
     regenEsRef.current?.close()
   }, [])
+
+  // /run?new=1 (the sidebar's Тест item) drops the current session and starts
+  // a fresh dialog; model selection and mode are preferences and survive.
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('new')) return
+    navigate('/run', { replace: true })
+    esRef.current?.close()
+    regenEsRef.current?.close()
+    setTurns([])
+    setSessionModels([])
+    setRunId(null)
+    setScreenState('idle')
+    setPrompt('')
+    setPerModelPrompts({})
+    setBatchPrompts([''])
+    setVote(null)
+    setExpandedCol(null)
+    setEditingTurn(null)
+    setError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search])
 
   // Opening a past dialog from the sidebar: /run?session=<runId> rebuilds the
   // whole conversation from the stored run and makes it the active session.
@@ -649,7 +669,7 @@ export function NewRun() {
       setScreenState('done')
       setVote(null)
       setExpandedCol(null)
-      setPreviewCells(new Set())
+      setEditingTurn(null)
       setError(null)
     }).catch(() => setError('Failed to load dialog'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -930,16 +950,33 @@ export function NewRun() {
     setExpandedCol(prev => prev === cellKey ? null : prev)
   }
 
-  function handleRestartPreview(cellKey: string) {
-    setPreviewNonce(prev => ({ ...prev, [cellKey]: (prev[cellKey] ?? 0) + 1 }))
-  }
+  async function handleEditTurn(promptIndex: number) {
+    if (!runId || !editingTurn) return
+    const trimmed = editingTurn.value.trim()
+    if (!trimmed) return
+    setEditingTurn(null)
+    setError(null)
+    setVote(null)
+    setExpandedCol(null)
 
-  function togglePreviewCell(cellKey: string) {
-    setPreviewCells(prev => {
-      const next = new Set(prev)
-      next.has(cellKey) ? next.delete(cellKey) : next.add(cellKey)
-      return next
-    })
+    // Fork semantics — everything after the edited turn is discarded
+    setTurns(prev => [...prev.slice(0, promptIndex), {
+      promptIndex,
+      prompt: trimmed,
+      showPromptBubble: true,
+      results: pendingResults(sessionModels),
+    }])
+    setScreenState('running')
+
+    try {
+      await benchmarkApi.editTurn(runId, promptIndex, trimmed)
+      esRef.current?.close()
+      const es = new EventSource(`/api/benchmark/stream/${runId}`)
+      esRef.current = es
+      wireSSE(es)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to edit message')
+    }
   }
 
   // renderCell is a function call (not JSX component) — no remount problem
@@ -954,8 +991,6 @@ export function NewRun() {
     const turnTtfs = [...turn.results.values()].map(x => x.ttfs).filter((t): t is number => t !== null)
     const minTtfs = turnTtfs.length > 1 ? Math.min(...turnTtfs) : null
     const isFastest = isDone && r.ttfs !== null && minTtfs !== null && r.ttfs === minTtfs
-    const artifactHtml = isDone ? extractHtmlArtifact(r.text) : null
-    const showPreview = previewCells.has(cellKey) && artifactHtml != null
 
     const dotBg = isDone ? 'var(--success)' : isError ? 'var(--error)' : isStreaming ? 'var(--accent)' : 'var(--border-hover)'
 
@@ -986,18 +1021,6 @@ export function NewRun() {
           <IconButton onClick={() => handleCopy(cellKey, r.text)} title="Copy">
             {copiedCol === cellKey ? <IconCheck /> : <IconCopy />}
           </IconButton>
-          {artifactHtml && (
-            <IconButton
-              onClick={() => togglePreviewCell(cellKey)}
-              title={showPreview ? 'Show text' : 'Show preview'}
-              active={showPreview}
-            >
-              {showPreview ? <IconText /> : <IconEye />}
-            </IconButton>
-          )}
-          {showPreview && (
-            <IconButton onClick={() => handleRestartPreview(cellKey)} title="Restart preview"><IconPlay /></IconButton>
-          )}
           {isExpanded ? (
             <IconButton onClick={() => setExpandedCol(null)} title="Collapse"><IconCollapse /></IconButton>
           ) : (
@@ -1030,14 +1053,18 @@ export function NewRun() {
               {r.error ?? 'Error'}
             </div>
           </div>
-        ) : showPreview && artifactHtml ? (
-          <ArtifactPreview html={artifactHtml} reloadKey={previewNonce[cellKey] ?? 0} />
         ) : (
           <div
             className="col-body"
-            style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+            style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word' }}
           >
-            {r.text || (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>Waiting…</span>)}
+            {r.text
+              ? splitFencedSegments(r.text).map((seg, si) =>
+                  seg.type === 'code'
+                    ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} />
+                    : <span key={`${cellKey}:${si}`} style={{ whiteSpace: 'pre-wrap' }}>{seg.content}</span>
+                )
+              : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>Waiting…</span>)}
             {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
           </div>
         )}
@@ -1134,14 +1161,60 @@ export function NewRun() {
           <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
             {ti > 0 && <div style={{ height: 1, background: 'var(--hairline)', margin: '4px 24px' }} />}
             {turn.showPromptBubble && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <div style={{
-                  maxWidth: '70%', background: 'var(--accent-bg)', border: '0.5px solid var(--accent-dim)',
-                  borderRadius: 10, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                }}>
-                  {turn.prompt}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                {editingTurn?.promptIndex === turn.promptIndex ? (
+                  <div style={{ width: '70%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <textarea
+                      autoFocus
+                      value={editingTurn.value}
+                      onChange={e => setEditingTurn({ promptIndex: turn.promptIndex, value: e.target.value })}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleEditTurn(turn.promptIndex) }
+                        if (e.key === 'Escape') setEditingTurn(null)
+                      }}
+                      rows={3}
+                      style={{
+                        width: '100%', background: 'var(--bg-elevated)', border: '0.5px solid var(--accent-dim)',
+                        borderRadius: 10, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)',
+                        outline: 'none', resize: 'vertical', lineHeight: 1.6,
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginRight: 4 }}>
+                        отправка заново удалит ходы после этого
+                      </span>
+                      <Button small onClick={() => setEditingTurn(null)}>Cancel</Button>
+                      <Button variant="primary" small onClick={() => void handleEditTurn(turn.promptIndex)}>Send</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{
+                      maxWidth: '70%', background: 'var(--accent-bg)', border: '0.5px solid var(--accent-dim)',
+                      borderRadius: 10, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)',
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    }}>
+                      {turn.prompt}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <IconButton
+                        title="Copy message"
+                        onClick={() => void handleCopy(`prompt:${turn.promptIndex}`, turn.prompt)}
+                        style={{ width: 22, height: 22, border: 'none' }}
+                      >
+                        {copiedCol === `prompt:${turn.promptIndex}` ? <IconCheck size={11} /> : <IconCopy size={11} />}
+                      </IconButton>
+                      <IconButton
+                        title="Edit message"
+                        onClick={() => setEditingTurn({ promptIndex: turn.promptIndex, value: turn.prompt })}
+                        disabled={screenState === 'running'}
+                        style={{ width: 22, height: 22, border: 'none', opacity: screenState === 'running' ? 0.4 : undefined }}
+                      >
+                        <IconPencil size={11} />
+                      </IconButton>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <div style={{

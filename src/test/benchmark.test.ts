@@ -260,4 +260,55 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     })
     expect(res.status).toBe(404)
   })
+
+  it('POST /api/runs/:id/edit-turn discards later turns and re-runs the edited one', async () => {
+    capturedMessages = []
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const model = `${pid}:gpt-4o-mini`
+
+    const { data } = await startBenchmark(['First'], [model])
+    const runId = data!.runId
+    await waitForRun(runId)
+
+    await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Second' }),
+    })
+    await waitForRun(runId)
+
+    // Edit turn 0 — turn 1 must be discarded, conversation restarts from scratch
+    capturedMessages = []
+    const res = await fetch(`${base}/api/runs/${runId}/edit-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'First edited' }),
+    })
+    expect(res.status).toBe(202)
+
+    const run = await waitForRun(runId)
+    expect(run.prompts).toEqual(['First edited'])
+    expect(run.results).toHaveLength(1)
+    expect(run.totalCalls).toBe(1)
+    expect(run.completedCalls).toBe(1)
+
+    // The re-run got NO history (nothing precedes turn 0)
+    expect(capturedMessages).toHaveLength(1)
+    expect(capturedMessages[0]).toEqual([{ role: 'user', content: 'First edited' }])
+  })
+
+  it('POST /api/runs/:id/edit-turn rejects out-of-range promptIndex', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const { data } = await startBenchmark(['Solo'], [`${pid}:gpt-4o-mini`])
+    await waitForRun(data!.runId)
+
+    const res = await fetch(`${base}/api/runs/${data!.runId}/edit-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 5, prompt: 'x' }),
+    })
+    expect(res.status).toBe(400)
+  })
 })

@@ -246,7 +246,8 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
 
       <Divider />
 
-      <Item to="/run" label="Тест" icon="test" collapsed={collapsed} />
+      {/* ?new=1 → always starts a fresh dialog; past ones live in the list below */}
+      <Item to="/run?new=1" label="Тест" icon="test" collapsed={collapsed} />
       {!collapsed && <RecentDialogs />}
       <Item to="/history" label="История" icon="history" collapsed={collapsed} />
 
