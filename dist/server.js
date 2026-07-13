@@ -10,6 +10,7 @@ import { registerRunsRoutes } from './api/runs.js';
 import { registerBenchmarkRoutes } from './api/benchmark.js';
 import { registerMockRoutes } from './api/mock.js';
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js';
+import { registerVersionRoutes } from './api/version.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UNBOUND_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 export async function createServer(port, dbPath) {
@@ -22,6 +23,7 @@ export async function createServer(port, dbPath) {
     await app.register(fastifyCors, { origin: true });
     // API routes
     await registerUploadsRoutes(app);
+    await registerVersionRoutes(app);
     await registerProvidersRoutes(app);
     await registerRunsRoutes(app);
     await registerBenchmarkRoutes(app);

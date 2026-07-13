@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { getTheme, setTheme, watchSystem, type Theme } from '../theme'
+import { useT, type Lang } from '../i18n'
+import { versionApi, type VersionInfo } from '../api'
+import { Button } from '../components/ui'
 
 const SEGMENT_CSS = `
   .seg-btn {
@@ -23,7 +26,13 @@ const SEGMENT_CSS = `
 `
 
 export function Settings() {
+  const { t, lang, setLang } = useT()
   const [theme, setThemeState] = useState<Theme>(getTheme)
+  const [info, setInfo] = useState<VersionInfo | null>(null)
+
+  useEffect(() => {
+    versionApi.get().then(setInfo).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (theme === 'system') {
@@ -31,63 +40,140 @@ export function Settings() {
     }
   }, [theme])
 
-  function applyTheme(t: Theme) {
-    setTheme(t)
-    setThemeState(t)
+  function applyTheme(th: Theme) {
+    setTheme(th)
+    setThemeState(th)
   }
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 480 }}>
       <style>{SEGMENT_CSS}</style>
-      <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>Настройки</h1>
+      <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>{t('settings.title')}</h1>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <SectionLabel>Внешний вид</SectionLabel>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '8px 12px',
-          background: 'var(--bg-elevated)',
-          border: '0.5px solid var(--border)',
-          borderRadius: 'var(--radius-sm)',
-        }}>
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Тема</span>
-          <div style={{
-            display: 'inline-flex',
-            background: 'var(--bg-elevated)',
-            border: '0.5px solid var(--border)',
-            borderRadius: 'var(--radius-sm)',
-            padding: 2,
-            gap: 1,
-          }}>
-            {(['dark', 'light', 'system'] as const).map(t => (
-              <button
-                key={t}
-                className={`seg-btn${theme === t ? ' active' : ''}`}
-                onClick={() => applyTheme(t)}
-              >
-                {t === 'dark' ? 'Тёмная' : t === 'light' ? 'Светлая' : 'Система'}
-              </button>
-            ))}
-          </div>
-        </div>
+        <SectionLabel>{t('settings.appearance')}</SectionLabel>
+        <SegmentRow label={t('settings.theme')}>
+          {(['dark', 'light', 'system'] as const).map(th => (
+            <button
+              key={th}
+              className={`seg-btn${theme === th ? ' active' : ''}`}
+              onClick={() => applyTheme(th)}
+            >
+              {th === 'dark' ? t('settings.themeDark') : th === 'light' ? t('settings.themeLight') : t('settings.themeSystem')}
+            </button>
+          ))}
+        </SegmentRow>
+        <SegmentRow label={t('settings.language')}>
+          {(['en', 'ru'] as const).map(l => (
+            <button
+              key={l}
+              className={`seg-btn${lang === l ? ' active' : ''}`}
+              onClick={() => setLang(l as Lang)}
+            >
+              {l === 'en' ? 'English' : 'Русский'}
+            </button>
+          ))}
+        </SegmentRow>
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <SectionLabel>Сервер</SectionLabel>
-        <Row label="Порт" value="4243 dev / 4242 prod" mono />
-        <Row label="Конфиг" value="~/.benchy-dev/config.json" mono />
-        <Row label="База данных" value="~/.benchy-dev/benchy.db" mono />
+        <SectionLabel>{t('settings.server')}</SectionLabel>
+        <Row label={t('settings.port')} value={info?.runtime.port != null ? String(info.runtime.port) : '…'} mono />
+        <Row label={t('settings.config')} value={info?.runtime.configPath ?? '…'} mono />
+        <Row label={t('settings.database')} value={info?.runtime.dbPath ?? '…'} mono />
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <SectionLabel>О приложении</SectionLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <SectionLabel>{t('settings.about')}</SectionLabel>
+        <UpdateRow info={info} onChecked={setInfo} />
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          benchy — self-hosted инструмент для бенчмаркинга LLM-моделей.
-          {' '}<a href="https://github.com/benchyhq/benchy" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>GitHub →</a>
+          {t('settings.aboutText')}
+          {info?.repoUrl && (
+            <>{' '}<a href={info.repoUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>GitHub →</a></>
+          )}
         </div>
       </section>
+    </div>
+  )
+}
+
+function UpdateRow({ info, onChecked }: { info: VersionInfo | null; onChecked: (v: VersionInfo) => void }) {
+  const { t } = useT()
+  const [checking, setChecking] = useState(false)
+
+  async function check() {
+    setChecking(true)
+    try {
+      onChecked(await versionApi.get(true))
+    } catch {
+      if (info) onChecked({ ...info, checkError: 'network' })
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const isDev = info?.current.builtAt == null
+  // 'network' (couldn't reach GitHub) and 'missing' (GitHub has nothing to
+  // compare against yet) are different truths — never report one as the other.
+  const status = !info ? ''
+    : isDev ? t('settings.devBuild')
+    : info.checkError === 'network' ? t('settings.checkFailed')
+    : info.checkError === 'missing' ? t('settings.noPublished')
+    : info.hasUpdate ? `${t('update.available')} — \`benchy update\``
+    : t('settings.upToDate')
+  const statusColor = !info || isDev || info.checkError === 'missing' ? 'var(--text-muted)'
+    : info.checkError === 'network' ? 'var(--warning)'
+    : info.hasUpdate ? 'var(--accent)'
+    : 'var(--success)'
+
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+      padding: '8px 12px', background: 'var(--bg-elevated)',
+      border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)',
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {t('settings.build')}
+          <span style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
+            {info?.current.sha ?? '…'}
+          </span>
+        </span>
+        {status && (
+          <span style={{ fontSize: 11, color: statusColor, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {status}
+          </span>
+        )}
+      </div>
+      <Button small onClick={check} disabled={checking || isDev} style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+        {checking ? t('settings.checking') : t('settings.checkUpdates')}
+      </Button>
+    </div>
+  )
+}
+
+function SegmentRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 12px',
+      background: 'var(--bg-elevated)',
+      border: '0.5px solid var(--border)',
+      borderRadius: 'var(--radius-sm)',
+    }}>
+      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
+      <div style={{
+        display: 'inline-flex',
+        background: 'var(--bg-elevated)',
+        border: '0.5px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 2,
+        gap: 1,
+      }}>
+        {children}
+      </div>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { providersApi } from '../api'
 import { ProviderTile } from '../components/ProviderTile'
 import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
+import { useT, t } from '../i18n'
 import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
 
 const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
@@ -164,7 +165,7 @@ function ProviderHeader({ name, subtitle, connected, docsUrl }: ProviderHeaderPr
       {connected && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--success-bg)', border: '0.5px solid var(--success)', flexShrink: 0 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />
-          <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>Connected</span>
+          <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>{t('providers.connected')}</span>
         </div>
       )}
     </div>
@@ -194,14 +195,14 @@ interface ApiKeySectionProps {
 function ApiKeySection({ apiKey, replacingKey, newKey, placeholder, onStartReplace, onNewKeyChange }: ApiKeySectionProps) {
   return (
     <div>
-      <SectionLabel>API KEY</SectionLabel>
+      <SectionLabel>{t('providers.apiKey')}</SectionLabel>
       {!replacingKey && apiKey ? (
         <div style={{ background: 'var(--bg-base)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>
             {maskKey(apiKey)}
           </span>
           <button onClick={onStartReplace} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)', padding: '0 0 0 12px' }}>
-            Replace key
+            {t('providers.replaceKey')}
           </button>
         </div>
       ) : (
@@ -215,7 +216,7 @@ function ApiKeySection({ apiKey, replacingKey, newKey, placeholder, onStartRepla
         />
       )}
       {!replacingKey && apiKey && (
-        <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-muted)' }}>Stored locally</div>
+        <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.storedLocally')}</div>
       )}
     </div>
   )
@@ -253,13 +254,13 @@ function ModelsSection({ available, selected, search, manualMode, manualText, fe
       <SectionLabel actions={
         <>
           <button className="prov-icon-btn" onClick={onFetchModels} disabled={fetchingModels}>
-            {fetchingModels ? <span className="prov-spinner" /> : '⟳'} Fetch models
+            {fetchingModels ? <span className="prov-spinner" /> : '⟳'} {t('providers.fetchModels')}
           </button>
           <button className="prov-icon-btn" onClick={onManualModeToggle}>
-            ✎ {manualMode ? 'List' : 'Manual'}
+            ✎ {manualMode ? t('providers.listMode') : t('providers.manualMode')}
           </button>
         </>
-      }>MODELS</SectionLabel>
+      }>{t('providers.models')}</SectionLabel>
 
       <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
         {manualMode ? (
@@ -279,14 +280,14 @@ function ModelsSection({ available, selected, search, manualMode, manualText, fe
                 type="text"
                 value={search}
                 onChange={e => onSearchChange(e.target.value)}
-                placeholder="Search models..."
+                placeholder={t('providers.searchModels')}
                 style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', flex: 1 }}
               />
             </div>
             <div style={{ maxHeight: 220, overflowY: 'auto' }}>
               {filtered.length === 0 && (
                 <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-                  {available.length === 0 ? 'Click "Fetch models" to load available models' : 'No models match'}
+                  {available.length === 0 ? t('providers.clickFetch') : t('providers.noModelsMatch')}
                 </div>
               )}
               {filtered.map(id => {
@@ -332,15 +333,15 @@ function TestSection({ models, testModelId, testing, result, onModelChange, onTe
   const disabled = testing || models.length === 0
   return (
     <div>
-      <SectionLabel>TEST</SectionLabel>
+      <SectionLabel>{t('providers.test')}</SectionLabel>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Test model</span>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('providers.testModel')}</span>
         <select className="prov-select" value={testModelId} onChange={e => onModelChange(e.target.value)}>
           {models.map(m => <option key={m} value={m}>{m}</option>)}
-          {models.length === 0 && <option value="">— select a model —</option>}
+          {models.length === 0 && <option value="">{t('providers.selectModel')}</option>}
         </select>
         <Button variant="primary" small onClick={onTest} disabled={disabled} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
-          {testing ? <><span className="prov-spinner" />Testing…</> : 'Test connection'}
+          {testing ? <><span className="prov-spinner" />{t('providers.testing')}</> : t('providers.testConnection')}
         </Button>
       </div>
       {result && (
@@ -352,7 +353,7 @@ function TestSection({ models, testModelId, testing, result, onModelChange, onTe
           color: result.ok ? 'var(--success)' : 'var(--error)',
         }}>
           {result.ok
-            ? `✓ Connection OK · ${result.ttfs ?? '?'}ms · ${result.message ?? 'streamed response received'}`
+            ? `✓ ${t('providers.connectionOk')} · ${result.ttfs ?? '?'}ms · ${result.message ?? t('providers.streamedResponse')}`
             : `✗ ${result.error}`}
         </div>
       )}
@@ -389,8 +390,8 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Advanced Defaults</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.7 }}>Applied to new runs unless overridden</span>
+          <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{t('providers.advancedDefaults')}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.7 }}>{t('providers.appliedToRuns')}</span>
         </div>
         <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>{open ? '∧' : '∨'}</span>
       </button>
@@ -399,14 +400,14 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
 
           {showBaseUrl && (
             <div style={{ paddingTop: 14, paddingBottom: 14, borderBottom: '0.5px solid var(--border)' }}>
-              <div style={fieldLabel as React.CSSProperties}>Base URL</div>
+              <div style={fieldLabel as React.CSSProperties}>{t('providers.baseUrl')}</div>
               <input className="prov-input" type="text" value={baseUrl} onChange={e => onBaseUrlChange(e.target.value)} style={{ marginTop: 5 }} />
             </div>
           )}
 
           {/* Generation */}
           <div style={{ paddingTop: 14 }}>
-            <div style={groupLabel}>Generation</div>
+            <div style={groupLabel}>{t('providers.generation')}</div>
             <div style={fieldGrid}>
               <SliderField label="Temperature" min={0} max={2} step={0.1}
                 value={d.temperature ?? null}
@@ -426,14 +427,14 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
 
           {/* Context */}
           <div style={{ paddingTop: 18 }}>
-            <div style={groupLabel}>Context</div>
+            <div style={groupLabel}>{t('providers.context')}</div>
             <div style={fieldGrid}>
               <SliderField label="Context budget" min={1} max={200000} step={1000}
                 value={d.contextBudget ?? null}
                 onChange={v => onChange({ contextBudget: v })}
                 allowAuto />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={inlineLabel}>Truncation</span>
+                <span style={inlineLabel}>{t('providers.truncation')}</span>
                 <select className="prov-select"
                   value={d.truncation ?? 'auto'}
                   onChange={e => onChange({ truncation: e.target.value as ProviderDefaults['truncation'] })}
@@ -449,7 +450,7 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
 
           {/* Reliability */}
           <div style={{ paddingTop: 18 }}>
-            <div style={groupLabel}>Reliability</div>
+            <div style={groupLabel}>{t('providers.reliability')}</div>
             <div style={fieldGrid}>
               <SliderField label="Timeout" min={1} max={120} step={1}
                 value={d.timeoutMs != null ? Math.round(d.timeoutMs / 1000) : null}
@@ -459,12 +460,12 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
                 value={d.retries ?? null}
                 onChange={v => onChange({ retries: v })} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={inlineLabel}>Streaming</span>
+                <span style={inlineLabel}>{t('providers.streaming')}</span>
                 <PillToggle
                   on={!!d.streaming}
                   onToggle={() => onChange({ streaming: !d.streaming })}
-                  labelOn="On"
-                  labelOff="Off"
+                  labelOn={t('common.on')}
+                  labelOff={t('common.off')}
                 />
               </div>
             </div>
@@ -484,9 +485,9 @@ interface ModalFooterProps {
 function ModalFooter({ onCancel, onSave, saving }: ModalFooterProps) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <Button onClick={onCancel}>Cancel</Button>
+      <Button onClick={onCancel}>{t('common.cancel')}</Button>
       <Button variant="primary" onClick={onSave} disabled={saving}>
-        {saving ? 'Saving…' : 'Save provider'}
+        {saving ? t('providers.saving') : t('providers.saveProvider')}
       </Button>
     </div>
   )
@@ -498,11 +499,11 @@ function DangerZone({ onDisconnect }: DangerZoneProps) {
   return (
     <div style={{ border: '0.5px solid var(--error)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--error)', marginBottom: 3 }}>Danger zone</div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Disconnecting will remove this provider and stop any in-flight requests.</div>
+        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--error)', marginBottom: 3 }}>{t('providers.dangerZone')}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('providers.dangerText')}</div>
       </div>
       <Button variant="danger" small onClick={onDisconnect} style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-        Disconnect provider
+        {t('providers.disconnect')}
       </Button>
     </div>
   )
@@ -511,6 +512,7 @@ function DangerZone({ onDisconnect }: DangerZoneProps) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function Providers() {
+  useT() // subscribe: a language switch re-renders this tree (sub-components use module t())
   const [providers, setProviders] = useState<Provider[]>([])
   const [modal, setModal] = useState<ModalState | null>(null)
   const [saving, setSaving] = useState(false)
@@ -770,23 +772,23 @@ export function Providers() {
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>Providers</h1>
+      <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>{t('providers.title')}</h1>
 
-      <TileGrid title="Active" tiles={activeTiles} />
-      <TileGrid title="Local" tiles={localTiles} />
+      <TileGrid title={t('providers.active')} tiles={activeTiles} />
+      <TileGrid title={t('providers.local')} tiles={localTiles} />
       <TileGrid
-        title="Custom"
+        title={t('providers.custom')}
         tiles={inactiveCustomProviders.map(p => ({ key: p.id, provider: p, onClick: () => openExistingCustom(p) }))}
         trailingButton={
           <button
             onClick={openCustom}
             style={{ background: 'none', border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: 16, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}
           >
-            + custom endpoint
+            {t('providers.customEndpoint')}
           </button>
         }
       />
-      <TileGrid title="Other" tiles={otherTiles} />
+      <TileGrid title={t('providers.other')} tiles={otherTiles} />
 
       {/* Modal */}
       {modal && (
@@ -805,7 +807,7 @@ export function Providers() {
             {/* Scrollable content */}
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
               <ProviderHeader
-                name={modal.provider.name || 'Custom provider'}
+                name={modal.provider.name || t('providers.customProvider')}
                 subtitle={modal.preset?.subtitle ?? 'Custom endpoint · OpenAI-style API'}
                 connected={isConnected}
                 docsUrl={modal.preset?.docsUrl}
@@ -824,8 +826,8 @@ export function Providers() {
 
               {isCustom && (
                 <div>
-                  <SectionLabel>PROVIDER NAME</SectionLabel>
-                  <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder="My Provider" />
+                  <SectionLabel>{t('providers.providerName')}</SectionLabel>
+                  <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
                 </div>
               )}
 

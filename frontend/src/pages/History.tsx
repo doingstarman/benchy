@@ -4,9 +4,11 @@ import { runsApi } from '../api'
 import { RUNS_CHANGED_EVENT } from './NewRun'
 import { Button, Input } from '../components/ui'
 import { IconPencil } from '../components/icons'
+import { useT } from '../i18n'
 import type { Run } from '../../../src/types'
 
 export function History() {
+  const { t } = useT()
   const navigate = useNavigate()
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,7 +36,7 @@ export function History() {
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation()
-    if (!confirm('Delete this run?')) return
+    if (!confirm(t('history.confirmDelete'))) return
     await runsApi.remove(id)
     window.dispatchEvent(new Event(RUNS_CHANGED_EVENT))
     load()
@@ -71,9 +73,9 @@ export function History() {
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>History</h1>
+        <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>{t('history.title')}</h1>
         <Button variant="primary" small onClick={() => navigate('/run')}>
-          + new run
+          {t('history.newRun')}
         </Button>
       </div>
 
@@ -81,7 +83,7 @@ export function History() {
       <div style={{ display: 'flex', gap: 8 }}>
         <Input
           type="text"
-          placeholder="Search prompts…"
+          placeholder={t('history.searchPrompts')}
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, width: 'auto', background: 'var(--bg-elevated)' }}
@@ -95,9 +97,9 @@ export function History() {
             color: 'var(--text-secondary)', outline: 'none', fontSize: 12,
           }}
         >
-          <option value="">All time</option>
-          <option value="today">Today</option>
-          <option value="week">This week</option>
+          <option value="">{t('history.allTime')}</option>
+          <option value="today">{t('history.today')}</option>
+          <option value="week">{t('history.week')}</option>
         </select>
         <select
           value={statusFilter}
@@ -108,9 +110,9 @@ export function History() {
             color: 'var(--text-secondary)', outline: 'none', fontSize: 12,
           }}
         >
-          <option value="">All</option>
-          <option value="saved">Saved</option>
-          <option value="unsaved">Unsaved</option>
+          <option value="">{t('history.all')}</option>
+          <option value="saved">{t('history.savedFilter')}</option>
+          <option value="unsaved">{t('history.unsavedFilter')}</option>
         </select>
       </div>
 
@@ -119,8 +121,8 @@ export function History() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--bg-elevated)' }}>
-              {['ID', 'Prompt', 'Models', 'Calls', 'Реплик', 'Date', 'Status', ''].map(h => (
-                <th key={h} style={{
+              {[['id', 'ID'], ['prompt', t('history.colPrompt')], ['models', t('history.colModels')], ['calls', t('history.colCalls')], ['replies', t('history.colReplies')], ['date', t('history.colDate')], ['status', t('history.colStatus')], ['actions', '']].map(([key, h]) => (
+                <th key={key} style={{
                   padding: '8px 12px', textAlign: 'left',
                   fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em',
                   color: 'var(--text-muted)', fontWeight: 500, borderBottom: '0.5px solid var(--border)',
@@ -132,10 +134,10 @@ export function History() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>Loading…</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{t('common.loading')}</td></tr>
             )}
             {!loading && runs.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No runs yet.</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{t('history.noRuns')}</td></tr>
             )}
             {runs.map(run => {
               const isHovered = hoveredId === run.id
@@ -170,7 +172,7 @@ export function History() {
                           if (e.key === 'Escape') setRenamingId(null)
                         }}
                         onBlur={() => void commitRename(run.id)}
-                        placeholder="Название теста…"
+                        placeholder={t('history.namePlaceholder')}
                         style={{
                           width: '100%', background: 'var(--bg-base)', border: '0.5px solid var(--accent-dim)',
                           borderRadius: 5, padding: '3px 7px', fontSize: 12,
@@ -184,7 +186,7 @@ export function History() {
                         </span>
                         <button
                           onClick={e => startRename(e, run)}
-                          title="Rename"
+                          title={t('history.rename')}
                           style={{
                             background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                             color: 'var(--text-muted)', lineHeight: 1, flexShrink: 0, display: 'inline-flex',
@@ -247,8 +249,8 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 6, opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s' }}>
-                      <Button small onClick={e => handleFork(e, run.id)}>fork</Button>
-                      <Button variant="danger" small onClick={e => handleDelete(e, run.id)}>delete</Button>
+                      <Button small onClick={e => handleFork(e, run.id)}>{t('history.fork')}</Button>
+                      <Button variant="danger" small onClick={e => handleDelete(e, run.id)}>{t('history.delete')}</Button>
                     </div>
                   </td>
                 </tr>

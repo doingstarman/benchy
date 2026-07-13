@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { runsApi, useSSE } from '../api'
 import type { SSEEvent } from '../api'
 import { ResponseCard } from '../components/ResponseCard'
+import { useT } from '../i18n'
 import type { Run, Result } from '../../../src/types'
 
 interface CellState {
@@ -21,6 +22,7 @@ function cellKey(promptIndex: number, model: string) {
 }
 
 export function Results() {
+  const { t } = useT()
   const { runId } = useParams<{ runId: string }>()
   const navigate = useNavigate()
   const [run, setRun] = useState<Run | null>(null)
@@ -114,7 +116,7 @@ export function Results() {
   if (!run) {
     return (
       <div style={{ padding: 24, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-        Loading…
+        {t('common.loading')}
       </div>
     )
   }
@@ -140,21 +142,21 @@ export function Results() {
       }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button onClick={() => navigate('/history')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12 }}>
-            ← history
+            {t('results.backHistory')}
           </button>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
             {run.id.slice(0, 8)}
           </span>
           {isLive && (
             <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
-              live
+              {t('results.live')}
             </span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {minTtfs != null && (
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
-              best ttfs <span style={{ color: 'var(--warning)' }}>{minTtfs}ms</span>
+              {t('results.bestTtfs')} <span style={{ color: 'var(--warning)' }}>{minTtfs}ms</span>
             </span>
           )}
           <button
@@ -171,7 +173,7 @@ export function Results() {
               cursor: 'pointer',
             }}
           >
-            {saved ? 'saved' : 'save'}
+            {saved ? t('results.saved') : t('results.save')}
           </button>
         </div>
       </div>
@@ -236,7 +238,7 @@ export function Results() {
             display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap',
           }}>
             <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              ⚙ {perModelKeys.length > 0 ? 'Custom settings (global)' : 'Custom settings'}
+              ⚙ {perModelKeys.length > 0 ? t('results.customSettingsGlobal') : t('results.customSettings')}
             </span>
             {entries.map(([key, val]) => (
               <span key={key} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
@@ -247,7 +249,7 @@ export function Results() {
             ))}
             {perModelKeys.length > 0 && (
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                + {perModelKeys.length} model override{perModelKeys.length !== 1 ? 's' : ''}
+                {t('results.modelOverrides', { n: perModelKeys.length })}
               </span>
             )}
           </div>

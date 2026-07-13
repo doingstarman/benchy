@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { createServer } from './server.js';
 import { findPidsOnPort } from './ports.js';
+import { getUpdateStatus } from './version.js';
 function resolveConfigDir(path) {
     if (path === '~')
         return homedir();
@@ -31,6 +32,17 @@ async function startServer(opts) {
         throw err;
     }
     console.log(`benchy running at ${url}`);
+    // Best-effort update notice — never blocks startup, silent when offline or in
+    // a dev build (which has no stamped version).
+    void getUpdateStatus()
+        .then(info => {
+        if (!info.hasUpdate)
+            return;
+        const dim = '\x1b[2m', yellow = '\x1b[33m', reset = '\x1b[0m';
+        const sha = info.latest?.sha ? ` ${dim}(${info.latest.sha})${reset}` : '';
+        console.log(`${yellow}⬆ A new version of benchy is available${reset}${sha} ${dim}— run \`benchy update\`${reset}`);
+    })
+        .catch(() => { });
     if (opts.open) {
         const { default: open } = await import('open');
         await open(url);

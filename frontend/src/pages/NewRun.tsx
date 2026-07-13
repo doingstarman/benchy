@@ -9,6 +9,7 @@ import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
 } from '../components/icons'
+import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
@@ -78,7 +79,7 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMet
           {onRemove && (
             <button
               onClick={() => onRemove(a.id)}
-              title="Remove"
+              title={t('title.remove')}
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
             >
               <IconClose size={11} />
@@ -141,7 +142,7 @@ export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd,
       {models.length > 1 && (
         <button
           onClick={onToggleAll}
-          title={allSelected ? 'Deselect all models' : 'Select all models'}
+          title={allSelected ? t('title.deselectAll') : t('title.selectAll')}
           style={{
             display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
             padding: '5px 11px',
@@ -177,7 +178,7 @@ export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd,
         )
       })}
       {models.length === 0 && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>No providers —</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{t('run.noProviders')}</span>
       )}
       <button
         onClick={onAdd}
@@ -343,7 +344,7 @@ export function Promptbox({
         {/* Slot is always reserved so rows don't reflow when an override appears */}
         <button
           onClick={() => resetOverride(key)}
-          title="Reset to inherited"
+          title={t('title.resetInherited')}
           style={{
             visibility: isSet ? 'visible' : 'hidden',
             background: 'none', border: 'none', color: 'var(--text-muted)',
@@ -380,10 +381,10 @@ export function Promptbox({
           display: 'flex', flexDirection: 'column', gap: 14,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>Run settings</span>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>{t('run.runSettings')}</span>
             {activeCount > 0 && (
               <button onClick={resetAllOverrides} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
-                reset all
+                {t('run.resetAll')}
               </button>
             )}
           </div>
@@ -395,7 +396,7 @@ export function Promptbox({
                 className={`settings-tab${validTab === 'all' ? ' active' : ''}`}
                 onClick={() => setActiveTab('all')}
               >
-                All models{globalCount > 0 ? ` · ${globalCount}` : ''}
+                {t('run.allModelsTab')}{globalCount > 0 ? ` · ${globalCount}` : ''}
               </button>
               {selectedModels.map(modelKey => {
                 const label = modelKey.split(':').slice(1).join(':')
@@ -417,12 +418,12 @@ export function Promptbox({
           {/* Inherited note for per-model tabs */}
           {validTab !== 'all' && globalCount > 0 && (
             <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: -8 }}>
-              ↑ inherits {globalCount} global override{globalCount !== 1 ? 's' : ''}
+              {t('run.inheritsGlobal', { n: globalCount })}
             </div>
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Generation</div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('providers.generation')}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12 }}>
               {overrideSlider('temperature', 'Temperature', { min: 0, max: 2, step: 0.1 })}
               {overrideSlider('topP', 'Top P', { min: 0, max: 1, step: 0.05 })}
@@ -432,7 +433,7 @@ export function Promptbox({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Reliability</div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('providers.reliability')}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12 }}>
               {overrideSlider('timeoutMs', 'Timeout', {
                 min: 1, max: 120, step: 1, unit: 's',
@@ -448,24 +449,24 @@ export function Promptbox({
       <div style={{ borderRadius: 10, overflow: 'hidden' }}>
       {!simplified && (
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
-          {(['one prompt → all models', 'prompt per model', 'many prompts → all models'] as const).map((label, i, arr) => (
+          {([0, 1, 2] as const).map(i => (
             <button
               key={i}
               onClick={() => onModeChange(i as PromptMode)}
               style={{
                 flex: 1, padding: '9px 14px', fontSize: 11, fontFamily: 'var(--font-mono)',
                 cursor: 'pointer', textAlign: 'left', background: 'none', border: 'none',
-                borderRight: i < arr.length - 1 ? '0.5px solid var(--border)' : 'none',
+                borderRight: i < 2 ? '0.5px solid var(--border)' : 'none',
                 borderBottom: mode === i ? '1.5px solid var(--accent)' : '1.5px solid transparent',
                 marginBottom: -0.5,
                 color: mode === i ? 'var(--accent)' : 'var(--text-muted)',
               }}
             >
-              {label}
+              {t(`run.mode${i}`)}
             </button>
           ))}
           <div style={{ padding: '9px 14px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
-            {selectedCount} selected
+            {t('run.selected', { n: selectedCount })}
           </div>
         </div>
       )}
@@ -481,7 +482,7 @@ export function Promptbox({
                 className="nr-ta"
                 value={perModelPrompts[key] ?? ''}
                 onChange={e => onPerModelPromptChange(key, e.target.value)}
-                placeholder={`Prompt for ${key.split(':').slice(1).join(':')}…`}
+                placeholder={t('run.promptForModel', { model: key.split(':').slice(1).join(':') })}
                 rows={2}
                 style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', resize: 'none', lineHeight: 1.65, padding: '4px 14px 10px' }}
               />
@@ -499,14 +500,14 @@ export function Promptbox({
                 className="nr-ta"
                 value={p}
                 onChange={e => onBatchPromptsChange(batchPrompts.map((bp, bi) => bi === i ? e.target.value : bp))}
-                placeholder={`Prompt ${i + 1}…`}
+                placeholder={t('run.promptN', { n: i + 1 })}
                 rows={2}
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', resize: 'none', lineHeight: 1.65, padding: '8px 8px 10px 0' }}
               />
               {batchPrompts.length > 1 && (
                 <button
                   onClick={() => onBatchPromptsChange(batchPrompts.filter((_, bi) => bi !== i))}
-                  title="Remove prompt"
+                  title={t('title.removePrompt')}
                   style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: '10px 14px 0 4px', lineHeight: 1 }}
                 >
                   ✕
@@ -522,12 +523,12 @@ export function Promptbox({
               fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', cursor: 'pointer',
             }}
           >
-            + add prompt
+            {t('run.addPrompt')}
           </button>
           {modelsSlot && (
             <div style={{ borderTop: '0.5px solid var(--border)', padding: '10px 14px 2px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
-                Send to
+                {t('run.sendTo')}
               </span>
               {modelsSlot}
             </div>
@@ -551,7 +552,7 @@ export function Promptbox({
                 if (!disabled) onRun()
               }
             }}
-            placeholder={simplified ? 'Follow-up or new prompt…' : 'Ask anything…'}
+            placeholder={simplified ? t('run.followup') : t('run.ask')}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none',
               fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
@@ -575,16 +576,16 @@ export function Promptbox({
                 e.target.value = ''
               }}
             />
-            <IconButton onClick={() => fileInputRef.current?.click()} title="Attach files (PNG, JPEG, WebP, GIF, PDF — up to 10 MB)">
+            <IconButton onClick={() => fileInputRef.current?.click()} title={t('title.attach')}>
               {uploading ? <span className="ui-spinner" /> : <IconPaperclip size={14} />}
             </IconButton>
           </>
         ) : (
-          <span style={{ color: 'var(--text-muted)', display: 'flex', opacity: 0.4 }} title="Attachments work in single-prompt mode"><IconPaperclip size={15} /></span>
+          <span style={{ color: 'var(--text-muted)', display: 'flex', opacity: 0.4 }} title={t('title.attachSingle')}><IconPaperclip size={15} /></span>
         )}
         <button
           onClick={() => setSettingsOpen(v => !v)}
-          title="Run settings"
+          title={t('title.runSettings')}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: settingsOpen || activeCount > 0 ? 'var(--accent-bg)' : 'none',
@@ -607,13 +608,13 @@ export function Promptbox({
         <div style={{ flex: 1 }} />
         {callCount > 0 && !isRunning && (
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginRight: 6 }}>
-            <span style={{ color: 'var(--accent)' }}>{callCount}</span> call{callCount !== 1 ? 's' : ''}
+            <span style={{ color: 'var(--accent)' }}>{callCount}</span> {t('run.callsWord')}
           </span>
         )}
         {isRunning ? (
           <button
             onClick={onStop}
-            title="Stop run"
+            title={t('title.stopRun')}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 36, height: 36, border: 'none', borderRadius: 7,
@@ -624,7 +625,7 @@ export function Promptbox({
           </button>
         ) : (
           <Button variant="primary" onClick={onRun} disabled={disabled}>
-            <IconPlay size={11} /> run
+            <IconPlay size={11} /> {t('run.run')}
           </Button>
         )}
       </div>
@@ -684,6 +685,7 @@ function notifyRunsChanged() {
 }
 
 export function NewRun() {
+  const { t } = useT()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -1169,20 +1171,20 @@ export function NewRun() {
                 color: 'var(--accent)', background: 'var(--accent-bg)',
                 border: '0.5px solid var(--accent-dim)', borderRadius: 8, padding: '1px 6px',
               }}>
-                ⚡ fastest
+                ⚡ {t('run.fastest')}
               </span>
             )}
           </span>
-          <IconButton onClick={() => handleRegenerate(turn.promptIndex, key)} title="Regenerate"><IconRefresh /></IconButton>
-          <IconButton onClick={() => handleCopy(cellKey, r.text)} title="Copy">
+          <IconButton onClick={() => handleRegenerate(turn.promptIndex, key)} title={t('title.regenerate')}><IconRefresh /></IconButton>
+          <IconButton onClick={() => handleCopy(cellKey, r.text)} title={t('common.copy')}>
             {copiedCol === cellKey ? <IconCheck /> : <IconCopy />}
           </IconButton>
           {isExpanded ? (
-            <IconButton onClick={() => setExpandedCol(null)} title="Collapse"><IconCollapse /></IconButton>
+            <IconButton onClick={() => setExpandedCol(null)} title={t('common.collapse')}><IconCollapse /></IconButton>
           ) : (
             <>
-              <IconButton onClick={() => setExpandedCol(cellKey)} title="Expand"><IconExpand /></IconButton>
-              <IconButton onClick={() => handleCloseColumn(turn.promptIndex, key)} title="Close"><IconClose /></IconButton>
+              <IconButton onClick={() => setExpandedCol(cellKey)} title={t('common.expand')}><IconExpand /></IconButton>
+              <IconButton onClick={() => handleCloseColumn(turn.promptIndex, key)} title={t('common.close')}><IconClose /></IconButton>
             </>
           )}
         </div>
@@ -1206,7 +1208,7 @@ export function NewRun() {
               background: 'var(--error-bg)', border: '0.5px solid var(--border)', borderRadius: 6,
               padding: '10px 12px', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--error)',
             }}>
-              {r.error ?? 'Error'}
+              {r.error ?? t('common.error')}
             </div>
           </div>
         ) : (
@@ -1220,7 +1222,7 @@ export function NewRun() {
                     ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} />
                     : <span key={`${cellKey}:${si}`} style={{ whiteSpace: 'pre-wrap' }}>{seg.content}</span>
                 )
-              : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>Waiting…</span>)}
+              : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>{t('run.waiting')}</span>)}
             {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
           </div>
         )}
@@ -1280,7 +1282,7 @@ export function NewRun() {
           alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',
         }}>
           <div style={{ fontSize: 24, color: 'var(--text-primary)', fontWeight: 400, letterSpacing: -0.4, textAlign: 'center' }}>
-            What would you like to benchmark?
+            {t('run.title')}
           </div>
           {mode !== 2 && <ChipsRow {...chipsRowProps} wrap />}
           <div style={{ width: '100%', maxWidth: 640 }}>
@@ -1341,10 +1343,10 @@ export function NewRun() {
                     />
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                       <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginRight: 4 }}>
-                        отправка заново удалит ходы после этого
+                        {t('run.editHint')}
                       </span>
-                      <Button small onClick={() => setEditingTurn(null)}>Cancel</Button>
-                      <Button variant="primary" small onClick={() => void handleEditTurn(turn.promptIndex)}>Send</Button>
+                      <Button small onClick={() => setEditingTurn(null)}>{t('common.cancel')}</Button>
+                      <Button variant="primary" small onClick={() => void handleEditTurn(turn.promptIndex)}>{t('common.send')}</Button>
                     </div>
                   </div>
                 ) : (
@@ -1363,14 +1365,14 @@ export function NewRun() {
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <IconButton
-                        title="Copy message"
+                        title={t('title.copyMessage')}
                         onClick={() => void handleCopy(`prompt:${turn.promptIndex}`, turn.prompt)}
                         style={{ width: 22, height: 22, border: 'none' }}
                       >
                         {copiedCol === `prompt:${turn.promptIndex}` ? <IconCheck size={11} /> : <IconCopy size={11} />}
                       </IconButton>
                       <IconButton
-                        title="Edit message"
+                        title={t('title.editMessage')}
                         onClick={() => setEditingTurn({ promptIndex: turn.promptIndex, value: turn.prompt })}
                         disabled={screenState === 'running'}
                         style={{ width: 22, height: 22, border: 'none', opacity: screenState === 'running' ? 0.4 : undefined }}

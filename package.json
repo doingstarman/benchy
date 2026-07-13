@@ -17,9 +17,10 @@
   "scripts": {
     "dev": "concurrently -n server,vite -c cyan,magenta \"tsx watch src/cli.ts start --port 4243 --config-dir ~/.benchy-dev --no-open\" \"vite --config frontend/vite.config.ts\"",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json && vite build --config frontend/vite.config.ts",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/stamp-version.mjs && vite build --config frontend/vite.config.ts",
     "start": "node dist/cli.js",
     "prepack": "npm run build",
+    "check:release": "node scripts/check-release.mjs",
     "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.frontend.json",
     "test": "vitest run",
     "test:watch": "vitest",

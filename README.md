@@ -19,10 +19,13 @@ The `benchy` name on the public npm registry is not this project yet. Until this
 
 - **Side-by-side runs** — one prompt → all models, a different prompt per model, or a batch of prompts fanned out to every selected model. All provider calls fire in parallel; responses stream in live.
 - **Chat mode** — any run can be continued as a multi-turn conversation. Each model keeps *its own* dialog branch: it sees your messages and its previous replies, never the other models' answers.
+- **Attachments** — drop an image or PDF into the prompt (file picker, `Ctrl+V` a screenshot, or drag & drop; PNG/JPEG/WebP/GIF/PDF, up to 10 MB) and benchmark how each model handles it. A provider that can't take the format says so in its own card, with a pointer to its docs — the capability gap *is* the signal, so nothing is silently dropped.
 - **Canvas preview** — when a model generates HTML/CSS/JS, render it in a sandboxed iframe right in the result card. Compare two models' takes on the same game or UI, playable side by side.
 - **Metrics** — time to first token (TTFS), total time, input/output tokens per response; the fastest card in each turn gets highlighted.
 - **History** — every run is a session: revisit it, rename it after your test, reopen it from the sidebar and keep chatting. The sidebar shows your last 5 dialogs.
 - **Human-readable errors** — connection refused, bad API key, rate limits and the like are reported as actionable messages, not `fetch failed`.
+- **English / Russian** — the whole interface switches language from Settings; it follows your browser's locale by default.
+- **Update notices** — benchy compares its own build against the latest one published here and tells you when a newer one is installable, in the app and on startup. Nothing auto-installs: you run `benchy update` yourself.
 
 ## Providers
 
@@ -39,9 +42,9 @@ All adapters stream — required for accurate TTFS.
 
 | Command | What it does |
 |---|---|
-| `benchy` / `benchy start` | Start the server on port 4242 (`--port`, `--config-dir`, `--no-open`) |
+| `benchy` / `benchy start` | Start the server on port 4242 (`--port`, `--config-dir`, `--no-open`); prints a notice if a newer build is available |
 | `benchy stop [--port]` | Stop a running server |
-| `benchy update` | Update to the latest version from GitHub, in place |
+| `benchy update` | Update to the latest version from GitHub, in place. Restart benchy afterwards to apply it |
 
 ## Development
 

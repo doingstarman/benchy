@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import type { Provider } from '../../../src/types'
 
 interface ProviderTileProps {
@@ -6,6 +7,7 @@ interface ProviderTileProps {
 }
 
 export function ProviderTile({ provider, onClick }: ProviderTileProps) {
+  const { t } = useT()
   const isConnected = provider.enabled && (!!provider.apiKey || !!provider.baseUrl)
 
   return (
@@ -40,7 +42,7 @@ export function ProviderTile({ provider, onClick }: ProviderTileProps) {
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
         {provider.models.length > 0
           ? provider.models.slice(0, 2).join(', ') + (provider.models.length > 2 ? ` +${provider.models.length - 2}` : '')
-          : 'no models'}
+          : t('tile.noModels')}
       </div>
     </button>
   )

@@ -7,6 +7,8 @@ const SLIDER_CSS = `
   .rf-value-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
 `
 
+import { useT } from '../i18n'
+
 interface SliderFieldProps {
   label: string
   min: number
@@ -24,6 +26,7 @@ interface SliderFieldProps {
 // control sizing purely via their grid — no fixed widths that can collide.
 // With allowAuto, the value readout itself toggles between Auto and a number.
 export function SliderField({ label, min, max, step, value, onChange, allowAuto, unit, accent }: SliderFieldProps) {
+  const { t } = useT()
   const isAuto = value == null
   const display = isAuto ? 'Auto' : `${value}${unit ?? ''}`
   const valueColor = accent ? 'var(--accent)' : isAuto ? 'var(--text-muted)' : 'var(--text-primary)'
@@ -56,7 +59,7 @@ export function SliderField({ label, min, max, step, value, onChange, allowAuto,
         <button
           className="rf-value-btn"
           onClick={() => onChange(isAuto ? min : null)}
-          title={isAuto ? 'Click to set a value' : 'Click to reset to Auto'}
+          title={isAuto ? t('slider.setValue') : t('slider.resetAuto')}
           style={valueStyle}
         >
           {display}

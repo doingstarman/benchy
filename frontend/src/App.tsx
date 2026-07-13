@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { UiStyles } from './components/ui'
+import { UpdateBanner } from './components/UpdateBanner'
 import { hasActiveNewRunSession } from './pages/NewRun'
+import { useT } from './i18n'
 
 const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
 
 export function App() {
+  const { t } = useT()
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
@@ -30,6 +33,7 @@ export function App() {
         display: 'flex',
         flexDirection: 'column',
       }}>
+        <UpdateBanner />
         {showBackToDialog && (
           <div style={{ padding: '10px 16px 0', flexShrink: 0 }}>
             <button
@@ -45,7 +49,7 @@ export function App() {
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10 3L5 8l5 5" />
               </svg>
-              в диалог
+              {t('app.backToDialog')}
             </button>
           </div>
         )}

@@ -1,3 +1,5 @@
+import { useT } from '../i18n'
+
 interface MetricsBarProps {
   ttfs: number | null
   totalTime: number | null
@@ -8,6 +10,7 @@ interface MetricsBarProps {
 }
 
 export function MetricsBar({ ttfs, totalTime, inputTokens, outputTokens, reasoningTokens, isFastest }: MetricsBarProps) {
+  const { t } = useT()
   return (
     <div style={{
       display: 'flex',
@@ -19,7 +22,7 @@ export function MetricsBar({ ttfs, totalTime, inputTokens, outputTokens, reasoni
       color: 'var(--text-secondary)',
     }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        {isFastest && <span title="Fastest TTFS" style={{ color: 'var(--warning)' }}>★</span>}
+        {isFastest && <span title={t('title.fastestTtfs')} style={{ color: 'var(--warning)' }}>★</span>}
         <span style={{ color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>ttfs</span>
         <span style={{ color: ttfs != null ? 'var(--text-primary)' : 'var(--text-muted)' }}>
           {ttfs != null ? `${ttfs}ms` : '—'}

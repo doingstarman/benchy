@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { runsApi } from '../api'
 import { getActiveNewRunRunId, RUNS_CHANGED_EVENT } from '../pages/NewRun'
+import { useT, t } from '../i18n'
 import type { Run } from '../../../src/types'
 
 const EXPANDED_WIDTH = 160
@@ -118,7 +119,7 @@ function Item({ to, label, icon, collapsed, soon }: { to: string; label: string;
           {label}
           {soon && (
             <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
-              soon
+              {t('nav.soon')}
             </span>
           )}
         </>
@@ -136,7 +137,7 @@ function DisabledItem({ label, icon, collapsed, soon }: { label: string; icon: s
           {label}
           {soon && (
             <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
-              soon
+              {t('nav.soon')}
             </span>
           )}
         </>
@@ -189,6 +190,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
+  const { t } = useT()
   return (
     <nav style={{
       width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
@@ -217,7 +219,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
           <button
             className="sidebar-logo-btn"
             onClick={() => onCollapsedChange(false)}
-            title="Expand sidebar"
+            title={t('nav.expand')}
           >
             <span className="logo-mark" style={{ fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>Y</span>
             <svg className="logo-expand" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -235,7 +237,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
             <button
               className="sidebar-collapse-btn"
               onClick={() => onCollapsedChange(true)}
-              title="Collapse sidebar"
+              title={t('nav.collapse')}
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10 3L5 8l5 5" />
@@ -248,30 +250,30 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
       <Divider />
 
       {/* ?new=1 → always starts a fresh dialog; past ones live in the list below */}
-      <Item to="/run?new=1" label="Тест" icon="test" collapsed={collapsed} />
+      <Item to="/run?new=1" label={t('nav.test')} icon="test" collapsed={collapsed} />
       {!collapsed && <RecentDialogs />}
-      <Item to="/history" label="История" icon="history" collapsed={collapsed} />
+      <Item to="/history" label={t('nav.history')} icon="history" collapsed={collapsed} />
 
       <Divider />
 
-      <DisabledItem label="Дашборд" icon="dashboard" collapsed={collapsed} soon />
-      <DisabledItem label="Результаты" icon="results" collapsed={collapsed} soon />
+      <DisabledItem label={t('nav.dashboard')} icon="dashboard" collapsed={collapsed} soon />
+      <DisabledItem label={t('nav.results')} icon="results" collapsed={collapsed} soon />
 
       <Divider />
 
-      <DisabledItem label="Модели" icon="models" collapsed={collapsed} soon />
-      <Item to="/providers" label="Провайдеры" icon="providers" collapsed={collapsed} />
+      <DisabledItem label={t('nav.models')} icon="models" collapsed={collapsed} soon />
+      <Item to="/providers" label={t('nav.providers')} icon="providers" collapsed={collapsed} />
 
       <Divider />
 
-      <DisabledItem label="Датасеты" icon="datasets" collapsed={collapsed} soon />
+      <DisabledItem label={t('nav.datasets')} icon="datasets" collapsed={collapsed} soon />
 
       {/* Push settings to bottom */}
       <div style={{ flex: 1 }} />
 
       <Divider />
 
-      <Item to="/settings" label="Настройки" icon="settings" collapsed={collapsed} />
+      <Item to="/settings" label={t('nav.settings')} icon="settings" collapsed={collapsed} />
     </nav>
   )
 }

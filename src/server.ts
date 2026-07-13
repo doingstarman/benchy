@@ -10,6 +10,7 @@ import { registerRunsRoutes } from './api/runs.js'
 import { registerBenchmarkRoutes } from './api/benchmark.js'
 import { registerMockRoutes } from './api/mock.js'
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js'
+import { registerVersionRoutes } from './api/version.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -29,6 +30,7 @@ export async function createServer(port: number, dbPath?: string) {
 
   // API routes
   await registerUploadsRoutes(app)
+  await registerVersionRoutes(app)
   await registerProvidersRoutes(app)
   await registerRunsRoutes(app)
   await registerBenchmarkRoutes(app)

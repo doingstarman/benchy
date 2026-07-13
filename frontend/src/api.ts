@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Provider, Run, Result, AttachmentMeta } from '../../src/types'
+// Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
+import type { VersionInfo } from '../../src/version'
+
+export type { VersionInfo }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -59,6 +63,13 @@ export const uploadsApi = {
   // Removing a chip before send — only unbound uploads; fire-and-forget so the
   // UI never blocks on cleanup. A bound attachment is refused by the server.
   remove: (id: string) => fetch(`/api/uploads/${id}`, { method: 'DELETE' }),
+}
+
+// ─── version / updates ───────────────────────────────────────────────────────
+
+export const versionApi = {
+  // force=true bypasses the server's 30-min remote cache (the "check now" button)
+  get: (force = false) => apiFetch<VersionInfo>(`/api/version${force ? '?check=1' : ''}`),
 }
 
 // ─── runs ────────────────────────────────────────────────────────────────────
