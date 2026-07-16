@@ -201,7 +201,8 @@ export const DICT: Record<string, Entry> = {
   'tile.noModels': { en: 'no models', ru: 'нет моделей' },
 
   // ── run (NewRun) ──
-  'run.title': { en: 'What would you like to benchmark?', ru: 'Что будем бенчмаркать?' },
+  'run.title': { en: 'What would you like to test?', ru: 'Что будем тестировать?' },
+  'run.addAnotherPrompt': { en: 'Another prompt (runs on its own)…', ru: 'Ещё промпт (выполнится сам по себе)…' },
   'run.mode0': { en: 'one prompt → all models', ru: 'один промпт → все модели' },
   'run.mode1': { en: 'prompt per model', ru: 'промпт на модель' },
   'run.mode2': { en: 'many prompts → all models', ru: 'много промптов → все модели' },
@@ -215,7 +216,11 @@ export const DICT: Record<string, Entry> = {
   'run.runSettings': { en: 'Run settings', ru: 'Настройки запуска' },
   'run.waiting': { en: 'Waiting…', ru: 'Ожидание…' },
   'run.noProviders': { en: 'No providers —', ru: 'Нет провайдеров —' },
+  'run.needsKey': { en: 'needs a key', ru: 'нужен ключ' },
+  'run.needsKeyHint': { en: 'Add an API key in Providers to use this model', ru: 'Добавьте API-ключ в Провайдерах, чтобы использовать модель' },
   'run.editHint': { en: 'resending will drop turns after this', ru: 'отправка заново удалит ходы после этого' },
+  'run.editHintBatch': { en: 're-runs just this prompt', ru: 'перезапустит только этот промпт' },
+  'run.promptLabel': { en: 'Prompt {n}', ru: 'Промпт {n}' },
   'run.allModels': { en: 'all', ru: 'все' },
   'run.resetAll': { en: 'reset all', ru: 'сбросить всё' },
   'run.allModelsTab': { en: 'All models', ru: 'Все модели' },

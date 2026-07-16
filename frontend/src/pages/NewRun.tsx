@@ -10,7 +10,7 @@ import {
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
 } from '../components/icons'
 import { useT, t } from '../i18n'
-import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta } from '../../../src/types'
+import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   temperature: 0.7,
@@ -47,6 +47,90 @@ interface Turn {
 
 // Shared chip/thumbnail strip for attachments — used both in the promptbox
 // (pending, removable) and in the user bubble (read-only, clickable).
+// The question above a batch column. Deliberately NOT a chat bubble: these
+// prompts were never addressed to each other, and dressing them as a dialogue
+// is what made the whole mode read wrong.
+interface BatchPromptHeaderProps {
+  turn: Turn
+  index: number
+  editing: string | null
+  busy: boolean
+  copied: boolean
+  onEditStart: () => void
+  onEditChange: (v: string) => void
+  onEditCancel: () => void
+  onEditSend: () => void
+  onCopy: () => void
+}
+
+function BatchPromptHeader({
+  turn, index, editing, busy, copied,
+  onEditStart, onEditChange, onEditCancel, onEditSend, onCopy,
+}: BatchPromptHeaderProps) {
+  return (
+    <div style={{
+      background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+      borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)',
+          textTransform: 'uppercase', letterSpacing: '0.07em', flex: 1,
+        }}>
+          {t('run.promptLabel', { n: index + 1 })}
+        </span>
+        <IconButton title={t('title.copyMessage')} onClick={onCopy} style={{ width: 20, height: 20, border: 'none' }}>
+          {copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
+        </IconButton>
+        <IconButton
+          title={t('title.editMessage')}
+          onClick={onEditStart}
+          disabled={busy}
+          style={{ width: 20, height: 20, border: 'none', opacity: busy ? 0.4 : undefined }}
+        >
+          <IconPencil size={10} />
+        </IconButton>
+      </div>
+
+      {editing !== null ? (
+        <>
+          <textarea
+            autoFocus
+            value={editing}
+            onChange={e => onEditChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditSend() }
+              if (e.key === 'Escape') onEditCancel()
+            }}
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box', background: 'var(--bg-base)',
+              border: '0.5px solid var(--accent-dim)', borderRadius: 6, padding: '6px 8px',
+              fontSize: 13, color: 'var(--text-primary)', outline: 'none', resize: 'vertical', lineHeight: 1.55,
+            }}
+          />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flex: 1 }}>
+              {t('run.editHintBatch')}
+            </span>
+            <Button small onClick={onEditCancel}>{t('common.cancel')}</Button>
+            <Button variant="primary" small onClick={onEditSend}>{t('common.send')}</Button>
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {turn.attachments && turn.attachments.length > 0 && (
+            <div style={{ marginBottom: turn.prompt ? 8 : 0 }}>
+              <AttachmentStrip attachments={turn.attachments} />
+            </div>
+          )}
+          {turn.prompt}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMeta[]; onRemove?: (id: string) => void }) {
   if (attachments.length === 0) return null
   return (
@@ -118,6 +202,9 @@ const ANIM_CSS = `
 
 interface ChipsRowProps {
   models: { key: string; label: string }[]
+  // Models whose provider is enabled but has no credentials yet — shown greyed
+  // so they don't silently vanish, and route to Providers on click.
+  needsKeyModels: { key: string; label: string }[]
   selectedModels: Set<string>
   onToggle: (key: string) => void
   onToggleAll: () => void
@@ -125,7 +212,7 @@ interface ChipsRowProps {
   wrap: boolean
 }
 
-export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd, wrap }: ChipsRowProps) {
+export function ChipsRow({ models, needsKeyModels, selectedModels, onToggle, onToggleAll, onAdd, wrap }: ChipsRowProps) {
   const allSelected = models.length > 0 && models.every(m => selectedModels.has(m.key))
   return (
     <div
@@ -177,7 +264,25 @@ export function ChipsRow({ models, selectedModels, onToggle, onToggleAll, onAdd,
           </button>
         )
       })}
-      {models.length === 0 && (
+      {needsKeyModels.map(({ key, label }) => (
+        <button
+          key={key}
+          onClick={onAdd}
+          title={t('run.needsKeyHint')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+            padding: '5px 11px',
+            border: '0.5px dashed var(--border)', borderRadius: 20,
+            background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
+            color: 'var(--border-hover)',
+          }}
+        >
+          <span style={{ flexShrink: 0, fontSize: 10 }}>🔑</span>
+          {label}
+          <span style={{ fontSize: 10, opacity: 0.8 }}>· {t('run.needsKey')}</span>
+        </button>
+      ))}
+      {models.length === 0 && needsKeyModels.length === 0 && (
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{t('run.noProviders')}</span>
       )}
       <button
@@ -220,6 +325,9 @@ interface PromptboxProps {
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
+  // In a batch, the follow-up box adds another independent prompt — it is not a
+  // reply to anything, and must not invite the user to treat it as one.
+  isBatch?: boolean
   // Attachments — only offered in single-prompt flows (mode 0 and follow-ups)
   pendingAttachments: AttachmentMeta[]
   uploading: boolean
@@ -233,6 +341,7 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
+  isBatch,
   pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -552,7 +661,7 @@ export function Promptbox({
                 if (!disabled) onRun()
               }
             }}
-            placeholder={simplified ? t('run.followup') : t('run.ask')}
+            placeholder={simplified ? (isBatch ? t('run.addAnotherPrompt') : t('run.followup')) : t('run.ask')}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none',
               fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
@@ -645,6 +754,7 @@ interface SavedSession {
   screenState: ScreenState
   turns: Turn[]
   sessionModels: string[]
+  runKind: RunKind
   runId: string | null
   selectedModels: Set<string>
   mode: PromptMode
@@ -701,6 +811,9 @@ export function NewRun() {
   const [screenState, setScreenState] = useState<ScreenState>(() => savedSession?.screenState ?? 'idle')
   const [turns, setTurns] = useState<Turn[]>(() => savedSession?.turns ?? [])
   const [sessionModels, setSessionModels] = useState<string[]>(() => savedSession?.sessionModels ?? [])
+  // What this run's prompts mean. A batch is a set of independent questions, so
+  // it must not be laid out — or continued — as a conversation.
+  const [runKind, setRunKind] = useState<RunKind>(() => savedSession?.runKind ?? 'chat')
   const [runId, setRunId] = useState<string | null>(() => savedSession?.runId ?? null)
   const [vote, setVote] = useState<string | null>(() => savedSession?.vote ?? null)
   // expandedCol / copiedCol are keyed by `${promptIndex}:${modelKey}`
@@ -718,7 +831,7 @@ export function NewRun() {
 
   useEffect(() => {
     savedSession = {
-      screenState, turns, sessionModels, runId, selectedModels,
+      screenState, turns, sessionModels, runKind, runId, selectedModels,
       mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
@@ -802,6 +915,7 @@ export function NewRun() {
       regenEsRef.current?.close()
       setTurns(restored)
       setSessionModels(run.models)
+      setRunKind(run.kind ?? 'chat')
       setRunId(run.id)
       setScreenState('done')
       setVote(null)
@@ -847,6 +961,13 @@ export function NewRun() {
 
   const connectedModels = providers
     .filter(p => p.enabled && (p.apiKey || p.baseUrl))
+    .flatMap(p => p.models.map(m => ({ key: `${p.id}:${m}`, label: m })))
+
+  // Enabled providers that have models but no way to reach them yet (no key and
+  // no base URL). Their models used to just disappear from the picker — a new
+  // user who added OpenAI without a key had no idea why gpt-4o wasn't there.
+  const needsKeyModels = providers
+    .filter(p => p.enabled && !p.apiKey && !p.baseUrl && p.models.length > 0)
     .flatMap(p => p.models.map(m => ({ key: `${p.id}:${m}`, label: m })))
 
   function toggleModel(key: string) {
@@ -961,6 +1082,8 @@ export function NewRun() {
           }]
       setTurns(initialTurns)
       setSessionModels(activeModels)
+      // Mirrors the server's derivation from the request shape.
+      setRunKind(effectiveMode === 1 ? 'pairs' : (effectiveMode === 2 && filledBatchPrompts.length > 1) ? 'batch' : 'chat')
       setRunId(newRunId)
       setScreenState('running')
       notifyRunsChanged()
@@ -1240,6 +1363,7 @@ export function NewRun() {
 
   const chipsRowProps: Omit<ChipsRowProps, 'wrap'> = {
     models: connectedModels,
+    needsKeyModels,
     selectedModels,
     onToggle: toggleModel,
     onToggleAll: toggleAllModels,
@@ -1265,6 +1389,7 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
+    isBatch: runKind === 'batch',
     pendingAttachments,
     uploading,
     onFilesPicked: handleFilesPicked,
@@ -1318,6 +1443,37 @@ export function NewRun() {
         )
       })()}
 
+      {/* A batch is a set of independent questions, so it reads across, not down:
+          one column per prompt, its answer(s) underneath. Laying it out as a
+          vertical stack made it look like a conversation, which it never was. */}
+      {runKind === 'batch' ? (
+        <div style={{
+          flex: 1, minHeight: 0, overflow: 'auto', display: 'grid', gap: 12, alignItems: 'start',
+          gridTemplateColumns: `repeat(${turns.length || 1}, minmax(320px, 1fr))`,
+        }}>
+          {turns.map(turn => (
+            <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+              <BatchPromptHeader
+                turn={turn}
+                index={turn.promptIndex}
+                editing={editingTurn?.promptIndex === turn.promptIndex ? editingTurn.value : null}
+                busy={screenState === 'running'}
+                copied={copiedCol === `prompt:${turn.promptIndex}`}
+                onEditStart={() => setEditingTurn({ promptIndex: turn.promptIndex, value: turn.prompt })}
+                onEditChange={v => setEditingTurn({ promptIndex: turn.promptIndex, value: v })}
+                onEditCancel={() => setEditingTurn(null)}
+                onEditSend={() => void handleEditTurn(turn.promptIndex)}
+                onCopy={() => void handleCopy(`prompt:${turn.promptIndex}`, turn.prompt)}
+              />
+              {sessionModels.map(key => (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', minHeight: 320, overflow: 'hidden' }}>
+                  {renderCell(turn, key)}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {turns.map((turn, ti) => (
           <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
@@ -1398,6 +1554,7 @@ export function NewRun() {
         ))}
         <div ref={bottomRef} />
       </div>
+      )}
 
       {screenState === 'done' && (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'nowrap', flexShrink: 0, overflowX: 'auto' }}>

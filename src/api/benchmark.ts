@@ -11,7 +11,7 @@ import { webhookAdapter } from '../adapters/webhook.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js'
 import type { Adapter, Message, MessageAttachment } from '../adapters/base.js'
-import type { ProviderType, BenchmarkRequest, RunSettings } from '../types.js'
+import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../types.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -137,6 +137,7 @@ interface RunRow {
   total_calls: number
   completed_calls: number
   created_at: number
+  kind: RunKind
   run_settings: string | null
 }
 
@@ -202,7 +203,13 @@ async function deleteAttachmentsFrom(runId: string, promptIndex: number): Promis
 // Reconstructs one model's own conversation branch from prior turns —
 // failed turns (error IS NOT NULL) are skipped entirely rather than
 // injected as broken/empty assistant messages.
-async function buildHistory(runId: string, model: string, prompts: string[]): Promise<Message[]> {
+async function buildHistory(runId: string, model: string, prompts: string[], kind: RunKind): Promise<Message[]> {
+  // Only a chat's prompts are a conversation. A batch (many independent prompts
+  // fanned out) or pairs run must never be replayed as a dialogue — doing so
+  // feeds the model three unrelated questions as if it had been asked them in
+  // sequence, silently poisoning every answer after the first.
+  if (kind !== 'chat') return []
+
   const db = getDb()
   const rows = db.prepare(
     'SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index'
@@ -258,9 +265,14 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       if (bindError) return reply.code(400).send({ error: bindError })
     }
 
+    // Derived from the request's shape, not trusted from the client: pairs are
+    // one prompt per model, several prompts fanned out to every model is a
+    // batch, and a single prompt is the start of a chat.
+    const kind: RunKind = pairs?.length ? 'pairs' : storedPrompts.length > 1 ? 'batch' : 'chat'
+
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson)
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind)
 
     // Regenerate copies the source turn's attachments onto this run so the
     // re-run sees the same media. Done after the INSERT (rows FK-reference it).
@@ -308,7 +320,9 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       const providers = await getProviders()
       const tasks = models.map(async model => {
-        const history = await buildHistory(req.params.id, model, prompts)
+        // In a batch run this returns [] — the new prompt is another independent
+        // question, not a follow-up to the previous ones.
+        const history = await buildHistory(req.params.id, model, prompts, run.kind)
         return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history)
       })
 
@@ -336,9 +350,12 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
         return reply.code(400).send({ error: `promptIndex out of range (0..${prompts.length - 1})` })
       }
 
-      // Discarded turns take their attachments (rows + files) with them; on
-      // the edited turn itself, only the re-sent ids survive.
-      await deleteAttachmentsFrom(req.params.id, promptIndex + 1)
+      // Chat forks: later turns follow from this one, so editing it invalidates
+      // them. A batch prompt answers to nobody — editing it re-runs that prompt
+      // alone and leaves its neighbours untouched.
+      const forks = run.kind === 'chat'
+
+      if (forks) await deleteAttachmentsFrom(req.params.id, promptIndex + 1)
       const keep = new Set(attachments ?? [])
       const ownRows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id = ? AND prompt_index = ?')
         .all(req.params.id, promptIndex) as { id: string; mime_type: string }[]
@@ -352,10 +369,19 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
         if (bindError) return reply.code(400).send({ error: bindError })
       }
 
-      const updatedPrompts = [...prompts.slice(0, promptIndex), prompt]
-      const dropped = db.prepare('SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?')
-        .get(req.params.id, promptIndex) as { n: number }
-      db.prepare('DELETE FROM results WHERE run_id = ? AND prompt_index >= ?').run(req.params.id, promptIndex)
+      const updatedPrompts = forks
+        ? [...prompts.slice(0, promptIndex), prompt]
+        : prompts.map((p, i) => i === promptIndex ? prompt : p)
+
+      const countSql = forks
+        ? 'SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?'
+        : 'SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index = ?'
+      const deleteSql = forks
+        ? 'DELETE FROM results WHERE run_id = ? AND prompt_index >= ?'
+        : 'DELETE FROM results WHERE run_id = ? AND prompt_index = ?'
+
+      const dropped = db.prepare(countSql).get(req.params.id, promptIndex) as { n: number }
+      db.prepare(deleteSql).run(req.params.id, promptIndex)
       db.prepare(
         "UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls - ? + ?, completed_calls = completed_calls - ? WHERE id = ?"
       ).run(JSON.stringify(updatedPrompts), dropped.n, models.length, dropped.n, req.params.id)
@@ -363,7 +389,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
       const tasks = models.map(async model => {
-        const history = await buildHistory(req.params.id, model, prompts)
+        const history = await buildHistory(req.params.id, model, prompts, run.kind)
         return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history)
       })
 

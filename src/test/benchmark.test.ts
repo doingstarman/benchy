@@ -611,6 +611,93 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(existsSync(uploadPath(att.id, 'image/png'))).toBe(true)
   })
 
+  it('never replays a batch run as a conversation — its prompts are independent', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    // Three unrelated questions fanned out to one model — NOT a dialogue.
+    capturedMessages = []
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['capital of France?', 'square root of 9?', 'colour of the sky?'], models: [model] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as { data: { kind: string } }
+    expect(run.data.kind).toBe('batch')
+
+    // Each of the three calls must have carried exactly one user message.
+    expect(capturedMessages).toHaveLength(3)
+    for (const messages of capturedMessages) {
+      expect(messages).toHaveLength(1)
+      expect(messages[0].role).toBe('user')
+    }
+
+    // Adding a fourth prompt is another independent question, not a follow-up:
+    // the model must NOT be handed the previous three as chat history.
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'and the tallest mountain?' }),
+    })
+    await waitForRun(data.runId)
+    expect(capturedMessages).toHaveLength(1)
+    expect(capturedMessages[0]).toEqual([{ role: 'user', content: 'and the tallest mountain?' }])
+  })
+
+  it('editing one batch prompt re-runs only it, leaving its neighbours alone', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['first', 'second', 'third'], models: [model] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // In a chat this would fork and discard turns 1 and 2. In a batch they are
+    // unrelated questions — they must survive.
+    await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'first (edited)' }),
+    })
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { prompts: string[]; results: Array<{ promptIndex: number }> }
+    }
+    expect(run.data.prompts).toEqual(['first (edited)', 'second', 'third'])
+    // All three prompts still have their answer.
+    expect(new Set(run.data.results.map(r => r.promptIndex))).toEqual(new Set([0, 1, 2]))
+  })
+
+  it('still replays a chat run as a conversation', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hello'], models: [model] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as { data: { kind: string } }
+    expect(run.data.kind).toBe('chat')
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'and again?' }),
+    })
+    await waitForRun(data.runId)
+    // user → assistant → user: the chat still sees its own past.
+    expect(capturedMessages[0]).toHaveLength(3)
+    expect(capturedMessages[0].map(m => m.role)).toEqual(['user', 'assistant', 'user'])
+  })
+
   it('rejects attachments with multiple prompts or unknown ids', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`

@@ -87,7 +87,14 @@ export interface Run {
   createdAt: number
   runSettings?: RunSettings
   title?: string | null
+  kind: RunKind
 }
+
+// What a run's prompts[] means. 'chat' = successive turns of one conversation
+// (each prompt sees the previous answers). 'batch' = independent prompts fanned
+// out to every model; 'pairs' = one prompt per model. For the latter two the
+// prompts were never a dialogue and must not be replayed as one.
+export type RunKind = 'chat' | 'batch' | 'pairs'
 
 export interface BenchmarkRequest {
   prompts?: string[]

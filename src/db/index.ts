@@ -15,7 +15,11 @@ CREATE TABLE IF NOT EXISTS runs (
   created_at INTEGER NOT NULL,
   settings_overrides TEXT,
   run_settings TEXT,
-  title TEXT
+  title TEXT,
+  -- What prompts[] MEANS for this run: 'chat' = turns of one conversation,
+  -- 'batch'/'pairs' = independent prompts that must never be replayed to the
+  -- model as if they were a dialogue.
+  kind TEXT NOT NULL DEFAULT 'chat'
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -79,6 +83,8 @@ export async function initDb(path?: string): Promise<void> {
     'ALTER TABLE runs ADD COLUMN settings_overrides TEXT',
     'ALTER TABLE runs ADD COLUMN run_settings TEXT',
     'ALTER TABLE runs ADD COLUMN title TEXT',
+    // Existing runs predate the distinction; 'chat' preserves their behaviour.
+    "ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
