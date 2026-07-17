@@ -46,12 +46,20 @@ if (inTarball !== onDisk) {
 // A tarball packed twelve commits ago passes that check happily and ships a
 // release containing none of itself — silently, because an old frontend and an
 // old backend agree with each other.
-const head = git(['rev-parse', '--short', 'HEAD']).trim()
+//
+// The test is not "stamp === HEAD": the build stamps HEAD before the tarball
+// commit exists, so afterwards the stamp is legitimately one commit behind.
+// What must hold is that no shippable source landed after the pack.
+const lastSource = git([
+  'log', '-1', '--format=%h', '--',
+  'src', 'frontend/src', 'package.json',
+  ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
+]).trim()
 const { sha, builtAt } = JSON.parse(onDisk)
-if (sha !== head) {
-  console.error(`\x1b[31m✗ the packed build is not HEAD.\x1b[0m stamped ${sha}, HEAD is ${head}`)
-  console.error('\n  Shipping this would deploy a build that predates the release.')
-  console.error('  Commit your work first, then `npm pack` (its prepack rebuilds from HEAD).')
+if (sha !== lastSource) {
+  console.error(`\x1b[31m✗ the packed build predates the source.\x1b[0m stamped ${sha}, source is at ${lastSource}`)
+  console.error('\n  Shipping this would deploy a build without the very commits being released.')
+  console.error('  Commit your work first, then `npm pack` — its prepack rebuilds from HEAD.')
   process.exit(1)
 }
 

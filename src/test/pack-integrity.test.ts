@@ -45,14 +45,26 @@ describe('published tarball', () => {
     expect(tarballEntries()).toContain('package/dist/version.json')
   })
 
-  it('is built from HEAD — a stale tarball ships a release containing none of itself', () => {
+  it('contains every source commit — a stale tarball ships a release with none of itself', () => {
     // The stamp being self-consistent proves nothing about WHICH build it
     // stamps. A tarball packed twelve commits ago passed every other check here
     // and would have deployed silently: an old frontend and an old backend
     // agree with each other, so nothing 404s and nothing looks wrong.
+    //
+    // Not "stamp === HEAD": the build stamps HEAD *before* the tarball commit
+    // exists, so the stamp is legitimately one commit behind ever after. What
+    // must hold is that no shippable source has landed since the pack.
     const stamp = JSON.parse(readFromTarball('package/dist/version.json')) as { sha?: string }
-    const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-    expect(stamp.sha, `tarball was packed at ${stamp.sha}, HEAD is ${head} — repack before shipping`).toBe(head)
+    const lastSource = execFileSync('git', [
+      'log', '-1', '--format=%h', '--',
+      'src', 'frontend/src', 'package.json',
+      ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
+    ], { cwd: ROOT, encoding: 'utf8' }).trim()
+
+    expect(
+      stamp.sha,
+      `source moved to ${lastSource} after the tarball was packed at ${stamp.sha} — run \`npm pack\` and commit the .tgz with dist/version.json`,
+    ).toBe(lastSource)
   })
 
   it('carries a well-formed build stamp that isNewer() can actually compare', () => {

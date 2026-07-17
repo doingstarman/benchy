@@ -777,6 +777,49 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(run.data.completedCalls).toBe(run.data.totalCalls)
   })
 
+  it('a result that outlived its prompt never becomes a blank user message', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['R1'], models: [model] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // Race them: the edit forks prompts back to length 1 while continue's cell
+    // lands at index 1. The result row then has no prompt behind it.
+    await Promise.all([
+      fetch(`${base}/api/runs/${data.runId}/continue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'R2' }),
+      }),
+      fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptIndex: 0, prompt: 'R1-EDIT' }),
+      }),
+    ])
+    await waitForRun(data.runId)
+
+    // Whatever the race left behind, the next turn must still be sendable:
+    // `content: undefined` is a 400 at every real provider, so one race used to
+    // make the conversation permanently uncontinuable.
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'R3' }),
+    })
+    await waitForRun(data.runId)
+
+    expect(capturedMessages.length).toBeGreaterThan(0)
+    for (const messages of capturedMessages) {
+      for (const m of messages) {
+        expect(typeof m.content, `role=${m.role} content=${JSON.stringify(m.content)}`).toBe('string')
+      }
+    }
+  })
+
   it('an empty pairs array is not a pairs run and must not swallow the prompts', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`

@@ -17,6 +17,13 @@ interface ProviderBody {
   defaults?: ProviderDefaults
 }
 
+interface TestResult {
+  ok: boolean
+  ttfs?: number
+  message?: string
+  error?: string
+}
+
 // A candidate configuration — what the form currently holds, saved or not.
 interface ProbeBody {
   type: ProviderType
@@ -32,6 +39,22 @@ interface ProbeBody {
 function apiUrl(baseUrl: string, path: string): string {
   return `${baseUrl.trim().replace(/\/+$/, '')}${path}`
 }
+
+// An endpoint that accepts the socket and then says nothing used to hang these
+// buttons forever — there was no timeout anywhere on the probe paths.
+const PROBE_TIMEOUT_MS = 20_000
+function probeFetch(url: string, headers: Record<string, string>): Promise<Response> {
+  return fetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+}
+
+// getAdapter falls back to the OpenAI adapter for anything it doesn't know, so
+// an unrecognised type would send the user's key to api.openai.com — nowhere
+// near where they pointed it. Reject at the boundary instead.
+// Mirrors ProviderType in types.ts; the satisfies keeps it honest if that union
+// grows (hand-typing this list already cost me 'custom').
+const KNOWN_TYPES = new Set(
+  ['openai', 'anthropic', 'google', 'openai-compatible', 'local', 'custom', 'http-json', 'script', 'webhook'] satisfies ProviderType[],
+)
 
 // Static model lists for providers without a /models endpoint
 const STATIC_MODELS: Record<string, string[]> = {
@@ -53,8 +76,8 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     if (!body || typeof body.name !== 'string' || !body.name.trim()) {
       return reply.code(400).send({ error: 'name is required' })
     }
-    if (typeof body.type !== 'string' || !body.type) {
-      return reply.code(400).send({ error: 'type is required' })
+    if (typeof body.type !== 'string' || !KNOWN_TYPES.has(body.type)) {
+      return reply.code(400).send({ error: `type must be one of: ${[...KNOWN_TYPES].join(', ')}` })
     }
     if (!Array.isArray(body.models) || !body.models.every(m => typeof m === 'string')) {
       return reply.code(400).send({ error: 'models must be an array of model ids' })
@@ -90,7 +113,9 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
   // so "Cancel" silently kept whatever you had typed.
   app.post<{ Body: ProbeBody }>('/api/providers/models', async (req, reply) => {
     const { type, apiKey, baseUrl } = req.body ?? {}
-    if (!type) return reply.code(400).send({ error: 'type is required' })
+    if (!type || !KNOWN_TYPES.has(type)) {
+      return reply.code(400).send({ error: `Unknown provider type "${type ?? ''}"` })
+    }
 
     if (STATIC_MODELS[type]) return { data: STATIC_MODELS[type] }
     if (['http-json', 'script', 'webhook'].includes(type)) return { data: [] }
@@ -98,19 +123,29 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     const base = baseUrl?.trim() || 'https://api.openai.com/v1'
     const url = apiUrl(base, '/models')
     try {
-      let res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} })
+      const keyed = await probeFetch(url, apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      let res = keyed
       // Some catalogues are public and refuse the key rather than ignore it —
       // OpenRouter 403s a restricted key on /models while happily streaming
       // completions with it. The list is public, so just ask anonymously.
-      if (!res.ok && apiKey && (res.status === 401 || res.status === 403)) {
-        res = await fetch(url)
+      if (!keyed.ok && apiKey && (keyed.status === 401 || keyed.status === 403)) {
+        const anon = await probeFetch(url, {})
+        // Only keep the anonymous attempt if it actually helped. Otherwise the
+        // keyless "missing bearer authentication" buried the real cause — a
+        // revoked or wrong key — and blamed a header we deliberately omitted.
+        if (anon.ok) res = anon
       }
       if (!res.ok) {
         const text = await res.text().catch(() => res.statusText)
         return reply.code(502).send({ error: `/models: ${describeHttpError(res.status, text)}` })
       }
-      const json = await res.json() as { data?: { id: string }[] }
-      return { data: (json.data ?? []).map(m => m.id).sort() }
+      const json = await res.json().catch(() => null) as { data?: { id: string }[] } | null
+      // A captive portal or proxy answers 200 with HTML; a raw parser error is
+      // not something a user can act on.
+      if (!json || !Array.isArray(json.data)) {
+        return reply.code(502).send({ error: `/models: ${base} answered without a model list — is this an OpenAI-compatible endpoint?` })
+      }
+      return { data: json.data.map(m => m.id).filter(id => typeof id === 'string').sort() }
     } catch (err) {
       return reply.code(502).send({ error: humanizeNetworkError(err, base) })
     }
@@ -123,29 +158,46 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     const { type, apiKey, baseUrl, model } = req.body ?? {}
     if (!type) return reply.code(400).send({ error: 'type is required' })
     if (!model) return reply.code(400).send({ error: 'No models configured' })
+    // An unknown type silently fell back to the OpenAI adapter, which then sent
+    // the key to api.openai.com — not where the user pointed it.
+    if (!KNOWN_TYPES.has(type)) {
+      return reply.code(400).send({ error: `Unknown provider type "${type}"` })
+    }
 
     // The only question worth asking: does this model answer? It used to gate on
     // /models first and call a provider broken when that failed — but /models is
     // a catalogue, not the service. OpenRouter's is public and 403s the very key
     // that streams completions fine, so a working provider was pronounced dead
     // without ever being asked to speak.
-    try {
-      const { getAdapter } = await import('./benchmark.js')
-      const adapter = getAdapter(type)
-      const t0 = Date.now()
-
-      for await (const chunk of adapter.stream(
-        [{ role: 'user', content: 'Hi' }],
-        { apiKey, baseUrl, model },
-      )) {
-        if (chunk.type === 'token') {
-          return { data: { ok: true, ttfs: Date.now() - t0, message: 'streamed response received' } }
+    const t0 = Date.now()
+    const ask = async (): Promise<TestResult> => {
+      try {
+        const { getAdapter } = await import('./benchmark.js')
+        const adapter = getAdapter(type)
+        for await (const chunk of adapter.stream(
+          [{ role: 'user', content: 'Hi' }],
+          { apiKey, baseUrl, model },
+        )) {
+          if (chunk.type === 'token') {
+            return { ok: true, ttfs: Date.now() - t0, message: 'streamed response received' }
+          }
+          if (chunk.type === 'error') return { ok: false, error: chunk.message }
         }
-        if (chunk.type === 'error') return { data: { ok: false, error: chunk.message } }
+        return { ok: false, error: 'No response from provider' }
+      } catch (err) {
+        return { ok: false, error: humanizeNetworkError(err, baseUrl) }
       }
-      return { data: { ok: false, error: 'No response from provider' } }
-    } catch (err) {
-      return { data: { ok: false, error: humanizeNetworkError(err, baseUrl) } }
     }
+
+    // An endpoint that accepts the connection and then says nothing left this
+    // button spinning forever — no timeout existed anywhere on this path.
+    const giveUp = new Promise<TestResult>(resolve => {
+      setTimeout(() => resolve({
+        ok: false,
+        error: `No response within ${PROBE_TIMEOUT_MS / 1000}s — the endpoint accepted the connection but never answered`,
+      }), PROBE_TIMEOUT_MS).unref?.()
+    })
+
+    return { data: await Promise.race([ask(), giveUp]) }
   })
 }

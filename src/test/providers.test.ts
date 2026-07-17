@@ -213,6 +213,65 @@ describe('probing a draft', () => {
     expect(after.body.data.map(p => p.id).sort()).toEqual(before.body.data.map(p => p.id).sort())
   })
 
+  it('keeps the real auth error when the anonymous retry also fails', async () => {
+    // The retry overwrote the keyed response, so a revoked key was reported as
+    // "missing bearer authentication" — blaming a header we deliberately left
+    // out, and burying the one thing the user needed to know.
+    const srv = createHttpServer((req, res) => {
+      if (req.url !== '/v1/models') { res.writeHead(404); res.end(); return }
+      if (req.headers.authorization) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'Your API key was revoked. Rotate it in the dashboard.' } }))
+      } else {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'Missing bearer authentication in header' } }))
+      }
+    })
+    await new Promise<void>(r => srv.listen(14303, '127.0.0.1', r))
+    try {
+      const res = await post<{ error: string }>('/api/providers/models', {
+        type: 'openai-compatible', apiKey: 'sk-revoked', baseUrl: 'http://127.0.0.1:14303/v1',
+      })
+      expect(res.status).toBe(502)
+      expect(res.body.error).toMatch(/revoked/)
+      expect(res.body.error).not.toMatch(/Missing bearer/)
+    } finally {
+      await new Promise<void>(r => srv.close(() => r()))
+    }
+  })
+
+  it('says something actionable when the endpoint answers 200 with HTML', async () => {
+    // A captive portal or proxy. A raw JSON parser error is not a thing a user
+    // can do anything about.
+    const srv = createHttpServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><body>Sign in to the network</body></html>')
+    })
+    await new Promise<void>(r => srv.listen(14304, '127.0.0.1', r))
+    try {
+      const res = await post<{ error: string }>('/api/providers/models', {
+        type: 'openai-compatible', baseUrl: 'http://127.0.0.1:14304/v1',
+      })
+      expect(res.status).toBe(502)
+      expect(res.body.error).toMatch(/without a model list/)
+      expect(res.body.error).not.toMatch(/Unexpected token/)
+    } finally {
+      await new Promise<void>(r => srv.close(() => r()))
+    }
+  })
+
+  it('refuses an unknown type instead of quietly shipping the key to OpenAI', async () => {
+    // getAdapter's fallback is the OpenAI adapter, so an unrecognised type sent
+    // the user's key to api.openai.com — nowhere near where they pointed it.
+    for (const path of ['/api/providers/test', '/api/providers/models']) {
+      const res = await post<{ error: string }>(path, { type: 'nope', apiKey: 'sk-leak', model: 'x' })
+      expect(res.status, path).toBe(400)
+      expect(res.body.error, path).toMatch(/type/i)
+    }
+    const saved = await post<{ error: string }>('/api/providers', { name: 'X', type: 'nope', models: [] })
+    expect(saved.status).toBe(400)
+  })
+
   it('falls back to an anonymous catalogue request when the key is refused', async () => {
     // OpenRouter's /models is public and 403s a restricted key — the very key
     // that streams completions fine. Refusing the key must not cost the list.
