@@ -277,5 +277,7 @@ export const DICT: Record<string, Entry> = {
   'code.restart': { en: 'Restart', ru: 'Перезапустить' },
   'code.showCode': { en: 'Show code', ru: 'Показать код' },
   'code.artifactPreview': { en: 'Artifact preview', ru: 'Превью артефакта' },
+  'code.fullscreen': { en: 'Fullscreen', ru: 'Во весь экран' },
+  'code.exitFullscreen': { en: 'Exit fullscreen', ru: 'Свернуть' },
   'code.streaming': { en: 'streaming…', ru: 'стриминг…' },
 }

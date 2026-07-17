@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArtifactPreview } from './ArtifactPreview'
 import { IconButton } from './ui'
-import { IconCopy, IconCheck, IconPlay, IconRefresh, IconText } from './icons'
+import { IconCopy, IconCheck, IconPlay, IconRefresh, IconText, IconExpand, IconCollapse, IconClose } from './icons'
 import { isRunnableCode, type CodeSegment } from '../lib/artifact'
 import { useT } from '../i18n'
 
@@ -17,9 +17,17 @@ interface CodeBlockProps {
 export function CodeBlock({ segment, fill }: CodeBlockProps) {
   const { t } = useT()
   const [running, setRunning] = useState(false)
+  const [maximized, setMaximized] = useState(false)
   const [copied, setCopied] = useState(false)
   const [nonce, setNonce] = useState(0)
   const runnable = isRunnableCode(segment)
+
+  useEffect(() => {
+    if (!maximized) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMaximized(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [maximized])
 
   async function copyCode() {
     await navigator.clipboard.writeText(segment.content).catch(() => {})
@@ -50,13 +58,17 @@ export function CodeBlock({ segment, fill }: CodeBlockProps) {
         {running && (
           <>
             <IconButton onClick={() => setNonce(n => n + 1)} title={t('code.restart')}><IconRefresh /></IconButton>
+            <IconButton onClick={() => setMaximized(true)} title={t('code.fullscreen')}><IconExpand /></IconButton>
             <IconButton onClick={() => setRunning(false)} title={t('code.showCode')} active><IconText /></IconButton>
           </>
         )}
       </div>
       {running ? (
         <div style={{ display: 'flex', ...(fill ? { flex: 1, minHeight: 0 } : { height: 360 }) }}>
-          <ArtifactPreview html={segment.content} reloadKey={nonce} />
+          {/* While maximized the iframe lives in the overlay below — an iframe
+              can't be mounted in two places, and remounting would restart the
+              program. Keep the inline slot sized but empty. */}
+          {!maximized && <ArtifactPreview html={segment.content} reloadKey={nonce} />}
         </div>
       ) : (
         <pre style={{
@@ -67,6 +79,40 @@ export function CodeBlock({ segment, fill }: CodeBlockProps) {
         }}>
           {segment.content}
         </pre>
+      )}
+
+      {maximized && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.6)',
+            display: 'flex', flexDirection: 'column', padding: 20,
+          }}
+          onClick={() => setMaximized(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+              border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden',
+              background: 'var(--bg-base)',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px 5px 12px',
+              borderBottom: '0.5px solid var(--border)', background: 'var(--bg-elevated)',
+            }}>
+              <span style={{ flex: 1, fontSize: 'var(--fs-xs)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {segment.lang}
+              </span>
+              <IconButton onClick={() => setNonce(n => n + 1)} title={t('code.restart')}><IconRefresh /></IconButton>
+              <IconButton onClick={() => setMaximized(false)} title={t('code.exitFullscreen')} active><IconCollapse /></IconButton>
+              <IconButton onClick={() => setMaximized(false)} title={t('common.close')}><IconClose /></IconButton>
+            </div>
+            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+              <ArtifactPreview html={segment.content} reloadKey={nonce} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
