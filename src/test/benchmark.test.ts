@@ -768,6 +768,77 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(capturedMessages[0].map(m => m.role)).toEqual(['user', 'assistant', 'user'])
   })
 
+  it('a model naming a missing provider fails like any other cell, not into the void', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const real = `${providers.data[0].id}:gpt-4o-mini`
+    const ghost = 'deleted-provider-id:some-model'
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [real, ghost] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { totalCalls: number; completedCalls: number; results: Array<{ model: string; error: string | null }> }
+    }
+
+    // It used to return before writing a row or counting the call: the run sat
+    // at 1/2 forever and the error existed only in the live stream, so
+    // reopening the run showed no cell for that model at all.
+    expect(run.data.completedCalls).toBe(run.data.totalCalls)
+    const cell = run.data.results.find(r => r.model === ghost)
+    expect(cell, 'the failed cell must be persisted').toBeDefined()
+    expect(cell!.error).toMatch(/not configured/)
+    // The healthy model is unaffected.
+    expect(run.data.results.find(r => r.model === real)?.error).toBeNull()
+  })
+
+  it('a rejected edit-turn destroys nothing — a 400 must mean "nothing happened"', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    const upload = async (name: string) => {
+      const f = new FormData()
+      f.append('file', new Blob([pngBytes(5, 5, 5)], { type: 'image/png' }), name)
+      const res = await fetch(`${base}/api/uploads`, { method: 'POST', body: f })
+      return (await res.json() as { data: { id: string } }).data.id
+    }
+
+    const first = await upload('turn0.png')
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['first'], models: [model], attachments: [first] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const second = await upload('turn1.png')
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second', attachments: [second] }),
+    })
+    await waitForRun(data.runId)
+
+    // This edit must be refused — and refused BEFORE anything is deleted. It
+    // used to delete this turn's images and fork away the next turn's, then
+    // return 400, so the user saw an error and lost their files anyway.
+    const rejected = await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'edited', attachments: ['does-not-exist'] }),
+    })
+    expect(rejected.status).toBe(400)
+
+    expect(existsSync(uploadPath(first, 'image/png')), 'turn 0 image').toBe(true)
+    expect(existsSync(uploadPath(second, 'image/png')), 'turn 1 image').toBe(true)
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { prompts: string[]; attachments: Array<{ id: string }> }
+    }
+    expect(run.data.prompts).toEqual(['first', 'second'])
+    expect(run.data.attachments.map(a => a.id).sort()).toEqual([first, second].sort())
+  })
+
   it('the history search box is a search box, not a pattern language', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`

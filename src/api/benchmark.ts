@@ -45,12 +45,6 @@ async function runCell(
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
-  const provider = providers.find(p => p.id === providerId)
-
-  if (!provider) {
-    broadcast(runId, 'cell_error', { runId, promptIndex, model: modelKey, error: `Provider "${providerId}" not found` })
-    return
-  }
 
   const db = getDb()
   const resultId = randomUUID()
@@ -68,6 +62,14 @@ async function runCell(
   let reasoningTokens: number | undefined
 
   try {
+    // A model can name a provider that no longer exists (deleted, or a saved run
+    // reopened). Failing here rather than returning early means it lands in the
+    // normal error path: the row is written, so the failure survives a reload,
+    // and the finally below still counts the call — the run used to sit at
+    // completed < total forever with the error visible only in that live stream.
+    const provider = providers.find(p => p.id === providerId)
+    if (!provider) throw new Error(`Provider "${providerId}" is not configured — it may have been deleted`)
+
     const adapter = getAdapter(provider.type)
     const effectiveSettings = {
       ...DEFAULT_PROVIDER_SETTINGS,
@@ -148,8 +150,11 @@ interface ResultHistoryRow {
 
 // Binds freshly-uploaded attachments to a specific turn. Rejects ids that
 // don't exist or already belong to a different turn.
-function bindAttachments(ids: string[], runId: string, promptIndex: number): string | null {
-  const db = getDb()
+// Split from the binding itself so a caller that is about to destroy something
+// can check the request is acceptable FIRST — edit-turn deleted attachments and
+// only then discovered the request was invalid, taking the user's images with a
+// request it went on to reject.
+function validateAttachments(ids: string[], runId: string, promptIndex: number): string | null {
   if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) {
     return 'attachments must be an array of upload id strings'
   }
@@ -160,7 +165,13 @@ function bindAttachments(ids: string[], runId: string, promptIndex: number): str
       return `Attachment ${id} already belongs to another message`
     }
   }
-  const bind = db.prepare('UPDATE attachments SET run_id = ?, prompt_index = ? WHERE id = ?')
+  return null
+}
+
+function bindAttachments(ids: string[], runId: string, promptIndex: number): string | null {
+  const invalid = validateAttachments(ids, runId, promptIndex)
+  if (invalid) return invalid
+  const bind = getDb().prepare('UPDATE attachments SET run_id = ?, prompt_index = ? WHERE id = ?')
   for (const id of ids) bind.run(runId, promptIndex, id)
   return null
 }
@@ -363,6 +374,14 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const targetModels = run.kind === 'pairs'
         ? (models[promptIndex] ? [models[promptIndex]] : [])
         : models
+
+      // Everything below destroys something. Reject a bad request before that,
+      // or a 400 the user reads as "nothing happened" will already have deleted
+      // their images — from this turn and every later one.
+      if (attachments?.length) {
+        const invalid = validateAttachments(attachments, req.params.id, promptIndex)
+        if (invalid) return reply.code(400).send({ error: invalid })
+      }
 
       if (forks) await deleteAttachmentsFrom(req.params.id, promptIndex + 1)
       const keep = new Set(attachments ?? [])
