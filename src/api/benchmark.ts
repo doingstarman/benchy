@@ -132,11 +132,22 @@ async function runCell(
       let iterText = ''
       const calls: ToolCall[] = []
 
+      // Close the open reasoning burst and add its duration. THINK TIME is the
+      // sum of these bursts — NOT first-thought-to-first-answer, which across a
+      // tool round would swallow the tool's own execution time and report a
+      // model that thought 1s but called a 10s tool as having thought 11s.
+      const closeReasoningBurst = () => {
+        if (reasoningStart !== null) {
+          reasoningMs = (reasoningMs ?? 0) + (Date.now() - reasoningStart)
+          reasoningStart = null
+        }
+      }
+
       for await (const chunk of stream) {
         if (chunk.type === 'token') {
           if (ttfs === null) ttfs = Date.now() - t0
           // The thinking phase ends the moment the answer starts.
-          if (reasoningStart !== null && reasoningMs === null) reasoningMs = Date.now() - reasoningStart
+          closeReasoningBurst()
           iterText += chunk.text
           fullText += chunk.text
           broadcast(runId, 'cell_token', { runId, promptIndex, model: modelKey, text: chunk.text })
@@ -148,6 +159,9 @@ async function runCell(
           reasoningText += chunk.text
           broadcast(runId, 'cell_reasoning', { runId, promptIndex, model: modelKey, text: chunk.text })
         } else if (chunk.type === 'tool_call') {
+          // Reasoning that ended in a tool call, not an answer, still counts —
+          // but stops here, before the tool runs.
+          closeReasoningBurst()
           calls.push(chunk.call)
         } else if (chunk.type === 'done') {
           inputTokens += chunk.usage.inputTokens
@@ -201,8 +215,9 @@ async function runCell(
     }
 
     const totalTime = Date.now() - t0
-    // A model that thought and then produced nothing still spent that time.
-    if (reasoningStart !== null && reasoningMs === null) reasoningMs = Date.now() - reasoningStart
+    // A model that thought and then produced nothing (no token, no tool) still
+    // spent that time — close the final open burst.
+    if (reasoningStart !== null) reasoningMs = (reasoningMs ?? 0) + (Date.now() - reasoningStart)
     const toolCallsJson = toolActivity.length ? JSON.stringify(toolActivity) : null
 
     db.prepare(

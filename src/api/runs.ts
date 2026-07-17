@@ -193,8 +193,8 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
 
     const newId = randomUUID()
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat')
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null)
     // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
     // Attachments are copied (own files + rows) so the fork re-runs with the
     // same media instead of silently dropping it.

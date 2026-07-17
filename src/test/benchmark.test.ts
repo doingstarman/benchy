@@ -21,6 +21,7 @@ let reasoningMode = false
 // Drives the tool path: first pass asks calc to evaluate, second pass answers
 // using the result. 'loop' keeps calling forever to exercise the cap.
 let toolMode: 'off' | 'once' | 'loop' = 'off'
+let reasoningToolMode = false
 let capturedMessages: { role: string; content: string }[][] = []
 let capturedSettings: Record<string, unknown>[] = []
 let capturedTools: unknown[][] = []
@@ -37,6 +38,24 @@ vi.mock('../adapters/openai.js', () => ({
         // A real gap: reasoningMs must measure it, and ttfs must not stop here.
         await new Promise(r => setTimeout(r, 25))
         yield { type: 'reasoning', text: ' then I decide' }
+      }
+
+      // Reasoning followed by a tool round, with real gaps around the tool, so a
+      // reasoningMs that wrongly spans first-thought→first-answer would swallow
+      // the tool + round-2 latency (~90ms) instead of just the thinking (~30ms).
+      if (reasoningToolMode) {
+        const alreadyCalled = messages.some(m => m.role === 'tool')
+        if (!alreadyCalled) {
+          yield { type: 'reasoning', text: 'let me compute' }
+          await new Promise(r => setTimeout(r, 30))
+          yield { type: 'tool_call', call: { id: 'rt1', name: 'calc', args: { expression: '2 + 2' } } }
+          yield { type: 'done', usage: { inputTokens: 5, outputTokens: 2 } }
+          return
+        }
+        await new Promise(r => setTimeout(r, 60)) // tool-exec + round-2 latency
+        yield { type: 'token', text: 'It is 4.' }
+        yield { type: 'done', usage: { inputTokens: 7, outputTokens: 4 } }
+        return
       }
 
       if (toolMode !== 'off') {
@@ -1428,6 +1447,34 @@ describe('tools', () => {
       expect(names).toContain('calc')
     } finally {
       toolMode = 'off'
+    }
+  })
+})
+
+describe('reasoning + tools timing', () => {
+  it('THINK TIME excludes tool execution and inter-round latency', async () => {
+    // The model thinks ~30ms, then a tool round adds ~60ms of exec+latency
+    // before the answer. reasoningMs must reflect the thinking only — spanning
+    // to the first answer token would report ~90ms of "think time".
+    reasoningToolMode = true
+    try {
+      const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+      const res = await fetch(`${base}/api/benchmark`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: ['compute'], models: [`${providers.data[0].id}:gpt-4o-mini`], tools: ['calc'] }),
+      })
+      const body = await res.json() as { data: { runId: string } }
+      await waitForRun(body.data.runId)
+      const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as {
+        data: { results: Array<{ metrics: { reasoningMs: number | null } }> }
+      }
+      const ms = run.data.results[0].metrics.reasoningMs
+      expect(ms).not.toBeNull()
+      // ~30ms of thinking, comfortably under the ~90ms the bug would report.
+      expect(ms!).toBeGreaterThanOrEqual(25)
+      expect(ms!).toBeLessThan(60)
+    } finally {
+      reasoningToolMode = false
     }
   })
 })

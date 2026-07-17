@@ -14,14 +14,36 @@ describe('isBlockedIp', () => {
     ip => { expect(isBlockedIp(ip)).toBe(false) },
   )
 
-  it.each(['::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:127.0.0.1'])(
+  it.each(['::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:127.0.0.1', 'fec0::1'])(
     'blocks local/private IPv6 %s',
     ip => { expect(isBlockedIp(ip)).toBe(true) },
   )
 
+  // The bypass a verify agent found: the WHATWG URL parser and getaddrinfo emit
+  // the IPv4-mapped address in COMPRESSED HEX, not dotted decimal, and the old
+  // regex only matched the dotted form — so http://[::ffff:127.0.0.1] reached
+  // the key store. Every blocked v4 range must be caught in hex-mapped form too.
+  it.each([
+    '::ffff:7f00:1',      // 127.0.0.1
+    '::ffff:a9fe:a9fe',   // 169.254.169.254 cloud metadata
+    '::ffff:0a00:1',      // 10.0.0.1
+    '::ffff:c0a8:1',      // 192.168.0.1
+  ])('blocks the hex-mapped form %s', ip => {
+    expect(isBlockedIp(ip)).toBe(true)
+  })
+
+  it('allows a public hex-mapped address', () => {
+    expect(isBlockedIp('::ffff:808:808')).toBe(false) // 8.8.8.8
+  })
+
   it.each(['2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8'])(
     'allows public IPv6 %s',
     ip => { expect(isBlockedIp(ip)).toBe(false) },
+  )
+
+  it.each(['fc2.com', 'fdn.org', 'example.com', 'localhost', 'not-an-ip'])(
+    'does not treat the hostname %s as a blocked IP (it must be resolved first)',
+    host => { expect(isBlockedIp(host)).toBe(false) },
   )
 })
 
@@ -49,7 +71,9 @@ describe('assertPublicHost', () => {
     await expect(assertPublicHost('169.254.169.254')).rejects.toThrow(/blocked/)
   })
 
-  it('allows a real public IP literal', async () => {
-    await expect(assertPublicHost('1.1.1.1')).resolves.toBeUndefined()
+  it('allows a real public IP literal and pins to it', async () => {
+    // Returns the vetted address so the caller can connect to exactly what was
+    // checked — the pin that closes the rebinding window.
+    await expect(assertPublicHost('1.1.1.1')).resolves.toEqual({ address: '1.1.1.1', family: 4 })
   })
 })

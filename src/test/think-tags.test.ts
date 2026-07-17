@@ -61,6 +61,20 @@ describe('ThinkTagParser', () => {
     })
   })
 
+  it('keeps a literal <think> that shares a chunk with the answer text before it', () => {
+    // A provider that emits a whole sentence per SSE frame delivers the answer
+    // and the literal tag together. The tag must survive verbatim, not be sliced
+    // out (which left "The  tag…" with a doubled space and a stranded </think>).
+    expect(run(['The <think> tag wraps reasoning.'])).toEqual({
+      reasoning: '',
+      answer: 'The <think> tag wraps reasoning.',
+    })
+    expect(run(['See <think>X</think> done'])).toEqual({
+      reasoning: '',
+      answer: 'See <think>X</think> done',
+    })
+  })
+
   it('stays armed through leading whitespace', () => {
     expect(run(['\n', '<think>a</think>', 'B'])).toEqual({ reasoning: 'a', answer: '\nB' })
   })

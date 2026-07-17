@@ -55,6 +55,12 @@ export class ThinkTagParser {
 
       if (at !== -1) {
         this.emit(out, this.buf.slice(0, at))
+        // The text before an OPEN tag was real answer, so emit() just disarmed
+        // us: this "<think>" is a literal the model wrote, not a control tag.
+        // Drop the already-emitted prefix and leave the tag onward in the buffer
+        // to be flushed as answer, unconsumed. (Only reachable when !inside — a
+        // CLOSE search never disarms.)
+        if (!this.armed) { this.buf = this.buf.slice(at); break }
         this.buf = this.buf.slice(at + tag.length)
         this.inside = !this.inside
         // A closed think block means the answer starts now; nothing later can

@@ -1197,8 +1197,11 @@ export function NewRun() {
           outputTokens: res.metrics.outputTokens,
           reasoningTokens: res.metrics.reasoningTokens,
           reasoningMs: res.metrics.reasoningMs,
-          toolCalls: (res.toolCalls ?? []).map(a => ({
-            id: `${a.name}:${a.ms}`, name: a.name, args: a.args, result: a.result, isError: a.isError, ms: a.ms,
+          toolCalls: (res.toolCalls ?? []).map((a, ci) => ({
+            // Stored activity has no id — synthesize a unique one by index, not
+            // by name:ms (calc is instant, so several calls share ms=0/1 and the
+            // colliding React keys dropped rows on reload).
+            id: `restored:${ci}`, name: a.name, args: a.args, result: a.result, isError: a.isError, ms: a.ms,
           })),
           status: (res.error ? 'error' : 'done') as UIResult['status'],
           ...(res.error ? { error: res.error } : {}),

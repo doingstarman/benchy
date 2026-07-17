@@ -47,6 +47,23 @@ describe('anthropicAdapter — extended thinking', () => {
     expect(sentParams[0].thinking).toEqual({ type: 'adaptive' })
   })
 
+  it('suppresses thinking when tools are enabled — the two together 400 on the tool round', async () => {
+    const chunks = []
+    for await (const chunk of anthropicAdapter.stream(
+      [{ role: 'user', content: 'hi' }],
+      {
+        model: 'claude-opus-4-8', apiKey: 'sk-test',
+        settings: { extendedThinking: true, temperature: 0.7 },
+        tools: [{ name: 'calc', description: 'd', parameters: { type: 'object', properties: {} } }],
+      },
+    )) chunks.push(chunk)
+
+    expect('thinking' in sentParams[0]).toBe(false)
+    // With thinking off, temperature flows again as normal.
+    expect(sentParams[0].temperature).toBe(0.7)
+    expect(sentParams[0].tools).toBeDefined()
+  })
+
   it('drops temperature when thinking is on — sending both is a 400 every time', async () => {
     await collect({ extendedThinking: true, temperature: 0.7, topP: 0.9 })
     expect('temperature' in sentParams[0]).toBe(false)

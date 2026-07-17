@@ -132,6 +132,7 @@ export interface BenchmarkRequest {
   runSettings?: import('../../src/types').RunSettings
   attachments?: string[]
   cloneAttachmentsFrom?: { runId: string; promptIndex: number }
+  tools?: string[]
 }
 
 export const benchmarkApi = {
@@ -157,7 +158,7 @@ export type SSEEvent =
   | { event: 'cell_reasoning'; runId: string; promptIndex: number; model: string; text: string }
   | { event: 'cell_tool_call'; runId: string; promptIndex: number; model: string; id: string; name: string; args: unknown }
   | { event: 'cell_tool_result'; runId: string; promptIndex: number; model: string; id: string; name: string; content: string; isError: boolean; ms: number }
-  | { event: 'cell_done'; runId: string; promptIndex: number; model: string; ttfs: number; totalTime: number; reasoningMs: number | null; toolCalls: number; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }
+  | { event: 'cell_done'; runId: string; promptIndex: number; model: string; ttfs: number | null; totalTime: number; reasoningMs: number | null; toolCalls: number; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }
   | { event: 'cell_error'; runId: string; promptIndex: number; model: string; error: string }
   | { event: 'run_done'; runId: string }
 

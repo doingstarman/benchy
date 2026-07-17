@@ -56,7 +56,14 @@ export const anthropicAdapter: Adapter = {
     // Claude never thinks unless asked, so this is opt-in rather than passive
     // observation. Adaptive is the only accepted form on 4.6+ — `budget_tokens`
     // is rejected outright on Opus 4.8/4.7 and Fable 5.
-    const thinking = config.settings?.extendedThinking === true
+    //
+    // NOT combined with tools: a thinking turn that calls a tool must replay its
+    // thinking block — signature and all — in the assistant message on the next
+    // round, or Anthropic 400s. benchy's neutral Message can't carry that opaque
+    // block through the tool loop, so when tools are on, thinking stays off and
+    // the tool round works. (OpenAI-compatible providers are unaffected — their
+    // reasoning rides the stream and is never replayed.)
+    const thinking = config.settings?.extendedThinking === true && !config.tools?.length
 
     try {
       const stream = client.messages.stream({
