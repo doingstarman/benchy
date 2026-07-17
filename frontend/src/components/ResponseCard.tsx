@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { MetricsBar } from './MetricsBar'
+import { ActivityTrace, ActivityTraceStyles } from './ActivityTrace'
+import { useShowReasoning } from '../prefs'
 import { runsApi } from '../api'
 
 interface ResponseCardProps {
@@ -7,11 +9,13 @@ interface ResponseCardProps {
   resultId?: string
   model: string
   text: string
+  reasoning?: string
   ttfs: number | null
   totalTime: number | null
   inputTokens: number | null
   outputTokens: number | null
   reasoningTokens?: number | null
+  reasoningMs?: number | null
   feedback?: 'up' | 'down' | null
   isFastest?: boolean
   isStreaming?: boolean
@@ -19,10 +23,11 @@ interface ResponseCardProps {
 }
 
 export function ResponseCard({
-  runId, resultId, model, text, ttfs, totalTime,
-  inputTokens, outputTokens, reasoningTokens,
+  runId, resultId, model, text, reasoning, ttfs, totalTime,
+  inputTokens, outputTokens, reasoningTokens, reasoningMs,
   feedback: initialFeedback, isFastest, isStreaming, error,
 }: ResponseCardProps) {
+  const showReasoning = useShowReasoning()
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(initialFeedback ?? null)
   const [modelName, providerId] = (() => {
     const idx = model.indexOf(':')
@@ -99,7 +104,7 @@ export function ResponseCard({
         <MetricsBar
           ttfs={ttfs} totalTime={totalTime}
           inputTokens={inputTokens} outputTokens={outputTokens}
-          reasoningTokens={reasoningTokens} isFastest={isFastest}
+          reasoningTokens={reasoningTokens} reasoningMs={reasoningMs} isFastest={isFastest}
         />
       </div>
 
@@ -116,6 +121,16 @@ export function ResponseCard({
         overflowY: 'auto',
         maxHeight: 600,
       }}>
+        <ActivityTraceStyles />
+        {showReasoning && !error && (
+          <ActivityTrace
+            reasoning={reasoning ?? ''}
+            reasoningMs={reasoningMs ?? null}
+            reasoningTokens={reasoningTokens ?? null}
+            status={isStreaming ? 'streaming' : 'done'}
+            answerStarted={text.length > 0}
+          />
+        )}
         {error ?? text}
         {isStreaming && !error && (
           <span style={{ display: 'inline-block', width: 8, height: 14, background: 'var(--accent)', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />

@@ -18,6 +18,7 @@ const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
   timeoutMs: 60000,
   retries: 2,
   streaming: true,
+  extendedThinking: false,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

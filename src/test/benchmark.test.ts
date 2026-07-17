@@ -15,16 +15,70 @@ const pngBytes = (...tail: number[]): Buffer => Buffer.from([0x89, 0x50, 0x4e, 0
 // Only the external HTTP calls to providers are mocked — everything else is real
 // slowMode adds a delay so SSE clients can connect before run_done fires
 let slowMode = false
+// Drives the reasoning path: the adapter emits thinking before the answer, the
+// way OpenRouter/DeepSeek actually stream it.
+let reasoningMode = false
+// Drives the tool path: first pass asks calc to evaluate, second pass answers
+// using the result. 'loop' keeps calling forever to exercise the cap.
+let toolMode: 'off' | 'once' | 'loop' = 'off'
+let reasoningToolMode = false
 let capturedMessages: { role: string; content: string }[][] = []
+let capturedSettings: Record<string, unknown>[] = []
+let capturedTools: unknown[][] = []
 
 vi.mock('../adapters/openai.js', () => ({
   openaiAdapter: {
-    async *stream(messages: { role: string; content: string }[], config: { model: string }) {
+    async *stream(messages: { role: string; content: string }[], config: { model: string; settings?: Record<string, unknown>; tools?: unknown[] }) {
       capturedMessages.push(messages)
+      capturedSettings.push(config.settings ?? {})
+      capturedTools.push(config.tools ?? [])
       if (slowMode) await new Promise(r => setTimeout(r, 80))
+      if (reasoningMode) {
+        yield { type: 'reasoning', text: 'first I consider' }
+        // A real gap: reasoningMs must measure it, and ttfs must not stop here.
+        await new Promise(r => setTimeout(r, 25))
+        yield { type: 'reasoning', text: ' then I decide' }
+      }
+
+      // Reasoning followed by a tool round, with real gaps around the tool, so a
+      // reasoningMs that wrongly spans first-thought→first-answer would swallow
+      // the tool + round-2 latency (~90ms) instead of just the thinking (~30ms).
+      if (reasoningToolMode) {
+        const alreadyCalled = messages.some(m => m.role === 'tool')
+        if (!alreadyCalled) {
+          yield { type: 'reasoning', text: 'let me compute' }
+          await new Promise(r => setTimeout(r, 30))
+          yield { type: 'tool_call', call: { id: 'rt1', name: 'calc', args: { expression: '2 + 2' } } }
+          yield { type: 'done', usage: { inputTokens: 5, outputTokens: 2 } }
+          return
+        }
+        await new Promise(r => setTimeout(r, 60)) // tool-exec + round-2 latency
+        yield { type: 'token', text: 'It is 4.' }
+        yield { type: 'done', usage: { inputTokens: 7, outputTokens: 4 } }
+        return
+      }
+
+      if (toolMode !== 'off') {
+        const alreadyCalled = messages.some(m => m.role === 'tool')
+        if (toolMode === 'loop' || !alreadyCalled) {
+          yield { type: 'tool_call', call: { id: `c${messages.length}`, name: 'calc', args: { expression: '2 + 2' } } }
+          yield { type: 'done', usage: { inputTokens: 5, outputTokens: 2 } }
+          return
+        }
+        // Second pass: the tool result is in the conversation now.
+        const toolMsg = messages.find(m => m.role === 'tool') as { toolResults?: { content: string }[] } | undefined
+        const answer = toolMsg?.toolResults?.[0]?.content ?? '?'
+        yield { type: 'token', text: `The answer is ${answer}.` }
+        yield { type: 'done', usage: { inputTokens: 7, outputTokens: 4 } }
+        return
+      }
+
       yield { type: 'token', text: `Hello from ${config.model}` }
       yield { type: 'token', text: '!' }
-      yield { type: 'done', usage: { inputTokens: 10, outputTokens: 3 } }
+      yield {
+        type: 'done',
+        usage: { inputTokens: 10, outputTokens: 3, ...(reasoningMode ? { reasoningTokens: 42 } : {}) },
+      }
     },
   },
 }))
@@ -1118,5 +1172,309 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
       body: JSON.stringify({ promptIndex: 5, prompt: 'x' }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('reasoning', () => {
+  async function runWithReasoning(): Promise<{ id: string; results: Array<Record<string, unknown>> }> {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    reasoningMode = true
+    try {
+      const body = await startBenchmark(['think about it'], [`${pid}:gpt-4o-mini`])
+      await waitForRun(body.data!.runId)
+      const run = await fetch(`${base}/api/runs/${body.data!.runId}`).then(r => r.json()) as {
+        data: { id: string; results: Array<Record<string, unknown>> }
+      }
+      return run.data
+    } finally {
+      reasoningMode = false
+    }
+  }
+
+  it('survives a reload — the whole point of storing it rather than only streaming it', async () => {
+    // GET /api/runs/:id is a completely separate path from the SSE stream, with
+    // no shared serializer. Reasoning reached the browser live and still went
+    // missing on refresh right up until this column existed.
+    const run = await runWithReasoning()
+    const cell = run.results[0]
+
+    expect(cell.reasoning).toBe('first I consider then I decide')
+    expect(cell.text).toBe('Hello from gpt-4o-mini!')
+  })
+
+  it('keeps reasoning out of the answer text', async () => {
+    const run = await runWithReasoning()
+    expect(String(run.results[0].text)).not.toContain('I consider')
+  })
+
+  it('reports reasoning tokens and think time in metrics', async () => {
+    const run = await runWithReasoning()
+    const metrics = run.results[0].metrics as { reasoningTokens: number | null; reasoningMs: number | null }
+
+    expect(metrics.reasoningTokens).toBe(42)
+    // The mock sleeps 25ms between its two thoughts.
+    expect(metrics.reasoningMs).toBeGreaterThanOrEqual(20)
+  })
+
+  it('does not let reasoning claim TTFS', async () => {
+    // If a reasoning chunk set ttfs, every thinking model's TTFS would collapse
+    // to near-zero and stop comparing against every run recorded before this
+    // feature existed. TTFS is time to first ANSWER token, and must therefore
+    // sit past the mock's 25ms thinking gap.
+    const run = await runWithReasoning()
+    const metrics = run.results[0].metrics as { ttfs: number | null }
+    expect(metrics.ttfs).toBeGreaterThanOrEqual(20)
+  })
+
+  it('leaves reasoning null for a model that never thinks', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const body = await startBenchmark(['plain'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+    const run = await fetch(`${base}/api/runs/${body.data!.runId}`).then(r => r.json()) as {
+      data: { results: Array<Record<string, unknown>> }
+    }
+    expect(run.data.results[0].reasoning).toBeNull()
+  })
+
+  it('does not replay reasoning back to the provider on continue', async () => {
+    // DeepSeek rejects a request that carries its own reasoning_content back,
+    // and an Anthropic thinking block replayed as prose is no longer a thinking
+    // block. History is answers only.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+    reasoningMode = true
+    let runId: string
+    try {
+      const body = await startBenchmark(['first'], [model])
+      runId = body.data!.runId
+      await waitForRun(runId)
+    } finally {
+      reasoningMode = false
+    }
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second' }),
+    })
+    await waitForRun(runId)
+
+    const sent = JSON.stringify(capturedMessages)
+    expect(sent).toContain('Hello from gpt-4o-mini')
+    expect(sent).not.toContain('I consider')
+  })
+
+  it('sends no extendedThinking to the adapter unless the run asks for it', async () => {
+    // The invariant the whole feature rests on: an ordinary run must go out
+    // exactly as it did before chat 2.0.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    capturedSettings = []
+    const body = await startBenchmark(['plain'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    expect(capturedSettings[0].extendedThinking).toBe(false)
+  })
+})
+
+describe('closing a model', () => {
+  it('stops follow-ups calling it — a closed column must stop costing money', async () => {
+    // Closing a column used to be cosmetic and per-turn: the server fans out
+    // over run.models and was never told, so it kept calling the model on every
+    // follow-up for the rest of the session. The answers were paid for, stored,
+    // and never shown.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const keep = `${pid}:gpt-4o-mini`
+    const drop = `${pid}:gpt-4o`
+
+    const body = await startBenchmark(['first'], [keep, drop])
+    const runId = body.data!.runId
+    await waitForRun(runId)
+
+    const res = await fetch(`${base}/api/runs/${runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [keep] }),
+    })
+    expect(res.status).toBe(200)
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second' }),
+    })
+    await waitForRun(runId)
+
+    // One call for the surviving model, none for the closed one.
+    expect(capturedMessages).toHaveLength(1)
+    const cells = getDb().prepare('SELECT model FROM results WHERE run_id = ? AND prompt_index = 1').all(runId) as { model: string }[]
+    expect(cells.map(c => c.model)).toEqual([keep])
+  })
+
+  it('refuses to add models to an existing run', async () => {
+    // `models` is also the record of what this run asked. Growing it would
+    // invent results that never happened.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const body = await startBenchmark(['x'], [`${pid}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    const res = await fetch(`${base}/api/runs/${body.data!.runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [`${pid}:gpt-4o-mini`, `${pid}:gpt-4o`] }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects an empty model set', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const body = await startBenchmark(['x'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    const res = await fetch(`${base}/api/runs/${body.data!.runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [] }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('tools', () => {
+  async function runWithTools(toolIds: string[]): Promise<{ id: string; results: Array<Record<string, unknown>> }> {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['what is 2+2'], models: [`${pid}:gpt-4o-mini`], tools: toolIds }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as {
+      data: { id: string; results: Array<Record<string, unknown>> }
+    }
+    return run.data
+  }
+
+  it('runs a tool the model asks for and answers with the result', async () => {
+    toolMode = 'once'
+    try {
+      const run = await runWithTools(['calc'])
+      const cell = run.results[0]
+      expect(cell.text).toBe('The answer is 4.')
+      const activity = cell.toolCalls as Array<{ name: string; result: string; isError: boolean }>
+      expect(activity).toHaveLength(1)
+      expect(activity[0]).toMatchObject({ name: 'calc', result: '4', isError: false })
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('sums usage across the tool round instead of overwriting it', async () => {
+    // Two provider calls (ask + answer): 5+7 in, 2+4 out. Overwriting would
+    // report only the last, hiding the cost of the tool round.
+    toolMode = 'once'
+    try {
+      const run = await runWithTools(['calc'])
+      const m = run.results[0].metrics as { inputTokens: number; outputTokens: number }
+      expect(m.inputTokens).toBe(12)
+      expect(m.outputTokens).toBe(6)
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('sends no tools to the adapter when none are enabled — the pre-tools request is unchanged', async () => {
+    capturedTools = []
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${providers.data[0].id}:gpt-4o-mini`] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    expect(capturedTools.every(t => t.length === 0)).toBe(true)
+  })
+
+  it('offers the enabled tool spec to the adapter', async () => {
+    capturedTools = []
+    toolMode = 'once'
+    try {
+      await runWithTools(['calc'])
+      const names = capturedTools.flat().map(t => (t as { name?: string }).name)
+      expect(names).toContain('calc')
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('stops after the iteration cap instead of looping on tool calls forever', async () => {
+    toolMode = 'loop'
+    try {
+      const run = await runWithTools(['calc'])
+      const cell = run.results[0]
+      expect(String(cell.text)).toContain('stopped after')
+      // 8 rounds, each recording one tool call.
+      expect((cell.toolCalls as unknown[]).length).toBe(8)
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('reuses the run tools on continue', async () => {
+    toolMode = 'once'
+    try {
+      const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+      const start = await fetch(`${base}/api/benchmark`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: ['first'], models: [`${providers.data[0].id}:gpt-4o-mini`], tools: ['calc'] }),
+      }).then(r => r.json()) as { data: { runId: string } }
+      await waitForRun(start.data.runId)
+
+      capturedTools = []
+      await fetch(`${base}/api/runs/${start.data.runId}/continue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'again' }),
+      })
+      await waitForRun(start.data.runId)
+      const names = capturedTools.flat().map(t => (t as { name?: string }).name)
+      expect(names).toContain('calc')
+    } finally {
+      toolMode = 'off'
+    }
+  })
+})
+
+describe('reasoning + tools timing', () => {
+  it('THINK TIME excludes tool execution and inter-round latency', async () => {
+    // The model thinks ~30ms, then a tool round adds ~60ms of exec+latency
+    // before the answer. reasoningMs must reflect the thinking only — spanning
+    // to the first answer token would report ~90ms of "think time".
+    reasoningToolMode = true
+    try {
+      const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+      const res = await fetch(`${base}/api/benchmark`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: ['compute'], models: [`${providers.data[0].id}:gpt-4o-mini`], tools: ['calc'] }),
+      })
+      const body = await res.json() as { data: { runId: string } }
+      await waitForRun(body.data.runId)
+      const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as {
+        data: { results: Array<{ metrics: { reasoningMs: number | null } }> }
+      }
+      const ms = run.data.results[0].metrics.reasoningMs
+      expect(ms).not.toBeNull()
+      // ~30ms of thinking, comfortably under the ~90ms the bug would report.
+      expect(ms!).toBeGreaterThanOrEqual(25)
+      expect(ms!).toBeLessThan(60)
+    } finally {
+      reasoningToolMode = false
+    }
   })
 })

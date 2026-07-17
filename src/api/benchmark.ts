@@ -10,8 +10,9 @@ import { scriptAdapter } from '../adapters/script.js'
 import { webhookAdapter } from '../adapters/webhook.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js'
-import type { Adapter, Message, MessageAttachment } from '../adapters/base.js'
+import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec } from '../adapters/base.js'
 import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../types.js'
+import { resolveTools, type Tool } from '../tools/index.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -34,6 +35,28 @@ function broadcast(runId: string, event: string, data: unknown) {
   }
 }
 
+// A runaway model that keeps calling tools would burn real money forever. Stop
+// after this many rounds, keep whatever text it produced, and mark the trace.
+const MAX_TOOL_ITERATIONS = 8
+
+// Resolve a run's tool ids into a dispatch map + the specs sent to providers.
+// web_search silently drops out when no key is set, so specs and map always
+// agree — a model is never offered a tool the loop can't run.
+async function prepareTools(ids: string[] | undefined): Promise<{ tools: Map<string, Tool>; specs: ToolSpec[] }> {
+  if (!ids?.length) return { tools: new Map(), specs: [] }
+  const tools = await resolveTools(ids)
+  const specs = [...tools.values()].map(t => t.spec)
+  return { tools, specs }
+}
+
+interface ToolActivity {
+  name: string
+  args: unknown
+  result: string
+  isError: boolean
+  ms: number
+}
+
 async function runCell(
   runId: string,
   promptIndex: number,
@@ -42,6 +65,8 @@ async function runCell(
   providers: Awaited<ReturnType<typeof getProviders>>,
   runSettings?: RunSettings,
   history: Message[] = [],
+  tools: Map<string, Tool> = new Map(),
+  toolSpecs: ToolSpec[] = [],
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
@@ -57,9 +82,19 @@ async function runCell(
   const t0 = Date.now()
   let ttfs: number | null = null
   let fullText = ''
+  let reasoningText = ''
+  // Wall-clock from the first thought to the first answer token. Not derivable
+  // from ttfs: a model can think for 20s before saying anything, and that gap is
+  // exactly what the metric is for.
+  let reasoningStart: number | null = null
+  let reasoningMs: number | null = null
+  // Summed across every iteration, never overwritten — a tool loop makes several
+  // provider calls and the cost of the tools is precisely the difference.
   let inputTokens = 0
   let outputTokens = 0
-  let reasoningTokens: number | undefined
+  let reasoningTokens = 0
+  let sawReasoningTokens = false
+  const toolActivity: ToolActivity[] = []
 
   try {
     // A model can name a provider that no longer exists (deleted, or a saved run
@@ -78,34 +113,121 @@ async function runCell(
       ...(runSettings?.perModel?.[modelKey] ?? {}),
     }
     const attachments = await loadAttachments(runId, promptIndex)
-    const stream = adapter.stream(
-      [...history, { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) }],
-      { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings },
-    )
 
-    for await (const chunk of stream) {
-      if (chunk.type === 'token') {
-        if (ttfs === null) ttfs = Date.now() - t0
-        fullText += chunk.text
-        broadcast(runId, 'cell_token', { runId, promptIndex, model: modelKey, text: chunk.text })
-      } else if (chunk.type === 'done') {
-        inputTokens = chunk.usage.inputTokens
-        outputTokens = chunk.usage.outputTokens
-        reasoningTokens = chunk.usage.reasoningTokens
-      } else if (chunk.type === 'error') {
-        throw new Error(chunk.message)
+    // The running conversation. Tool rounds append to it; without tools the loop
+    // runs exactly once and this is just the single request as before.
+    const convo: Message[] = [
+      ...history,
+      { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) },
+    ]
+
+    let hitToolCap = false
+    let toolRounds = 0
+    for (;;) {
+      const stream = adapter.stream(convo, {
+        apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings: effectiveSettings,
+        ...(toolSpecs.length ? { tools: toolSpecs } : {}),
+      })
+
+      let iterText = ''
+      const calls: ToolCall[] = []
+
+      // Close the open reasoning burst and add its duration. THINK TIME is the
+      // sum of these bursts — NOT first-thought-to-first-answer, which across a
+      // tool round would swallow the tool's own execution time and report a
+      // model that thought 1s but called a 10s tool as having thought 11s.
+      const closeReasoningBurst = () => {
+        if (reasoningStart !== null) {
+          reasoningMs = (reasoningMs ?? 0) + (Date.now() - reasoningStart)
+          reasoningStart = null
+        }
       }
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'token') {
+          if (ttfs === null) ttfs = Date.now() - t0
+          // The thinking phase ends the moment the answer starts.
+          closeReasoningBurst()
+          iterText += chunk.text
+          fullText += chunk.text
+          broadcast(runId, 'cell_token', { runId, promptIndex, model: modelKey, text: chunk.text })
+        } else if (chunk.type === 'reasoning') {
+          // Deliberately does NOT set ttfs: that stays "time to first answer
+          // token", or every thinking model's TTFS collapses to near-zero and
+          // stops comparing against every run recorded before this feature.
+          if (reasoningStart === null) reasoningStart = Date.now()
+          reasoningText += chunk.text
+          broadcast(runId, 'cell_reasoning', { runId, promptIndex, model: modelKey, text: chunk.text })
+        } else if (chunk.type === 'tool_call') {
+          // Reasoning that ended in a tool call, not an answer, still counts —
+          // but stops here, before the tool runs.
+          closeReasoningBurst()
+          calls.push(chunk.call)
+        } else if (chunk.type === 'done') {
+          inputTokens += chunk.usage.inputTokens
+          outputTokens += chunk.usage.outputTokens
+          if (chunk.usage.reasoningTokens != null) { reasoningTokens += chunk.usage.reasoningTokens; sawReasoningTokens = true }
+        } else if (chunk.type === 'error') {
+          throw new Error(chunk.message)
+        }
+      }
+
+      // No tools asked for → the model is done, this is the final answer.
+      if (calls.length === 0) break
+
+      // Already ran the maximum number of tool rounds: stop, keep the text.
+      if (toolRounds >= MAX_TOOL_ITERATIONS) { hitToolCap = true; break }
+      toolRounds++
+
+      // Run every requested tool concurrently — same Promise.all discipline as
+      // the rest of benchy — and hand all results back in one turn.
+      const results: ToolResult[] = await Promise.all(calls.map(async call => {
+        broadcast(runId, 'cell_tool_call', { runId, promptIndex, model: modelKey, id: call.id, name: call.name, args: call.args })
+        const started = Date.now()
+        const tool = tools.get(call.name)
+        let content: string
+        let isError = false
+        if (!tool) {
+          content = `Unknown tool: ${call.name}`
+          isError = true
+        } else {
+          try {
+            content = await tool.run(call.args)
+          } catch (err) {
+            content = err instanceof Error ? err.message : String(err)
+            isError = true
+          }
+        }
+        const ms = Date.now() - started
+        toolActivity.push({ name: call.name, args: call.args, result: content, isError, ms })
+        broadcast(runId, 'cell_tool_result', { runId, promptIndex, model: modelKey, id: call.id, name: call.name, content, isError, ms })
+        return { id: call.id, name: call.name, content, isError }
+      }))
+
+      convo.push({ role: 'assistant', content: iterText, toolCalls: calls })
+      convo.push({ role: 'tool', content: '', toolResults: results })
+    }
+
+    if (hitToolCap) {
+      const note = `\n\n[stopped after ${MAX_TOOL_ITERATIONS} tool rounds]`
+      fullText += note
+      broadcast(runId, 'cell_token', { runId, promptIndex, model: modelKey, text: note })
     }
 
     const totalTime = Date.now() - t0
+    // A model that thought and then produced nothing (no token, no tool) still
+    // spent that time — close the final open burst.
+    if (reasoningStart !== null) reasoningMs = (reasoningMs ?? 0) + (Date.now() - reasoningStart)
+    const toolCallsJson = toolActivity.length ? JSON.stringify(toolActivity) : null
+
     db.prepare(
-      'UPDATE results SET text = ?, ttfs = ?, total_time = ?, input_tokens = ?, output_tokens = ?, reasoning_tokens = ? WHERE id = ?'
-    ).run(fullText, ttfs, totalTime, inputTokens, outputTokens, reasoningTokens ?? null, resultId)
+      'UPDATE results SET text = ?, ttfs = ?, total_time = ?, input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, reasoning = ?, reasoning_ms = ?, tool_calls = ? WHERE id = ?'
+    ).run(fullText, ttfs, totalTime, inputTokens, outputTokens, sawReasoningTokens ? reasoningTokens : null, reasoningText || null, reasoningMs, toolCallsJson, resultId)
 
     broadcast(runId, 'cell_done', {
       runId, promptIndex, model: modelKey,
-      ttfs, totalTime,
-      usage: { inputTokens, outputTokens, ...(reasoningTokens != null ? { reasoningTokens } : {}) },
+      ttfs, totalTime, reasoningMs, toolCalls: toolActivity.length,
+      usage: { inputTokens, outputTokens, ...(sawReasoningTokens ? { reasoningTokens } : {}) },
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -156,6 +278,19 @@ interface RunRow {
   created_at: number
   kind: RunKind
   run_settings: string | null
+  tools: string | null
+}
+
+// Parse a run's stored tool ids. A follow-up reuses whatever the run started
+// with, so the model keeps the same toolset across the whole conversation.
+function runToolIds(run: RunRow): string[] {
+  if (!run.tools) return []
+  try {
+    const parsed = JSON.parse(run.tools) as unknown
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 interface ResultHistoryRow {
@@ -238,6 +373,11 @@ async function buildHistory(runId: string, model: string, prompts: string[], kin
   // (already filtered to this model) are exactly that model's own thread.
   if (kind === 'batch') return []
 
+  // `reasoning` is stored but deliberately NOT replayed here. Providers do not
+  // want their own thinking back as assistant text: DeepSeek rejects the
+  // request outright, and an Anthropic thinking block replayed as plain prose
+  // is no longer a thinking block. History is the answers only — the reasoning
+  // is for the human reading the trace, and reaches the UI via GET /api/runs/:id.
   const db = getDb()
   const rows = db.prepare(
     'SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index'
@@ -266,7 +406,7 @@ async function buildHistory(runId: string, model: string, prompts: string[], kin
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom } = req.body
+    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools } = req.body
     if (!pairs?.length && (!prompts?.length || !models?.length)) {
       return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
     }
@@ -311,9 +451,12 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     // batch, and a single prompt is the start of a chat.
     const kind: RunKind = pairs?.length ? 'pairs' : storedPrompts.length > 1 ? 'batch' : 'chat'
 
+    const validTools = Array.isArray(tools) ? tools.filter(t => typeof t === 'string') : []
+    const toolsJson = validTools.length ? JSON.stringify(validTools) : null
+
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind)
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson)
 
     // Regenerate copies the source turn's attachments onto this run so the
     // re-run sees the same media. Done after the INSERT (rows FK-reference it).
@@ -323,9 +466,10 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
+    const { tools: toolMap, specs: toolSpecs } = await prepareTools(validTools)
     const tasks = isPairs
-      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
-      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings)))
+      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs))
+      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs)))
 
     finalizeRun(runId, tasks)
 
@@ -365,11 +509,12 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       ).run(JSON.stringify(updatedPrompts), targetModels.length, runSettingsJson, req.params.id)
 
       const providers = await getProviders()
+      const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run))
       const tasks = targetModels.map(async model => {
         // In a batch run this returns [] — the new prompt is another independent
         // question, not a follow-up to the previous ones.
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history)
+        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs)
       })
 
       finalizeRun(req.params.id, tasks)
@@ -451,9 +596,10 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
+      const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run))
       const tasks = targetModels.map(async model => {
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history)
+        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs)
       })
 
       finalizeRun(req.params.id, tasks)

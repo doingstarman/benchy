@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getTheme, setTheme, watchSystem, type Theme } from '../theme'
 import { useT, type Lang } from '../i18n'
+import { useShowReasoning, setShowReasoning } from '../prefs'
 import { versionApi, type VersionInfo } from '../api'
 import { Button } from '../components/ui'
 
@@ -27,6 +28,7 @@ const SEGMENT_CSS = `
 
 export function Settings() {
   const { t, lang, setLang } = useT()
+  const showReasoning = useShowReasoning()
   const [theme, setThemeState] = useState<Theme>(getTheme)
   const [info, setInfo] = useState<VersionInfo | null>(null)
 
@@ -71,6 +73,18 @@ export function Settings() {
               onClick={() => setLang(l as Lang)}
             >
               {l === 'en' ? 'English' : 'Русский'}
+            </button>
+          ))}
+        </SegmentRow>
+        <SegmentRow label={t('settings.showReasoning')}>
+          {([true, false] as const).map(on => (
+            <button
+              key={String(on)}
+              className={`seg-btn${showReasoning === on ? ' active' : ''}`}
+              onClick={() => setShowReasoning(on)}
+              title={t('settings.showReasoningHint')}
+            >
+              {on ? t('common.on') : t('common.off')}
             </button>
           ))}
         </SegmentRow>

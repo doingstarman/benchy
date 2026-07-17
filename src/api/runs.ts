@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
 import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js'
-import type { Run, Result, Metrics, RunSettings, RunKind } from '../types.js'
+import type { Run, Result, Metrics, RunSettings, RunKind, ToolActivity } from '../types.js'
 
 interface RunRow {
   id: string
@@ -17,6 +17,7 @@ interface RunRow {
   run_settings: string | null
   title: string | null
   kind: RunKind
+  tools: string | null
 }
 
 interface ResultRow {
@@ -31,6 +32,9 @@ interface ResultRow {
   input_tokens: number | null
   output_tokens: number | null
   reasoning_tokens: number | null
+  reasoning: string | null
+  reasoning_ms: number | null
+  tool_calls: string | null
   feedback: string | null
   error: string | null
   created_at: number
@@ -59,6 +63,27 @@ function rowToRun(row: RunRow): Run {
     kind: row.kind ?? 'chat',
     ...(runSettings ? { runSettings } : {}),
     ...(row.title != null ? { title: row.title } : {}),
+    ...(row.tools ? { tools: parseTools(row.tools) } : {}),
+  }
+}
+
+function parseTools(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function parseToolCalls(raw: string | null): ToolActivity[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed as ToolActivity[] : []
+  } catch {
+    return []
   }
 }
 
@@ -69,6 +94,7 @@ function rowToResult(row: ResultRow): Result {
     inputTokens: row.input_tokens,
     outputTokens: row.output_tokens,
     reasoningTokens: row.reasoning_tokens,
+    reasoningMs: row.reasoning_ms,
   }
   return {
     id: row.id,
@@ -77,6 +103,8 @@ function rowToResult(row: ResultRow): Result {
     model: row.model,
     providerId: row.provider_id,
     text: row.text,
+    reasoning: row.reasoning,
+    toolCalls: parseToolCalls(row.tool_calls),
     metrics,
     feedback: row.feedback as Result['feedback'],
     error: row.error,
@@ -165,8 +193,8 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
 
     const newId = randomUUID()
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat')
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null)
     // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
     // Attachments are copied (own files + rows) so the fork re-runs with the
     // same media instead of silently dropping it.
@@ -176,9 +204,36 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ data: rowToRun(newRun) })
   })
 
-  app.patch<{ Params: { id: string }; Body: { saved?: boolean; title?: string | null } }>('/api/runs/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { saved?: boolean; title?: string | null; models?: string[] } }>('/api/runs/:id', async (req, reply) => {
     const db = getDb()
-    const { saved, title } = req.body
+    const { saved, title, models } = req.body
+
+    // Dropping a model from the comparison. Only ever a narrowing: `models` is
+    // also the historical record of what this run asked, so adding to it would
+    // invent results that never happened.
+    if (models !== undefined) {
+      const current = db.prepare('SELECT models, kind FROM runs WHERE id = ?').get(req.params.id) as
+        { models: string; kind: string | null } | undefined
+      if (!current) return reply.code(404).send({ error: 'Run not found' })
+
+      // In a pairs run `models` is aligned index-for-index with `prompts` — it
+      // is not a set, and removing an entry silently re-pairs every prompt after
+      // it with the wrong model.
+      if ((current.kind ?? 'chat') === 'pairs') {
+        return reply.code(400).send({ error: 'Cannot change the model set of a pairs run — its models are paired to its prompts' })
+      }
+
+      const existing = new Set(JSON.parse(current.models) as string[])
+      if (!Array.isArray(models) || models.length === 0) {
+        return reply.code(400).send({ error: 'models must be a non-empty array' })
+      }
+      const unknown = models.filter(m => !existing.has(m))
+      if (unknown.length > 0) {
+        return reply.code(400).send({ error: `Cannot add models to an existing run: ${unknown.join(', ')}` })
+      }
+      db.prepare('UPDATE runs SET models = ? WHERE id = ?').run(JSON.stringify(models), req.params.id)
+    }
+
     if (saved !== undefined) {
       db.prepare('UPDATE runs SET saved = ? WHERE id = ?').run(saved ? 1 : 0, req.params.id)
     }

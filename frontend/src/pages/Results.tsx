@@ -8,11 +8,13 @@ import type { Run, Result } from '../../../src/types'
 
 interface CellState {
   text: string
+  reasoning: string
   ttfs: number | null
   totalTime: number | null
   inputTokens: number | null
   outputTokens: number | null
   reasoningTokens: number | null
+  reasoningMs: number | null
   done: boolean
   error: string | null
 }
@@ -46,11 +48,13 @@ export function Results() {
         for (const r of data.results) {
           initial[cellKey(r.promptIndex, r.model)] = {
             text: r.text,
+            reasoning: r.reasoning ?? '',
             ttfs: r.metrics.ttfs,
             totalTime: r.metrics.totalTime,
             inputTokens: r.metrics.inputTokens,
             outputTokens: r.metrics.outputTokens,
             reasoningTokens: r.metrics.reasoningTokens,
+            reasoningMs: r.metrics.reasoningMs,
             done: true,
             error: r.error,
           }
@@ -64,8 +68,14 @@ export function Results() {
     if (e.event === 'cell_token') {
       setCells(prev => {
         const k = cellKey(e.promptIndex, e.model)
-        const existing = prev[k] ?? { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, done: false, error: null }
+        const existing = prev[k] ?? { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, done: false, error: null }
         return { ...prev, [k]: { ...existing, text: existing.text + e.text } }
+      })
+    } else if (e.event === 'cell_reasoning') {
+      setCells(prev => {
+        const k = cellKey(e.promptIndex, e.model)
+        const existing = prev[k] ?? { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, done: false, error: null }
+        return { ...prev, [k]: { ...existing, reasoning: existing.reasoning + e.text } }
       })
     } else if (e.event === 'cell_done') {
       setCells(prev => {
@@ -79,6 +89,7 @@ export function Results() {
             inputTokens: e.usage.inputTokens,
             outputTokens: e.usage.outputTokens,
             reasoningTokens: e.usage.reasoningTokens ?? null,
+            reasoningMs: e.reasoningMs,
             done: true,
             error: null,
           },
@@ -87,7 +98,7 @@ export function Results() {
     } else if (e.event === 'cell_error') {
       setCells(prev => {
         const k = cellKey(e.promptIndex, e.model)
-        return { ...prev, [k]: { ...(prev[k] ?? { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null }), done: true, error: e.error } }
+        return { ...prev, [k]: { ...(prev[k] ?? { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null }), done: true, error: e.error } }
       })
     } else if (e.event === 'run_done') {
       setIsLive(false)
@@ -273,11 +284,13 @@ export function Results() {
               resultId={result?.id}
               model={model}
               text={cell?.text ?? ''}
+              reasoning={cell?.reasoning ?? ''}
               ttfs={cell?.ttfs ?? null}
               totalTime={cell?.totalTime ?? null}
               inputTokens={cell?.inputTokens ?? null}
               outputTokens={cell?.outputTokens ?? null}
               reasoningTokens={cell?.reasoningTokens}
+              reasoningMs={cell?.reasoningMs}
               feedback={result?.feedback}
               isFastest={isFastest}
               isStreaming={isLive && !(cell?.done)}

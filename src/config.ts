@@ -14,10 +14,26 @@ export const DEFAULT_PROVIDER_SETTINGS: Required<ProviderDefaults> = {
   timeoutMs: 60000,
   retries: 2,
   streaming: true,
+  extendedThinking: false,
+}
+
+export interface SearchConfig {
+  provider: 'brave' | 'tavily'
+  apiKey: string
 }
 
 interface Config {
   providers: Provider[]
+  // Optional: enables the web_search tool. Without a key the tool is not even
+  // offered to models, so tool runs never depend on a search key existing.
+  search?: SearchConfig
+}
+
+export async function getSearchConfig(): Promise<SearchConfig | undefined> {
+  const config = await readConfig()
+  const s = config.search
+  if (!s || !s.apiKey || (s.provider !== 'brave' && s.provider !== 'tavily')) return undefined
+  return s
 }
 
 function getBenchyDir(): string {

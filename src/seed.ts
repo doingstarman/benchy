@@ -75,6 +75,18 @@ const MOCK_PROVIDERS: Provider[] = [
     models: ['deepseek-chat'],
     enabled: true,
   },
+  {
+    id: 'mock-reasoning',
+    name: 'Mock Reasoning',
+    type: 'openai',
+    baseUrl: mockBaseUrl,
+    apiKey: 'mock-key',
+    // One model per shape reasoning actually arrives in, so the trace UI can be
+    // exercised offline instead of against a paid provider: a reasoning field,
+    // inline <think> tags, and a token count with no text.
+    models: ['r1-think', 'qwen-tagged', 'o3-quiet'],
+    enabled: true,
+  },
 ]
 
 async function seed() {

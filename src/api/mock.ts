@@ -120,6 +120,7 @@ interface ChatBody {
   model: string
   messages: { role: string; content: string | ContentPart[] }[]
   stream?: boolean
+  tools?: { function?: { name?: string } }[]
 }
 
 // The openai adapter sends attachment messages as content-part arrays —
@@ -136,10 +137,38 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: ChatBody }>(
     '/api/mock/chat/completions',
     async (req: FastifyRequest<{ Body: ChatBody }>, reply: FastifyReply) => {
-      const { model = 'mock', messages = [], stream } = req.body
+      const { model = 'mock', messages = [], stream, tools = [] } = req.body
 
       if (!stream) {
         return reply.code(400).send({ error: { message: 'mock adapter requires stream: true' } })
+      }
+
+      // Tool demo: when tools are offered and the model hasn't been given a
+      // result yet, ask for one. On the next pass (a tool message is present)
+      // it answers normally. Lets the whole tool UI be exercised offline.
+      const offered = new Set(tools.map(t => t.function?.name).filter(Boolean))
+      const alreadyRan = messages.some(m => m.role === 'tool')
+      const created0 = Math.floor(Date.now() / 1000)
+      const streamId = `chatcmpl-mock-${Date.now()}`
+      if (offered.size > 0 && !alreadyRan) {
+        const tool = offered.has('calc') ? { name: 'calc', arguments: '{"expression":"6 * 7 + 1"}' }
+          : offered.has('web_search') ? { name: 'web_search', arguments: '{"query":"benchy llm benchmarking"}' }
+          : { name: 'fetch_url', arguments: '{"url":"https://example.com"}' }
+        reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' })
+        reply.raw.flushHeaders()
+        await new Promise(r => setTimeout(r, getTtfsMs(model)))
+        reply.raw.write(`data: ${JSON.stringify({
+          id: streamId, object: 'chat.completion.chunk', created: created0, model,
+          choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${created0}`, type: 'function', function: tool }] }, finish_reason: null }],
+        })}\n\n`)
+        reply.raw.write(`data: ${JSON.stringify({
+          id: streamId, object: 'chat.completion.chunk', created: created0, model,
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 },
+        })}\n\n`)
+        reply.raw.write('data: [DONE]\n\n')
+        reply.raw.end()
+        return
       }
 
       const lastUserContent = [...messages].reverse().find(m => m.role === 'user')?.content
@@ -149,7 +178,13 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
       const ack = imageCount > 0
         ? `Вижу ${imageCount} ${imageCount === 1 ? 'вложение' : 'вложения'} — принял. `
         : ''
-      const text = ack + getResponse(model, lastUserMsg)
+      // Second pass of a tool run: answer using the result the tool returned, so
+      // the demo visibly closes the loop.
+      const toolResult = alreadyRan
+        ? [...messages].reverse().find(m => m.role === 'tool')?.content
+        : undefined
+      const toolAck = typeof toolResult === 'string' ? `Инструмент вернул: ${toolResult}. ` : ''
+      const text = ack + toolAck + getResponse(model, lastUserMsg)
       const words = text.split(' ')
       const ttfsDelay = getTtfsMs(model)
       const wordDelay = Math.max(20, Math.min(60, (3000 - ttfsDelay) / words.length))
@@ -171,8 +206,36 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
 
       const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
+      // A mock model whose name says it thinks, thinks — otherwise the reasoning
+      // UI can only be exercised against a real paid provider, and each of the
+      // three shapes is emitted by a different one. `-think` streams a reasoning
+      // field (OpenRouter/DeepSeek), `-tagged` inlines <think> tags (qwen/Ollama),
+      // and `-quiet` reports a token count with no text at all (OpenAI o-series).
+      const thinkStyle = /-think/.test(model) ? 'field'
+        : /-tagged/.test(model) ? 'tags'
+        : /-quiet/.test(model) ? 'quiet'
+        : null
+      const thoughts = ['Разбираю вопрос по частям.', ' Взвешиваю варианты.', ' Выбираю самый прямой ответ.']
+      const emit = (delta: Record<string, unknown>) => write({
+        id, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta, finish_reason: null }],
+      })
+
       // Simulate time-to-first-token
       await sleep(ttfsDelay)
+
+      if (thinkStyle === 'field') {
+        for (const th of thoughts) { emit({ reasoning_content: th }); await sleep(220) }
+      } else if (thinkStyle === 'tags') {
+        // Deliberately split the tag across chunks — that is exactly how it
+        // arrives from a real endpoint, and what the parser exists for.
+        emit({ content: '<thi' })
+        emit({ content: 'nk>' })
+        for (const th of thoughts) { emit({ content: th }); await sleep(220) }
+        emit({ content: '</think>' })
+      } else if (thinkStyle === 'quiet') {
+        await sleep(900)
+      }
 
       // Stream words one by one
       for (let i = 0; i < words.length; i++) {
@@ -188,7 +251,12 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
       write({
         id, object: 'chat.completion.chunk', created, model,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        usage: { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens },
+        usage: {
+          prompt_tokens: inputTokens,
+          completion_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+          ...(thinkStyle ? { completion_tokens_details: { reasoning_tokens: 128 } } : {}),
+        },
       })
 
       reply.raw.write('data: [DONE]\n\n')

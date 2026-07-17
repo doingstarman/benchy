@@ -4,11 +4,13 @@ import { providersApi, benchmarkApi, runsApi, uploadsApi } from '../api'
 import { splitFencedSegments } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
-import { Button, IconButton } from '../components/ui'
+import { Button, IconButton, PillToggle } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
-  IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
+  IconPlay, IconStop, IconPaperclip, IconPencil, IconFile, IconChevron,
 } from '../components/icons'
+import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
+import { useShowReasoning } from '../prefs'
 import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run } from '../../../src/types'
 
@@ -22,14 +24,29 @@ const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   timeoutMs: 60000,
   retries: 2,
   streaming: true,
+  extendedThinking: false,
+}
+
+interface UIToolCall {
+  id: string
+  name: string
+  args: unknown
+  // Absent until the result lands, so the row can show a spinner while running.
+  result?: string
+  isError?: boolean
+  ms?: number
 }
 
 interface UIResult {
   text: string
+  reasoning: string
   ttfs: number | null
   totalTime: number | null
   inputTokens: number | null
   outputTokens: number | null
+  reasoningTokens: number | null
+  reasoningMs: number | null
+  toolCalls: UIToolCall[]
   status: 'pending' | 'streaming' | 'done' | 'error'
   error?: string
 }
@@ -175,9 +192,64 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMet
   )
 }
 
+// ─── MetricsStrip ─────────────────────────────────────────────────────────
+//
+// Three headline numbers stay on screen; the rest live one click away. TTFS
+// deliberately still means "time to first ANSWER token" — a thinking model's
+// TTFS therefore includes its think time, and THINK TIME is what splits that
+// number apart.
+function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: boolean }) {
+  const [open, setOpen] = useState(false)
+  const { t } = useT()
+
+  const headline = [
+    { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
+    { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
+    { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
+  ]
+  const extra = [
+    { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
+    { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
+    { l: 'TOOLS', v: r.toolCalls.length > 0 ? `${r.toolCalls.length}` : '—' },
+  ]
+
+  const cell = (l: string, v: string, best: boolean, last: boolean) => (
+    <div key={l} style={{ flex: 1, padding: '0 10px', borderRight: last ? 'none' : '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-sans)', marginBottom: 1 }}>{l}</div>
+      <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 500, color: best ? 'var(--accent)' : v === '—' ? 'var(--border-hover)' : 'var(--text-secondary)' }}>{v}</div>
+    </div>
+  )
+
+  return (
+    <div style={{ borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ height: 38, display: 'flex' }}>
+        {headline.map(({ l, v, best }) => cell(l, v, best, false))}
+        <button
+          onClick={() => setOpen(o => !o)}
+          title={open ? t('common.collapse') : t('metrics.more')}
+          style={{
+            width: 28, flexShrink: 0, background: 'none', border: 0, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: open ? 'var(--accent)' : 'var(--text-muted)',
+          }}
+        >
+          <IconChevron open={open} size={11} />
+        </button>
+      </div>
+      {open && (
+        <div style={{ height: 38, display: 'flex', borderTop: '0.5px solid var(--border)' }}>
+          {extra.map(({ l, v }, i) => cell(l, v, false, i === extra.length - 1))}
+          <div style={{ width: 28, flexShrink: 0 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function pendingResults(models: string[]): Map<string, UIResult> {
   return new Map(models.map(key => [key, {
-    text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending',
+    text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null,
+    reasoningTokens: null, reasoningMs: null, toolCalls: [], status: 'pending',
   }]))
 }
 
@@ -427,6 +499,10 @@ interface PromptboxProps {
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
+  // Which tools this run enables, and how to flip one. A run-level set, not a
+  // per-model generation setting — hence its own props, not part of runSettings.
+  selectedTools: Set<string>
+  onToggleTool: (id: string) => void
   // In a batch, the follow-up box adds another independent prompt — it is not a
   // reply to anything, and must not invite the user to treat it as one.
   isBatch?: boolean
@@ -443,6 +519,7 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
+  selectedTools, onToggleTool,
   isBatch,
   pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
@@ -522,6 +599,40 @@ export function Promptbox({
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [settingsOpen])
+
+  // Boolean twin of overrideSlider: same set / inherited / reset semantics, so a
+  // per-model tab can turn thinking on for one model without touching the rest.
+  function overrideToggle(key: keyof RunSettingsOverrides, label: string, hint: string) {
+    const isSet = key in currentTabOverrides && currentTabOverrides[key] != null
+    const inherited = currentTabInherited[key as keyof typeof currentTabInherited] === true
+    const on = isSet ? currentTabOverrides[key] === true : inherited
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <PillToggle
+            on={on}
+            onToggle={() => updateTabOverrides({ ...currentTabOverrides, [key]: !on })}
+            labelOn={label}
+            labelOff={label}
+            title={hint}
+          />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 0 }}>{hint}</span>
+        </div>
+        <button
+          onClick={() => resetOverride(key)}
+          title={t('title.resetInherited')}
+          style={{
+            visibility: isSet ? 'visible' : 'hidden',
+            background: 'none', border: 'none', color: 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0,
+          }}
+        >
+          ↺
+        </button>
+      </div>
+    )
+  }
 
   function overrideSlider(
     key: keyof RunSettingsOverrides,
@@ -640,6 +751,31 @@ export function Promptbox({
               {overrideSlider('topP', 'Top P', { min: 0, max: 1, step: 0.05 })}
               {overrideSlider('topK', 'Top K', { min: 1, max: 100, step: 1, allowAuto: true })}
               {overrideSlider('maxOutputTokens', 'Max tokens', { min: 1, max: 32000, step: 64 })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.reasoningSection')}</div>
+            {overrideToggle('extendedThinking', t('run.extendedThinking'), t('run.extendedThinkingHint'))}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.toolsSection')}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -6 }}>{t('run.toolsHint')}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[
+                { id: 'calc', label: t('run.toolCalc') },
+                { id: 'fetch_url', label: t('run.toolFetch') },
+                { id: 'web_search', label: t('run.toolSearch') },
+              ].map(({ id, label }) => (
+                <PillToggle
+                  key={id}
+                  on={selectedTools.has(id)}
+                  onToggle={() => onToggleTool(id)}
+                  labelOn={label}
+                  labelOff={label}
+                />
+              ))}
             </div>
           </div>
 
@@ -859,6 +995,7 @@ interface SavedSession {
   runKind: RunKind
   runId: string | null
   selectedModels: Set<string>
+  selectedTools: Set<string>
   mode: PromptMode
   prompt: string
   perModelPrompts: Record<string, string>
@@ -898,11 +1035,15 @@ function notifyRunsChanged() {
 
 export function NewRun() {
   const { t } = useT()
+  const showReasoning = useShowReasoning()
   const navigate = useNavigate()
   const location = useLocation()
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
+  // Which tools this run enables. Empty by default — an ordinary run sends no
+  // tools and measures exactly what it measured before tools existed.
+  const [selectedTools, setSelectedTools] = useState<Set<string>>(() => savedSession?.selectedTools ?? new Set())
   const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
@@ -933,7 +1074,7 @@ export function NewRun() {
 
   useEffect(() => {
     savedSession = {
-      screenState, turns, sessionModels, runKind, runId, selectedModels,
+      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools,
       mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
@@ -1049,10 +1190,19 @@ export function NewRun() {
           : {}),
         results: new Map(run.results.filter(res => res.promptIndex === i).map(res => [res.model, {
           text: res.text,
+          reasoning: res.reasoning ?? '',
           ttfs: res.metrics.ttfs,
           totalTime: res.metrics.totalTime,
           inputTokens: res.metrics.inputTokens,
           outputTokens: res.metrics.outputTokens,
+          reasoningTokens: res.metrics.reasoningTokens,
+          reasoningMs: res.metrics.reasoningMs,
+          toolCalls: (res.toolCalls ?? []).map((a, ci) => ({
+            // Stored activity has no id — synthesize a unique one by index, not
+            // by name:ms (calc is instant, so several calls share ms=0/1 and the
+            // colliding React keys dropped rows on reload).
+            id: `restored:${ci}`, name: a.name, args: a.args, result: a.result, isError: a.isError, ms: a.ms,
+          })),
           status: (res.error ? 'error' : 'done') as UIResult['status'],
           ...(res.error ? { error: res.error } : {}),
         }])),
@@ -1061,6 +1211,9 @@ export function NewRun() {
       regenEsRef.current?.close()
       setTurns(restored)
       setSessionModels(run.models)
+      // Follow-ups reuse the run's tools server-side, so reflect them in the
+      // toggles too — otherwise the UI claims tools are off on a run that has them.
+      setSelectedTools(new Set(run.tools ?? []))
       setRunKind(run.kind ?? 'chat')
       setRunId(run.id)
       setScreenState('done')
@@ -1123,6 +1276,14 @@ export function NewRun() {
     })
   }
 
+  function toggleTool(id: string) {
+    setSelectedTools(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   function toggleProviderModels(id: string) {
     const keys = providerGroups.find(g => g.id === id)?.models.map(m => m.key) ?? []
     setSelectedModels(prev => {
@@ -1159,29 +1320,53 @@ export function NewRun() {
     }))
   }
 
+  // Both live streams need identical cell handling and differ only in which turn
+  // an event belongs to: the run's own stream trusts the event, while the
+  // throwaway regenerate run always reports promptIndex 0 and must be remapped
+  // onto the visible turn. These used to be two hand-copied blocks, so every new
+  // event had to be remembered twice — and whatever was forgotten went missing
+  // on regenerate only, which is the kind of bug nobody reports.
+  function wireCellEvents(es: EventSource, indexOf: (eventIndex: number) => number) {
+    const on = <T,>(type: string, fn: (data: T & { promptIndex: number; model: string }) => void) =>
+      es.addEventListener(type, e => {
+        const data = JSON.parse((e as MessageEvent).data) as T & { promptIndex: number; model: string }
+        fn(data)
+      })
+
+    on('cell_start', ({ promptIndex, model }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, status: 'streaming' })))
+
+    on<{ text: string }>('cell_token', ({ promptIndex, model, text }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, text: r.text + text, status: 'streaming' })))
+
+    on<{ text: string }>('cell_reasoning', ({ promptIndex, model, text }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, reasoning: r.reasoning + text, status: 'streaming' })))
+
+    on<{ id: string; name: string; args: unknown }>('cell_tool_call', ({ promptIndex, model, id, name, args }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, toolCalls: [...r.toolCalls, { id, name, args }], status: 'streaming' })))
+
+    on<{ id: string; name: string; content: string; isError: boolean; ms: number }>('cell_tool_result', ({ promptIndex, model, id, content, isError, ms }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({
+        ...r,
+        toolCalls: r.toolCalls.map(c => c.id === id ? { ...c, result: content, isError, ms } : c),
+      })))
+
+    on<{ ttfs: number; totalTime: number; reasoningMs: number | null; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }>(
+      'cell_done',
+      ({ promptIndex, model, ttfs, totalTime, reasoningMs, usage }) =>
+        updateTurnResult(indexOf(promptIndex), model, r => ({
+          ...r, status: 'done', ttfs, totalTime, reasoningMs,
+          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+          reasoningTokens: usage.reasoningTokens ?? null,
+        })),
+    )
+
+    on<{ error: string }>('cell_error', ({ promptIndex, model, error: msg }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, status: 'error', error: msg })))
+  }
+
   function wireSSE(es: EventSource) {
-    es.addEventListener('cell_start', e => {
-      const { promptIndex, model } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
-    })
-    es.addEventListener('cell_token', e => {
-      const { promptIndex, model, text } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; text: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
-    })
-    es.addEventListener('cell_done', e => {
-      const { promptIndex, model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
-        promptIndex: number; model: string; ttfs: number; totalTime: number
-        usage: { inputTokens: number; outputTokens: number }
-      }
-      updateTurnResult(promptIndex, model, r => ({
-        ...r, status: 'done', ttfs, totalTime,
-        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
-      }))
-    })
-    es.addEventListener('cell_error', e => {
-      const { promptIndex, model, error: msg } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; error: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
-    })
+    wireCellEvents(es, i => i)
     es.addEventListener('run_done', () => es.close())
     es.onerror = () => es.close()
   }
@@ -1205,11 +1390,12 @@ export function NewRun() {
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
 
     const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
+    const tools = selectedTools.size ? [...selectedTools] : undefined
     const req = effectiveMode === 0
-      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id) }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools }
       : effectiveMode === 1
-        ? { pairs: filledPairs, runSettings: effectiveRunSettings }
-        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings }
+        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools }
+        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
@@ -1309,7 +1495,7 @@ export function NewRun() {
     const savedPrompt = turn.prompt
     setTurns(prev => prev.map(t => t.promptIndex !== promptIndex ? t : {
       ...t,
-      results: new Map(t.results).set(modelKey, { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending' }),
+      results: new Map(t.results).set(modelKey, { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, toolCalls: [], status: 'pending' }),
     }))
     try {
       // Carry the turn's attachments onto the throwaway regenerate run so a
@@ -1320,29 +1506,8 @@ export function NewRun() {
       const es = new EventSource(`/api/benchmark/stream/${regenRunId}`)
       regenEsRef.current = es
       // Regenerate results land on a throwaway run with its own promptIndex 0 —
-      // remap it onto this turn's promptIndex so wireSSE finds the right cell.
-      es.addEventListener('cell_start', e => {
-        const { model } = JSON.parse((e as MessageEvent).data) as { model: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
-      })
-      es.addEventListener('cell_token', e => {
-        const { model, text } = JSON.parse((e as MessageEvent).data) as { model: string; text: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
-      })
-      es.addEventListener('cell_done', e => {
-        const { model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
-          model: string; ttfs: number; totalTime: number
-          usage: { inputTokens: number; outputTokens: number }
-        }
-        updateTurnResult(promptIndex, model, r => ({
-          ...r, status: 'done', ttfs, totalTime,
-          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
-        }))
-      })
-      es.addEventListener('cell_error', e => {
-        const { model, error: msg } = JSON.parse((e as MessageEvent).data) as { model: string; error: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
-      })
+      // ignore it and pin every event to the turn being regenerated.
+      wireCellEvents(es, () => promptIndex)
       // The regenerate run is a throwaway — its tokens are already remapped onto
       // the visible turn. Reap it on clean completion (row + any cloned
       // attachment files, via the delete cascade) so repeated regeneration
@@ -1365,15 +1530,34 @@ export function NewRun() {
     setTimeout(() => setCopiedCol(prev => prev === cellKey ? null : prev), 1200)
   }
 
-  function handleCloseColumn(promptIndex: number, modelKey: string) {
+  // Closing a column drops the model from the whole session, not from one turn.
+  //
+  // It used to delete a single cell, which was wrong three ways over: the grid
+  // still reserved a track for it so the space stayed empty, the very next
+  // follow-up rebuilt cells from sessionModels and brought the model straight
+  // back, and the server — which fans out over run.models and was never told —
+  // kept calling it on every turn for the rest of the session. You paid for
+  // answers you had explicitly closed and never saw.
+  function handleCloseColumn(modelKey: string) {
+    // Closing the last column would leave a chat with nothing in it and no way
+    // to get anything back.
+    if (sessionModels.length <= 1) return
+
+    const remaining = sessionModels.filter(k => k !== modelKey)
+    setSessionModels(remaining)
     setTurns(prev => prev.map(t => {
-      if (t.promptIndex !== promptIndex || !t.results.has(modelKey)) return t
+      if (!t.results.has(modelKey)) return t
       const next = new Map(t.results)
       next.delete(modelKey)
       return { ...t, results: next }
     }))
-    const cellKey = `${promptIndex}:${modelKey}`
-    setExpandedCol(prev => prev === cellKey ? null : prev)
+    setExpandedCol(prev => prev?.endsWith(`:${modelKey}`) ? null : prev)
+
+    // A pairs run pairs each model to its own prompt, so its model list is not
+    // a set and the server refuses to narrow it; the column just hides.
+    if (runId && runKind !== 'pairs') {
+      void runsApi.setModels(runId, remaining).catch(() => {})
+    }
   }
 
   async function handleEditTurn(promptIndex: number) {
@@ -1456,23 +1640,15 @@ export function NewRun() {
           ) : (
             <>
               <IconButton onClick={() => setExpandedCol(cellKey)} title={t('common.expand')}><IconExpand /></IconButton>
-              <IconButton onClick={() => handleCloseColumn(turn.promptIndex, key)} title={t('common.close')}><IconClose /></IconButton>
+              {/* Nothing to close down to — a chat with zero columns is a dead end. */}
+              {sessionModels.length > 1 && (
+                <IconButton onClick={() => handleCloseColumn(key)} title={t('title.closeModel')}><IconClose /></IconButton>
+              )}
             </>
           )}
         </div>
 
-        <div style={{ height: 38, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
-          {[
-            { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
-            { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
-            { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
-          ].map(({ l, v, best }, i) => (
-            <div key={l} style={{ flex: 1, padding: '0 10px', borderRight: i < 2 ? '0.5px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-sans)', marginBottom: 1 }}>{l}</div>
-              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 500, color: best ? 'var(--accent)' : v === '—' ? 'var(--border-hover)' : 'var(--text-secondary)' }}>{v}</div>
-            </div>
-          ))}
-        </div>
+        <MetricsStrip result={r} isFastest={isFastest} />
 
         {isError ? (
           <div style={{ flex: 1, padding: 12, overflowY: 'auto' }}>
@@ -1486,12 +1662,29 @@ export function NewRun() {
         ) : (
           <div
             className="col-body"
-            style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word' }}
+            style={{
+              flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
+              color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word',
+              // Fullscreen: become a flex column so a lone code artifact can
+              // stretch to the whole cell instead of sitting in a 280px window
+              // with dead space beneath it.
+              ...(isExpanded ? { display: 'flex', flexDirection: 'column' } : {}),
+            }}
           >
+            {showReasoning && (
+              <ActivityTrace
+                reasoning={r.reasoning}
+                reasoningMs={r.reasoningMs}
+                reasoningTokens={r.reasoningTokens}
+                status={r.status}
+                answerStarted={r.text.length > 0}
+              />
+            )}
+            <ToolTrace calls={r.toolCalls} />
             {r.text
               ? splitFencedSegments(r.text).map((seg, si) =>
                   seg.type === 'code'
-                    ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} />
+                    ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} fill={isExpanded} />
                     : <span key={`${cellKey}:${si}`} style={{ whiteSpace: 'pre-wrap' }}>{seg.content}</span>
                 )
               : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>{t('run.waiting')}</span>)}
@@ -1537,6 +1730,8 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
+    selectedTools,
+    onToggleTool: toggleTool,
     isBatch: runKind === 'batch',
     pendingAttachments,
     uploading,
@@ -1549,7 +1744,7 @@ export function NewRun() {
   if (screenState === 'idle') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
-        <style>{ANIM_CSS}</style>
+        <style>{ANIM_CSS}</style><ActivityTraceStyles />
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',
@@ -1571,7 +1766,7 @@ export function NewRun() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 16, gap: 12 }}>
-      <style>{ANIM_CSS}</style>
+      <style>{ANIM_CSS}</style><ActivityTraceStyles />
 
       {expandedCol && (() => {
         const [expandedPromptIndex, expandedModel] = [expandedCol.slice(0, expandedCol.indexOf(':')), expandedCol.slice(expandedCol.indexOf(':') + 1)]

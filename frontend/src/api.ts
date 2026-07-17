@@ -111,6 +111,10 @@ export const runsApi = {
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ saved }) }),
   rename: (id: string, title: string | null) =>
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  // Narrow the run's model set — a closed column must stop costing money on
+  // every follow-up, not just disappear from view.
+  setModels: (id: string, models: string[]) =>
+    apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ models }) }),
   setFeedback: (runId: string, resultId: string, feedback: 'up' | 'down' | null) =>
     fetch(`/api/runs/${runId}/results/${resultId}/feedback`, {
       method: 'PATCH',
@@ -128,6 +132,7 @@ export interface BenchmarkRequest {
   runSettings?: import('../../src/types').RunSettings
   attachments?: string[]
   cloneAttachmentsFrom?: { runId: string; promptIndex: number }
+  tools?: string[]
 }
 
 export const benchmarkApi = {
@@ -150,7 +155,10 @@ export const benchmarkApi = {
 export type SSEEvent =
   | { event: 'cell_start'; runId: string; promptIndex: number; model: string }
   | { event: 'cell_token'; runId: string; promptIndex: number; model: string; text: string }
-  | { event: 'cell_done'; runId: string; promptIndex: number; model: string; ttfs: number; totalTime: number; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }
+  | { event: 'cell_reasoning'; runId: string; promptIndex: number; model: string; text: string }
+  | { event: 'cell_tool_call'; runId: string; promptIndex: number; model: string; id: string; name: string; args: unknown }
+  | { event: 'cell_tool_result'; runId: string; promptIndex: number; model: string; id: string; name: string; content: string; isError: boolean; ms: number }
+  | { event: 'cell_done'; runId: string; promptIndex: number; model: string; ttfs: number | null; totalTime: number; reasoningMs: number | null; toolCalls: number; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }
   | { event: 'cell_error'; runId: string; promptIndex: number; model: string; error: string }
   | { event: 'run_done'; runId: string }
 
@@ -176,7 +184,7 @@ export function useSSE(runId: string | null, onEvent: (e: SSEEvent) => void) {
       }
     }
 
-    for (const t of ['cell_start', 'cell_token', 'cell_done', 'cell_error', 'run_done']) {
+    for (const t of ['cell_start', 'cell_token', 'cell_reasoning', 'cell_tool_call', 'cell_tool_result', 'cell_done', 'cell_error', 'run_done']) {
       es.addEventListener(t, handleEvent(t))
     }
 
