@@ -201,10 +201,18 @@ async function buildHistory(runId, model, prompts, kind) {
     const rows = db.prepare('SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index').all(runId, model);
     const history = [];
     for (const row of rows) {
+        const content = prompts[row.prompt_index];
+        // A result can outlive its prompt: an edit forks prompts down while a
+        // concurrent continue's cells are still landing past the new end. Sending
+        // `content: undefined` builds a blank user message that real providers
+        // reject with a 400 — one race and the conversation could never continue
+        // again. Drop the orphan instead; its prompt no longer exists.
+        if (typeof content !== 'string')
+            continue;
         const attachments = await loadAttachments(runId, row.prompt_index, true);
         history.push({
             role: 'user',
-            content: prompts[row.prompt_index],
+            content,
             ...(attachments.length ? { attachments } : {}),
         });
         history.push({ role: 'assistant', content: row.text });

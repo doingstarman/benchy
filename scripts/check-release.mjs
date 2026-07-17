@@ -68,7 +68,7 @@ if (sha !== lastSource) {
 const dirty = git(['status', '--porcelain', '--', 'dist/version.json', TARBALL]).trim()
 
 console.log(`\x1b[32m✓ release stamp consistent\x1b[0m — ${sha} @ ${builtAt}`)
-console.log(`  tarball == dist/version.json, and both are built from HEAD (${head}).`)
+console.log(`  tarball == dist/version.json, and both contain every source commit (${lastSource}).`)
 if (dirty) {
   console.log('\n  Now commit these together, WITHOUT rebuilding in between:')
   for (const line of dirty.split('\n')) console.log(`    ${line.trim()}`)
