@@ -178,6 +178,8 @@ export const DICT: Record<string, Entry> = {
   'providers.manualMode': { en: 'Manual', ru: 'Вручную' },
   'providers.searchModels': { en: 'Search models...', ru: 'Поиск моделей...' },
   'providers.noModelsMatch': { en: 'No models match', ru: 'Ничего не найдено' },
+  'providers.selectedGroup': { en: 'Selected', ru: 'Выбрано' },
+  'providers.ofTotal': { en: '{shown} of {total}', ru: '{shown} из {total}' },
   'providers.clickFetch': { en: 'Click "Fetch models" to load available models', ru: 'Нажмите «Загрузить модели», чтобы получить список' },
   'providers.test': { en: 'TEST', ru: 'ТЕСТ' },
   'providers.testModel': { en: 'Test model', ru: 'Модель для теста' },

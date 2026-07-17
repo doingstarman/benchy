@@ -130,6 +130,9 @@ const MODAL_CSS = `
   .prov-model-row:last-child { border-bottom: none; }
   .prov-model-row:hover { background: var(--bg-base); }
   .prov-tag { display: inline-block; font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); padding: 1px 5px; border-radius: 3px; background: var(--bg-base); border: 0.5px solid var(--border); }
+  .prov-group { width: 100%; display: flex; align-items: center; gap: 7px; padding: 7px 14px; background: none; border: none; border-bottom: 0.5px solid var(--border); cursor: pointer; font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary); }
+  .prov-group:hover { background: var(--bg-base); color: var(--text-primary); }
+  .prov-group-label { padding: 6px 14px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); background: var(--accent-bg); border-bottom: 0.5px solid var(--border); }
   .prov-icon-btn { background: none; border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
   .prov-icon-btn:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-primary); }
   .prov-icon-btn:disabled { opacity: .45; cursor: default; }
@@ -142,6 +145,29 @@ const MODAL_CSS = `
 `
 
 // ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
+
+interface Tile { key: string; provider: Provider; onClick: () => void }
+
+// Was declared inside Providers, against the rule right above: every render
+// produced a new component type, so React threw the whole grid away and rebuilt
+// it on each keystroke — remounting tiles and detaching anything holding onto
+// one of those nodes.
+function TileGrid({ title, tiles, trailingButton }: { title: string; tiles: Tile[]; trailingButton?: React.ReactNode }) {
+  if (tiles.length === 0 && !trailingButton) return null
+  return (
+    <div>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
+        {title}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
+        {tiles.map(tile => (
+          <ProviderTile key={tile.key} provider={tile.provider} onClick={tile.onClick} />
+        ))}
+        {trailingButton}
+      </div>
+    </div>
+  )
+}
 
 interface ProviderHeaderProps {
   name: string
@@ -249,8 +275,58 @@ interface ModelsSectionProps {
   onFetchModels: () => void
 }
 
+// Aggregators namespace their ids as "vendor/model" — OpenRouter ships 344 of
+// them across 56 vendors. A flat list of 344 checkboxes is not a chooser, so
+// once it gets big we collapse by vendor and pin what's already selected.
+const GROUPING_THRESHOLD = 20
+const vendorOf = (id: string) => (id.includes('/') ? id.split('/')[0] : '')
+
+// Tags are keyed by bare model name, but an aggregator's id carries a vendor
+// prefix — so "openai/gpt-4o" found nothing. Fall back to the last segment.
+const capsOf = (id: string) => MODEL_CAPABILITIES[id] ?? MODEL_CAPABILITIES[id.split('/').pop() ?? ''] ?? []
+
+function ModelRow({ id, checked, onToggle, indent }: { id: string; checked: boolean; onToggle: () => void; indent?: boolean }) {
+  const caps = capsOf(id)
+  return (
+    <div className="prov-model-row" style={indent ? { paddingLeft: 28 } : undefined}>
+      <input type="checkbox" className="prov-checkbox" checked={checked} onChange={onToggle} id={`model-${id}`} />
+      <label htmlFor={`model-${id}`} style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {id}
+      </label>
+      {caps.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {caps.map(c => <span key={c} className="prov-tag">{c}</span>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ModelsSection({ available, selected, search, manualMode, manualText, fetchingModels, onToggle, onSearchChange, onManualModeToggle, onManualTextChange, onFetchModels }: ModelsSectionProps) {
-  const filtered = available.filter(id => id.toLowerCase().includes(search.toLowerCase()))
+  const [openVendors, setOpenVendors] = useState<Set<string>>(new Set())
+
+  const q = search.trim().toLowerCase()
+  const filtered = available.filter(id => id.toLowerCase().includes(q))
+  const selectedList = filtered.filter(id => selected.has(id))
+  const rest = filtered.filter(id => !selected.has(id))
+
+  const grouped = available.length > GROUPING_THRESHOLD && available.filter(id => id.includes('/')).length > available.length / 2
+  const vendors = new Map<string, string[]>()
+  if (grouped) {
+    for (const id of rest) {
+      const v = vendorOf(id) || '·'
+      if (!vendors.has(v)) vendors.set(v, [])
+      vendors.get(v)!.push(id)
+    }
+  }
+  // A search is a request to see matches, not to go hunting through folders.
+  const isOpen = (v: string) => q.length > 0 || openVendors.has(v)
+  const toggleVendor = (v: string) => setOpenVendors(prev => {
+    const next = new Set(prev)
+    next.has(v) ? next.delete(v) : next.add(v)
+    return next
+  })
+
   return (
     <div>
       <SectionLabel actions={
@@ -285,35 +361,47 @@ function ModelsSection({ available, selected, search, manualMode, manualText, fe
                 placeholder={t('providers.searchModels')}
                 style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', flex: 1 }}
               />
+              {available.length > 0 && (
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', flexShrink: 0 }}>
+                  {t('providers.ofTotal', { shown: filtered.length, total: available.length })}
+                </span>
+              )}
             </div>
-            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {filtered.length === 0 && (
                 <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
                   {available.length === 0 ? t('providers.clickFetch') : t('providers.noModelsMatch')}
                 </div>
               )}
-              {filtered.map(id => {
-                const caps = MODEL_CAPABILITIES[id] ?? []
-                return (
-                  <div key={id} className="prov-model-row">
-                    <input
-                      type="checkbox"
-                      className="prov-checkbox"
-                      checked={selected.has(id)}
-                      onChange={() => onToggle(id)}
-                      id={`model-${id}`}
-                    />
-                    <label htmlFor={`model-${id}`} style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', cursor: 'pointer' }}>
-                      {id}
-                    </label>
-                    {caps.length > 0 && (
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        {caps.map(c => <span key={c} className="prov-tag">{c}</span>)}
-                      </div>
-                    )}
+
+              {/* What you picked stays in sight — in a list of 344 it was gone. */}
+              {selectedList.length > 0 && (
+                <>
+                  <div className="prov-group-label">
+                    {t('providers.selectedGroup')} · {selectedList.length}
                   </div>
-                )
-              })}
+                  {selectedList.map(id => (
+                    <ModelRow key={id} id={id} checked onToggle={() => onToggle(id)} />
+                  ))}
+                </>
+              )}
+
+              {grouped
+                ? [...vendors.entries()].map(([vendor, ids]) => (
+                    <div key={vendor}>
+                      <button className="prov-group" onClick={() => toggleVendor(vendor)}>
+                        <IconChevron open={isOpen(vendor)} size={11} />
+                        <span style={{ flex: 1, textAlign: 'left' }}>{vendor || '·'}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>{ids.length}</span>
+                      </button>
+                      {isOpen(vendor) && ids.map(id => (
+                        <ModelRow key={id} id={id} checked={false} onToggle={() => onToggle(id)} indent />
+                      ))}
+                    </div>
+                  ))
+                : rest.map(id => (
+                    <ModelRow key={id} id={id} checked={false} onToggle={() => onToggle(id)} />
+                  ))}
             </div>
           </>
         )}
@@ -735,7 +823,6 @@ export function Providers() {
   const providerMap = new Map(providers.map(p => [p.name, p]))
   const presetNames = new Set(PRESET_PROVIDERS.map(p => p.name))
 
-  interface Tile { key: string; provider: Provider; onClick: () => void }
 
   function stub(preset: PresetProvider): Provider {
     return { id: '', name: preset.name, type: preset.type, models: [], enabled: false }
@@ -758,23 +845,6 @@ export function Providers() {
     .filter(t => !t.active && t.preset.type !== 'local')
     .map(t => ({ key: t.preset.name, provider: t.connected ?? stub(t.preset), onClick: () => openPreset(t.preset) }))
   const inactiveCustomProviders = customProviders.filter(p => !isProviderActive(p))
-
-  function TileGrid({ title, tiles, trailingButton }: { title: string; tiles: Tile[]; trailingButton?: React.ReactNode }) {
-    if (tiles.length === 0 && !trailingButton) return null
-    return (
-      <div>
-        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
-          {title}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
-          {tiles.map(tile => (
-            <ProviderTile key={tile.key} provider={tile.provider} onClick={tile.onClick} />
-          ))}
-          {trailingButton}
-        </div>
-      </div>
-    )
-  }
 
   const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
   const isLocal = modal?.provider.type === 'local'
