@@ -7,11 +7,14 @@ import { useT } from '../i18n'
 
 interface CodeBlockProps {
   segment: CodeSegment
+  // In a fullscreen cell the fixed 280px window wastes most of the screen —
+  // let the block grow to fill instead.
+  fill?: boolean
 }
 
 // ChatGPT-style windowed code block: header with language + actions, body
 // toggles between the code listing and a sandboxed live preview.
-export function CodeBlock({ segment }: CodeBlockProps) {
+export function CodeBlock({ segment, fill }: CodeBlockProps) {
   const { t } = useT()
   const [running, setRunning] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -29,6 +32,7 @@ export function CodeBlock({ segment }: CodeBlockProps) {
       border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)',
       overflow: 'hidden', margin: '10px 0', background: 'var(--bg-base)',
       display: 'flex', flexDirection: 'column',
+      ...(fill ? { flex: 1, minHeight: 200 } : {}),
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px 5px 12px',
@@ -51,12 +55,13 @@ export function CodeBlock({ segment }: CodeBlockProps) {
         )}
       </div>
       {running ? (
-        <div style={{ height: 360, display: 'flex' }}>
+        <div style={{ display: 'flex', ...(fill ? { flex: 1, minHeight: 0 } : { height: 360 }) }}>
           <ArtifactPreview html={segment.content} reloadKey={nonce} />
         </div>
       ) : (
         <pre style={{
-          margin: 0, padding: 12, overflow: 'auto', maxHeight: 280,
+          margin: 0, padding: 12, overflow: 'auto',
+          ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight: 280 }),
           fontSize: 'var(--fs-md)', fontFamily: 'var(--font-mono)', lineHeight: 1.6,
           color: 'var(--text-secondary)', whiteSpace: 'pre',
         }}>

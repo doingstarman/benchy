@@ -1594,7 +1594,14 @@ export function NewRun() {
         ) : (
           <div
             className="col-body"
-            style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word' }}
+            style={{
+              flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
+              color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word',
+              // Fullscreen: become a flex column so a lone code artifact can
+              // stretch to the whole cell instead of sitting in a 280px window
+              // with dead space beneath it.
+              ...(isExpanded ? { display: 'flex', flexDirection: 'column' } : {}),
+            }}
           >
             {showReasoning && (
               <ActivityTrace
@@ -1608,7 +1615,7 @@ export function NewRun() {
             {r.text
               ? splitFencedSegments(r.text).map((seg, si) =>
                   seg.type === 'code'
-                    ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} />
+                    ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} fill={isExpanded} />
                     : <span key={`${cellKey}:${si}`} style={{ whiteSpace: 'pre-wrap' }}>{seg.content}</span>
                 )
               : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>{t('run.waiting')}</span>)}
