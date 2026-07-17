@@ -1,4 +1,5 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Provider, ProviderDefaults } from './types.js'
@@ -32,17 +33,43 @@ function isDevEnvironment(): boolean {
 }
 
 export async function readConfig(): Promise<Config> {
+  const path = getConfigPath()
+
+  let raw: string
   try {
-    const raw = await readFile(getConfigPath(), 'utf-8')
-    return JSON.parse(raw) as Config
+    raw = await readFile(path, 'utf-8')
   } catch {
-    return { providers: [] }
+    return { providers: [] } // no config yet — a first run is legitimately empty
   }
+
+  // A file that EXISTS but can't be understood must never be reported as "no
+  // providers": upsert would then write a config containing only the new entry
+  // and take every other provider's API key with it. Refuse instead — the file
+  // stays on disk untouched, so the user can fix or restore it.
+  const bail = (why: string): never => {
+    throw new Error(`Config at ${path} ${why} — refusing to overwrite it. Fix or move the file, then restart benchy.`)
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return bail('is not valid JSON')
+  }
+  if (!parsed || typeof parsed !== 'object') return bail('is not a JSON object')
+  if (!Array.isArray((parsed as Config).providers)) return bail('has no providers array')
+
+  return parsed as Config
 }
 
 export async function writeConfig(config: Config): Promise<void> {
   await mkdir(getBenchyDir(), { recursive: true })
-  await writeFile(getConfigPath(), JSON.stringify(config, null, 2), 'utf-8')
+  const path = getConfigPath()
+  // Write-then-rename: rename is atomic, so a crash or a full disk leaves the
+  // previous config intact instead of a half-written file that reads as empty.
+  const tmp = `${path}.${randomUUID()}.tmp`
+  await writeFile(tmp, JSON.stringify(config, null, 2), 'utf-8')
+  await rename(tmp, path)
 }
 
 export async function getProviders(): Promise<Provider[]> {
