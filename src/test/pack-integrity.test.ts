@@ -9,22 +9,26 @@ import { join } from 'node:path'
 // without dist/version.json in it, which would have killed update detection for
 // every user, silently and forever. This test makes that impossible to repeat.
 const ROOT = join(import.meta.dirname, '..', '..')
-const TARBALL = join(ROOT, 'benchy-0.1.0.tgz')
+const TARBALL = 'benchy-0.1.0.tgz'
 
+// GNU tar treats "C:\..." as a remote host and dies with "Cannot connect to C:",
+// so these tests — the guard against shipping a broken artifact — failed on the
+// one machine that builds the releases, and the suite was reported as green
+// anyway. Run tar from the repo root with a relative name instead.
 function tarballEntries(): string[] {
-  return execFileSync('tar', ['-tzf', TARBALL], { encoding: 'utf8' })
+  return execFileSync('tar', ['-tzf', TARBALL], { cwd: ROOT, encoding: 'utf8' })
     .split('\n')
     .map(l => l.trim())
     .filter(Boolean)
 }
 
 function readFromTarball(entry: string): string {
-  return execFileSync('tar', ['-xzOf', TARBALL, entry], { encoding: 'utf8' })
+  return execFileSync('tar', ['-xzOf', TARBALL, entry], { cwd: ROOT, encoding: 'utf8' })
 }
 
 describe('published tarball', () => {
   it('exists — it is what users actually install', () => {
-    expect(existsSync(TARBALL)).toBe(true)
+    expect(existsSync(join(ROOT, TARBALL))).toBe(true)
   })
 
   it('ships the runtime the app needs: cli, server, frontend build', () => {
@@ -39,6 +43,16 @@ describe('published tarball', () => {
     // returns false unconditionally, and the user is told "dev build — updates
     // not tracked" on a real install.
     expect(tarballEntries()).toContain('package/dist/version.json')
+  })
+
+  it('is built from HEAD — a stale tarball ships a release containing none of itself', () => {
+    // The stamp being self-consistent proves nothing about WHICH build it
+    // stamps. A tarball packed twelve commits ago passed every other check here
+    // and would have deployed silently: an old frontend and an old backend
+    // agree with each other, so nothing 404s and nothing looks wrong.
+    const stamp = JSON.parse(readFromTarball('package/dist/version.json')) as { sha?: string }
+    const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+    expect(stamp.sha, `tarball was packed at ${stamp.sha}, HEAD is ${head} — repack before shipping`).toBe(head)
   })
 
   it('carries a well-formed build stamp that isNewer() can actually compare', () => {

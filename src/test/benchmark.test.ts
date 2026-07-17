@@ -710,6 +710,94 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(atOne[0].model).toBe(B)
   })
 
+  it('editing a prompt appended to a pairs run re-runs it instead of erasing everything', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const A = `${pid}:gpt-4o-mini`
+    const B = `${pid}:gpt-4o`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: [{ prompt: 'Q-for-A', model: A }, { prompt: 'Q-for-B', model: B }] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    // A follow-up sits PAST the end of models[] — it belongs to everyone.
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'appended' }),
+    })
+    await waitForRun(data.runId)
+
+    // models[2] is undefined, so this used to target nobody: it deleted the
+    // answers, re-ran nothing, and reported success. Permanently.
+    await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 2, prompt: 'appended-EDITED' }),
+    })
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { prompts: string[]; results: Array<{ promptIndex: number; model: string; error: string | null }> }
+    }
+    expect(run.data.prompts).toEqual(['Q-for-A', 'Q-for-B', 'appended-EDITED'])
+    // The two original pairs survive…
+    expect(run.data.results.filter(r => r.promptIndex === 0)).toHaveLength(1)
+    expect(run.data.results.filter(r => r.promptIndex === 1)).toHaveLength(1)
+    // …and the edited follow-up was actually answered, by both models.
+    const edited = run.data.results.filter(r => r.promptIndex === 2)
+    expect(edited).toHaveLength(2)
+    expect(edited.every(r => r.error === null)).toBe(true)
+  })
+
+  it('a pairs run that uses one model twice does not answer twice on a follow-up', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const A = `${providers.data[0].id}:gpt-4o-mini`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: [{ prompt: 'first', model: A }, { prompt: 'second', model: A }] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'follow-up' }),
+    })
+    await waitForRun(data.runId)
+
+    // models is ['A','A'] — aligned to prompts, not a model set. Fanning out
+    // over it gave the same model the same question twice.
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { totalCalls: number; completedCalls: number; results: Array<{ promptIndex: number }> }
+    }
+    expect(run.data.results.filter(r => r.promptIndex === 2)).toHaveLength(1)
+    expect(run.data.completedCalls).toBe(run.data.totalCalls)
+  })
+
+  it('an empty pairs array is not a pairs run and must not swallow the prompts', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    // The guard tests .length while the branches tested truthiness, so []
+    // slipped past and then won every ternary: a 202 for an empty run.
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: [], prompts: ['what is 2+2'], models: [model] }),
+    })
+    const { data } = await res.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { kind: string; prompts: string[]; models: string[]; results: unknown[] }
+    }
+    expect(run.data.prompts).toEqual(['what is 2+2'])
+    expect(run.data.models).toEqual([model])
+    expect(run.data.results).toHaveLength(1)
+  })
+
   it('a pairs run continues each model on its own thread, not the batch void', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const pid = providers.data[0].id

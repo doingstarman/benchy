@@ -277,11 +277,16 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     }
 
     const runId = randomUUID()
-    const totalCalls = pairs ? pairs.length : prompts!.length * models!.length
     const db = getDb()
 
-    const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts!
-    const storedModels = pairs ? pairs.map(p => p.model) : models!
+    // `pairs: []` is not a pairs run. The guard above tests .length while these
+    // used to test truthiness, so an empty array slipped through and then won
+    // every branch — producing a 202 for an empty run that dropped the prompts
+    // the caller actually sent.
+    const isPairs = !!pairs?.length
+    const totalCalls = isPairs ? pairs!.length : prompts!.length * models!.length
+    const storedPrompts = isPairs ? pairs!.map(p => p.prompt) : prompts!
+    const storedModels = isPairs ? pairs!.map(p => p.model) : models!
     const hasSettings = runSettings && (
       Object.keys(runSettings.global ?? {}).length > 0 ||
       Object.keys(runSettings.perModel ?? {}).length > 0
@@ -310,8 +315,8 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
-    const tasks = pairs
-      ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
+    const tasks = isPairs
+      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
       : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings)))
 
     finalizeRun(runId, tasks)
@@ -334,6 +339,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const newPromptIndex = prompts.length
       const updatedPrompts = [...prompts, prompt]
 
+      // In a pairs run `models` is aligned to `prompts`, one entry per pair — it
+      // is not the run's model set, and the same model may appear twice. A
+      // follow-up is addressed to each model once, so dedupe before fanning out.
+      const targetModels = run.kind === 'pairs' ? [...new Set(models)] : models
+
       if (attachments?.length) {
         const bindError = bindAttachments(attachments, req.params.id, newPromptIndex)
         if (bindError) return reply.code(400).send({ error: bindError })
@@ -344,10 +354,10 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       db.prepare(
         "UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?"
-      ).run(JSON.stringify(updatedPrompts), models.length, runSettingsJson, req.params.id)
+      ).run(JSON.stringify(updatedPrompts), targetModels.length, runSettingsJson, req.params.id)
 
       const providers = await getProviders()
-      const tasks = models.map(async model => {
+      const tasks = targetModels.map(async model => {
         // In a batch run this returns [] — the new prompt is another independent
         // question, not a follow-up to the previous ones.
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
@@ -383,11 +393,13 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       // alone and leaves its neighbours untouched.
       const forks = run.kind === 'chat'
 
-      // In a pairs run prompts[i] belongs to models[i] and to nobody else, so
-      // only that model re-runs. Fanning the edit out to every model made other
-      // models answer a question that was never addressed to them.
+      // In a pairs run prompts[i] belongs to models[i] — but only for the
+      // original pairs. A prompt appended by `continue` sits past the end of
+      // `models` and was addressed to everyone, so it re-runs on everyone.
+      // Indexing blindly gave `undefined` there: the edit deleted every answer,
+      // re-ran nothing, and reported success.
       const targetModels = run.kind === 'pairs'
-        ? (models[promptIndex] ? [models[promptIndex]] : [])
+        ? (promptIndex < models.length ? [models[promptIndex]] : [...new Set(models)])
         : models
 
       // Everything below destroys something. Reject a bad request before that,

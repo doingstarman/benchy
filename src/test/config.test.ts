@@ -99,6 +99,44 @@ describe('config write', () => {
     expect(existsSync(configPath())).toBe(true)
   })
 
+  it('never leaves an API key sitting in a temp file, even under load', async () => {
+    // The temp file holds every key in cleartext. Writing in parallel used to
+    // strand a pile of them next to config.json — on Windows a rename that
+    // loses to an antivirus lock throws EPERM, and nothing cleaned up after it.
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        writeConfig({ providers: [provider(`p${i}`, `sk-secret-${i}`)] }).catch(() => {}),
+      ),
+    )
+    const strays = readdirSync(dir).filter(f => f.includes('.tmp'))
+    expect(strays, `stray temp files: ${strays.join(', ')}`).toEqual([])
+  })
+
+  it('serializes concurrent saves instead of dropping all but the last', async () => {
+    // Twenty parallel upserts used to leave ONE provider: the rename is atomic,
+    // but read-modify-write was not, so every writer built on a stale read and
+    // the last one clobbered the rest. Atomicity is not isolation.
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) => upsertProvider(provider(`p${i}`, `sk-${i}`))),
+    )
+    const stored = (await readConfig()).providers
+    expect(stored).toHaveLength(20)
+    expect(stored.map(p => p.apiKey).sort()).toEqual(
+      Array.from({ length: 20 }, (_, i) => `sk-${i}`).sort(),
+    )
+  })
+
+  it('serializes concurrent removes against saves', async () => {
+    await Promise.all(Array.from({ length: 10 }, (_, i) => upsertProvider(provider(`p${i}`, `sk-${i}`))))
+    await Promise.all([
+      ...Array.from({ length: 5 }, (_, i) => removeProvider(`p${i}`)),
+      ...Array.from({ length: 5 }, (_, i) => upsertProvider(provider(`new${i}`, `sk-new-${i}`))),
+    ])
+    const ids = (await readConfig()).providers.map(p => p.id).sort()
+    // The five survivors plus the five newcomers — nothing lost in the crossfire.
+    expect(ids).toEqual(['new0', 'new1', 'new2', 'new3', 'new4', 'p5', 'p6', 'p7', 'p8', 'p9'])
+  })
+
   it('round-trips providers and their keys through upsert/remove', async () => {
     await upsertProvider(provider('alpha', 'sk-alpha-SECRET'))
     await upsertProvider(provider('beta', 'sk-beta-SECRET'))
