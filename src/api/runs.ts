@@ -180,9 +180,36 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ data: rowToRun(newRun) })
   })
 
-  app.patch<{ Params: { id: string }; Body: { saved?: boolean; title?: string | null } }>('/api/runs/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { saved?: boolean; title?: string | null; models?: string[] } }>('/api/runs/:id', async (req, reply) => {
     const db = getDb()
-    const { saved, title } = req.body
+    const { saved, title, models } = req.body
+
+    // Dropping a model from the comparison. Only ever a narrowing: `models` is
+    // also the historical record of what this run asked, so adding to it would
+    // invent results that never happened.
+    if (models !== undefined) {
+      const current = db.prepare('SELECT models, kind FROM runs WHERE id = ?').get(req.params.id) as
+        { models: string; kind: string | null } | undefined
+      if (!current) return reply.code(404).send({ error: 'Run not found' })
+
+      // In a pairs run `models` is aligned index-for-index with `prompts` — it
+      // is not a set, and removing an entry silently re-pairs every prompt after
+      // it with the wrong model.
+      if ((current.kind ?? 'chat') === 'pairs') {
+        return reply.code(400).send({ error: 'Cannot change the model set of a pairs run — its models are paired to its prompts' })
+      }
+
+      const existing = new Set(JSON.parse(current.models) as string[])
+      if (!Array.isArray(models) || models.length === 0) {
+        return reply.code(400).send({ error: 'models must be a non-empty array' })
+      }
+      const unknown = models.filter(m => !existing.has(m))
+      if (unknown.length > 0) {
+        return reply.code(400).send({ error: `Cannot add models to an existing run: ${unknown.join(', ')}` })
+      }
+      db.prepare('UPDATE runs SET models = ? WHERE id = ?').run(JSON.stringify(models), req.params.id)
+    }
+
     if (saved !== undefined) {
       db.prepare('UPDATE runs SET saved = ? WHERE id = ?').run(saved ? 1 : 0, req.params.id)
     }

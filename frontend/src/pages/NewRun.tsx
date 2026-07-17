@@ -1462,15 +1462,34 @@ export function NewRun() {
     setTimeout(() => setCopiedCol(prev => prev === cellKey ? null : prev), 1200)
   }
 
-  function handleCloseColumn(promptIndex: number, modelKey: string) {
+  // Closing a column drops the model from the whole session, not from one turn.
+  //
+  // It used to delete a single cell, which was wrong three ways over: the grid
+  // still reserved a track for it so the space stayed empty, the very next
+  // follow-up rebuilt cells from sessionModels and brought the model straight
+  // back, and the server — which fans out over run.models and was never told —
+  // kept calling it on every turn for the rest of the session. You paid for
+  // answers you had explicitly closed and never saw.
+  function handleCloseColumn(modelKey: string) {
+    // Closing the last column would leave a chat with nothing in it and no way
+    // to get anything back.
+    if (sessionModels.length <= 1) return
+
+    const remaining = sessionModels.filter(k => k !== modelKey)
+    setSessionModels(remaining)
     setTurns(prev => prev.map(t => {
-      if (t.promptIndex !== promptIndex || !t.results.has(modelKey)) return t
+      if (!t.results.has(modelKey)) return t
       const next = new Map(t.results)
       next.delete(modelKey)
       return { ...t, results: next }
     }))
-    const cellKey = `${promptIndex}:${modelKey}`
-    setExpandedCol(prev => prev === cellKey ? null : prev)
+    setExpandedCol(prev => prev?.endsWith(`:${modelKey}`) ? null : prev)
+
+    // A pairs run pairs each model to its own prompt, so its model list is not
+    // a set and the server refuses to narrow it; the column just hides.
+    if (runId && runKind !== 'pairs') {
+      void runsApi.setModels(runId, remaining).catch(() => {})
+    }
   }
 
   async function handleEditTurn(promptIndex: number) {
@@ -1553,7 +1572,10 @@ export function NewRun() {
           ) : (
             <>
               <IconButton onClick={() => setExpandedCol(cellKey)} title={t('common.expand')}><IconExpand /></IconButton>
-              <IconButton onClick={() => handleCloseColumn(turn.promptIndex, key)} title={t('common.close')}><IconClose /></IconButton>
+              {/* Nothing to close down to — a chat with zero columns is a dead end. */}
+              {sessionModels.length > 1 && (
+                <IconButton onClick={() => handleCloseColumn(key)} title={t('title.closeModel')}><IconClose /></IconButton>
+              )}
             </>
           )}
         </div>

@@ -111,6 +111,10 @@ export const runsApi = {
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ saved }) }),
   rename: (id: string, title: string | null) =>
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  // Narrow the run's model set — a closed column must stop costing money on
+  // every follow-up, not just disappear from view.
+  setModels: (id: string, models: string[]) =>
+    apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ models }) }),
   setFeedback: (runId: string, resultId: string, feedback: 'up' | 'down' | null) =>
     fetch(`/api/runs/${runId}/results/${resultId}/feedback`, {
       method: 'PATCH',

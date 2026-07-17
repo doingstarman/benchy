@@ -222,6 +222,10 @@ export const DICT: Record<string, Entry> = {
   'run.needsKey': { en: 'needs a key', ru: 'нужен ключ' },
   'run.needsKeyHint': { en: 'Add an API key in Providers to use this provider', ru: 'Добавьте API-ключ в Провайдерах, чтобы использовать провайдера' },
   'metrics.more': { en: 'More metrics', ru: 'Больше метрик' },
+  'title.closeModel': {
+    en: 'Drop this model from the run — follow-ups stop calling it',
+    ru: 'Убрать модель из прогона — следующие ходы её не вызывают',
+  },
   'trace.thinking': { en: 'Thinking…', ru: 'Думает…' },
   'trace.reasoned': { en: 'Reasoning', ru: 'Размышления' },
   'trace.tokens': { en: '{n} tokens', ru: '{n} токенов' },

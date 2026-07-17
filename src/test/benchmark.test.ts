@@ -1237,3 +1237,69 @@ describe('reasoning', () => {
     expect(capturedSettings[0].extendedThinking).toBe(false)
   })
 })
+
+describe('closing a model', () => {
+  it('stops follow-ups calling it — a closed column must stop costing money', async () => {
+    // Closing a column used to be cosmetic and per-turn: the server fans out
+    // over run.models and was never told, so it kept calling the model on every
+    // follow-up for the rest of the session. The answers were paid for, stored,
+    // and never shown.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const keep = `${pid}:gpt-4o-mini`
+    const drop = `${pid}:gpt-4o`
+
+    const body = await startBenchmark(['first'], [keep, drop])
+    const runId = body.data!.runId
+    await waitForRun(runId)
+
+    const res = await fetch(`${base}/api/runs/${runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [keep] }),
+    })
+    expect(res.status).toBe(200)
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second' }),
+    })
+    await waitForRun(runId)
+
+    // One call for the surviving model, none for the closed one.
+    expect(capturedMessages).toHaveLength(1)
+    const cells = getDb().prepare('SELECT model FROM results WHERE run_id = ? AND prompt_index = 1').all(runId) as { model: string }[]
+    expect(cells.map(c => c.model)).toEqual([keep])
+  })
+
+  it('refuses to add models to an existing run', async () => {
+    // `models` is also the record of what this run asked. Growing it would
+    // invent results that never happened.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const body = await startBenchmark(['x'], [`${pid}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    const res = await fetch(`${base}/api/runs/${body.data!.runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [`${pid}:gpt-4o-mini`, `${pid}:gpt-4o`] }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects an empty model set', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const body = await startBenchmark(['x'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    const res = await fetch(`${base}/api/runs/${body.data!.runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [] }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
