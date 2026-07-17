@@ -45,6 +45,13 @@ describe('fetch_url — SSRF refusal', () => {
     await expect(fetchUrlTool.run({ url: 'http://localhost:4242/api/providers' })).rejects.toThrow()
   })
 
+  it('refuses the IPv4-mapped-IPv6 spelling of loopback end-to-end', async () => {
+    // The exact bypass a verify agent found: the URL parser normalizes this to
+    // the hex form ::ffff:7f00:1, which the old regex missed. Full path — URL
+    // parse → assertPublicHost — must reject it.
+    await expect(fetchUrlTool.run({ url: 'http://[::ffff:127.0.0.1]:4242/api/providers' })).rejects.toThrow()
+  })
+
   it('refuses the cloud metadata endpoint', async () => {
     await expect(fetchUrlTool.run({ url: 'http://169.254.169.254/latest/meta-data/' })).rejects.toThrow()
   })
