@@ -12,7 +12,15 @@ export const DEFAULT_PROVIDER_SETTINGS = {
     timeoutMs: 60000,
     retries: 2,
     streaming: true,
+    extendedThinking: false,
 };
+export async function getSearchConfig() {
+    const config = await readConfig();
+    const s = config.search;
+    if (!s || !s.apiKey || (s.provider !== 'brave' && s.provider !== 'tavily'))
+        return undefined;
+    return s;
+}
 function getBenchyDir() {
     return process.env.BENCHY_DIR ?? join(homedir(), '.benchy');
 }

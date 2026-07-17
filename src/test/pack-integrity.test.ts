@@ -55,8 +55,11 @@ describe('published tarball', () => {
     // exists, so the stamp is legitimately one commit behind ever after. What
     // must hold is that no shippable source has landed since the pack.
     const stamp = JSON.parse(readFromTarball('package/dist/version.json')) as { sha?: string }
+    // --full-history so a release cut on a merge commit sees the merge as the
+    // last source change instead of an ancestor (default simplification skips
+    // it); otherwise a legitimately complete tarball false-fails here.
     const lastSource = execFileSync('git', [
-      'log', '-1', '--format=%h', '--',
+      'log', '-1', '--full-history', '--format=%h', '--',
       'src', 'frontend/src', 'package.json',
       ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
     ], { cwd: ROOT, encoding: 'utf8' }).trim()

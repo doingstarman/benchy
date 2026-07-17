@@ -23,7 +23,30 @@ function rowToRun(row) {
         kind: row.kind ?? 'chat',
         ...(runSettings ? { runSettings } : {}),
         ...(row.title != null ? { title: row.title } : {}),
+        ...(row.tools ? { tools: parseTools(row.tools) } : {}),
     };
+}
+function parseTools(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((t) => typeof t === 'string') : [];
+    }
+    catch {
+        return [];
+    }
+}
+function parseToolCalls(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
 }
 function rowToResult(row) {
     const metrics = {
@@ -32,6 +55,7 @@ function rowToResult(row) {
         inputTokens: row.input_tokens,
         outputTokens: row.output_tokens,
         reasoningTokens: row.reasoning_tokens,
+        reasoningMs: row.reasoning_ms,
     };
     return {
         id: row.id,
@@ -40,6 +64,8 @@ function rowToResult(row) {
         model: row.model,
         providerId: row.provider_id,
         text: row.text,
+        reasoning: row.reasoning,
+        toolCalls: parseToolCalls(row.tool_calls),
         metrics,
         feedback: row.feedback,
         error: row.error,
@@ -118,7 +144,7 @@ export async function registerRunsRoutes(app) {
         if (!original)
             return reply.code(404).send({ error: 'Run not found' });
         const newId = randomUUID();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat');
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null);
         // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
         // Attachments are copied (own files + rows) so the fork re-runs with the
         // same media instead of silently dropping it.
@@ -128,7 +154,30 @@ export async function registerRunsRoutes(app) {
     });
     app.patch('/api/runs/:id', async (req, reply) => {
         const db = getDb();
-        const { saved, title } = req.body;
+        const { saved, title, models } = req.body;
+        // Dropping a model from the comparison. Only ever a narrowing: `models` is
+        // also the historical record of what this run asked, so adding to it would
+        // invent results that never happened.
+        if (models !== undefined) {
+            const current = db.prepare('SELECT models, kind FROM runs WHERE id = ?').get(req.params.id);
+            if (!current)
+                return reply.code(404).send({ error: 'Run not found' });
+            // In a pairs run `models` is aligned index-for-index with `prompts` — it
+            // is not a set, and removing an entry silently re-pairs every prompt after
+            // it with the wrong model.
+            if ((current.kind ?? 'chat') === 'pairs') {
+                return reply.code(400).send({ error: 'Cannot change the model set of a pairs run — its models are paired to its prompts' });
+            }
+            const existing = new Set(JSON.parse(current.models));
+            if (!Array.isArray(models) || models.length === 0) {
+                return reply.code(400).send({ error: 'models must be a non-empty array' });
+            }
+            const unknown = models.filter(m => !existing.has(m));
+            if (unknown.length > 0) {
+                return reply.code(400).send({ error: `Cannot add models to an existing run: ${unknown.join(', ')}` });
+            }
+            db.prepare('UPDATE runs SET models = ? WHERE id = ?').run(JSON.stringify(models), req.params.id);
+        }
         if (saved !== undefined) {
             db.prepare('UPDATE runs SET saved = ? WHERE id = ?').run(saved ? 1 : 0, req.params.id);
         }

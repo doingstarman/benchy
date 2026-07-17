@@ -50,8 +50,13 @@ if (inTarball !== onDisk) {
 // The test is not "stamp === HEAD": the build stamps HEAD before the tarball
 // commit exists, so afterwards the stamp is legitimately one commit behind.
 // What must hold is that no shippable source landed after the pack.
+// --full-history so a merge commit that brings in source is SEEN as the last
+// source change. Without it, git's default history simplification skips the
+// merge (it's TREESAME to the merged branch) and returns an ancestor, so a
+// release cut on a merge commit false-failed as "predates the source" even
+// though the tarball, built from that merge, contained every commit.
 const lastSource = git([
-  'log', '-1', '--format=%h', '--',
+  'log', '-1', '--full-history', '--format=%h', '--',
   'src', 'frontend/src', 'package.json',
   ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
 ]).trim()
