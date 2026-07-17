@@ -9,7 +9,7 @@ import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile, IconChevron,
 } from '../components/icons'
-import { ActivityTrace, ActivityTraceStyles } from '../components/ActivityTrace'
+import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning } from '../prefs'
 import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run } from '../../../src/types'
@@ -27,6 +27,16 @@ const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   extendedThinking: false,
 }
 
+interface UIToolCall {
+  id: string
+  name: string
+  args: unknown
+  // Absent until the result lands, so the row can show a spinner while running.
+  result?: string
+  isError?: boolean
+  ms?: number
+}
+
 interface UIResult {
   text: string
   reasoning: string
@@ -36,6 +46,7 @@ interface UIResult {
   outputTokens: number | null
   reasoningTokens: number | null
   reasoningMs: number | null
+  toolCalls: UIToolCall[]
   status: 'pending' | 'streaming' | 'done' | 'error'
   error?: string
 }
@@ -199,6 +210,7 @@ function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: b
   const extra = [
     { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
     { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
+    { l: 'TOOLS', v: r.toolCalls.length > 0 ? `${r.toolCalls.length}` : '—' },
   ]
 
   const cell = (l: string, v: string, best: boolean, last: boolean) => (
@@ -237,7 +249,7 @@ function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: b
 function pendingResults(models: string[]): Map<string, UIResult> {
   return new Map(models.map(key => [key, {
     text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null,
-    reasoningTokens: null, reasoningMs: null, status: 'pending',
+    reasoningTokens: null, reasoningMs: null, toolCalls: [], status: 'pending',
   }]))
 }
 
@@ -487,6 +499,10 @@ interface PromptboxProps {
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
+  // Which tools this run enables, and how to flip one. A run-level set, not a
+  // per-model generation setting — hence its own props, not part of runSettings.
+  selectedTools: Set<string>
+  onToggleTool: (id: string) => void
   // In a batch, the follow-up box adds another independent prompt — it is not a
   // reply to anything, and must not invite the user to treat it as one.
   isBatch?: boolean
@@ -503,6 +519,7 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
+  selectedTools, onToggleTool,
   isBatch,
   pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
@@ -743,6 +760,26 @@ export function Promptbox({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.toolsSection')}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -6 }}>{t('run.toolsHint')}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[
+                { id: 'calc', label: t('run.toolCalc') },
+                { id: 'fetch_url', label: t('run.toolFetch') },
+                { id: 'web_search', label: t('run.toolSearch') },
+              ].map(({ id, label }) => (
+                <PillToggle
+                  key={id}
+                  on={selectedTools.has(id)}
+                  onToggle={() => onToggleTool(id)}
+                  labelOn={label}
+                  labelOff={label}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('providers.reliability')}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', columnGap: 28, rowGap: 12 }}>
               {overrideSlider('timeoutMs', 'Timeout', {
@@ -958,6 +995,7 @@ interface SavedSession {
   runKind: RunKind
   runId: string | null
   selectedModels: Set<string>
+  selectedTools: Set<string>
   mode: PromptMode
   prompt: string
   perModelPrompts: Record<string, string>
@@ -1003,6 +1041,9 @@ export function NewRun() {
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
+  // Which tools this run enables. Empty by default — an ordinary run sends no
+  // tools and measures exactly what it measured before tools existed.
+  const [selectedTools, setSelectedTools] = useState<Set<string>>(() => savedSession?.selectedTools ?? new Set())
   const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
@@ -1033,7 +1074,7 @@ export function NewRun() {
 
   useEffect(() => {
     savedSession = {
-      screenState, turns, sessionModels, runKind, runId, selectedModels,
+      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools,
       mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
@@ -1156,6 +1197,9 @@ export function NewRun() {
           outputTokens: res.metrics.outputTokens,
           reasoningTokens: res.metrics.reasoningTokens,
           reasoningMs: res.metrics.reasoningMs,
+          toolCalls: (res.toolCalls ?? []).map(a => ({
+            id: `${a.name}:${a.ms}`, name: a.name, args: a.args, result: a.result, isError: a.isError, ms: a.ms,
+          })),
           status: (res.error ? 'error' : 'done') as UIResult['status'],
           ...(res.error ? { error: res.error } : {}),
         }])),
@@ -1164,6 +1208,9 @@ export function NewRun() {
       regenEsRef.current?.close()
       setTurns(restored)
       setSessionModels(run.models)
+      // Follow-ups reuse the run's tools server-side, so reflect them in the
+      // toggles too — otherwise the UI claims tools are off on a run that has them.
+      setSelectedTools(new Set(run.tools ?? []))
       setRunKind(run.kind ?? 'chat')
       setRunId(run.id)
       setScreenState('done')
@@ -1226,6 +1273,14 @@ export function NewRun() {
     })
   }
 
+  function toggleTool(id: string) {
+    setSelectedTools(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   function toggleProviderModels(id: string) {
     const keys = providerGroups.find(g => g.id === id)?.models.map(m => m.key) ?? []
     setSelectedModels(prev => {
@@ -1284,6 +1339,15 @@ export function NewRun() {
     on<{ text: string }>('cell_reasoning', ({ promptIndex, model, text }) =>
       updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, reasoning: r.reasoning + text, status: 'streaming' })))
 
+    on<{ id: string; name: string; args: unknown }>('cell_tool_call', ({ promptIndex, model, id, name, args }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, toolCalls: [...r.toolCalls, { id, name, args }], status: 'streaming' })))
+
+    on<{ id: string; name: string; content: string; isError: boolean; ms: number }>('cell_tool_result', ({ promptIndex, model, id, content, isError, ms }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({
+        ...r,
+        toolCalls: r.toolCalls.map(c => c.id === id ? { ...c, result: content, isError, ms } : c),
+      })))
+
     on<{ ttfs: number; totalTime: number; reasoningMs: number | null; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }>(
       'cell_done',
       ({ promptIndex, model, ttfs, totalTime, reasoningMs, usage }) =>
@@ -1323,11 +1387,12 @@ export function NewRun() {
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
 
     const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
+    const tools = selectedTools.size ? [...selectedTools] : undefined
     const req = effectiveMode === 0
-      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id) }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools }
       : effectiveMode === 1
-        ? { pairs: filledPairs, runSettings: effectiveRunSettings }
-        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings }
+        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools }
+        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
@@ -1427,7 +1492,7 @@ export function NewRun() {
     const savedPrompt = turn.prompt
     setTurns(prev => prev.map(t => t.promptIndex !== promptIndex ? t : {
       ...t,
-      results: new Map(t.results).set(modelKey, { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, status: 'pending' }),
+      results: new Map(t.results).set(modelKey, { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, toolCalls: [], status: 'pending' }),
     }))
     try {
       // Carry the turn's attachments onto the throwaway regenerate run so a
@@ -1612,6 +1677,7 @@ export function NewRun() {
                 answerStarted={r.text.length > 0}
               />
             )}
+            <ToolTrace calls={r.toolCalls} />
             {r.text
               ? splitFencedSegments(r.text).map((seg, si) =>
                   seg.type === 'code'
@@ -1661,6 +1727,8 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
+    selectedTools,
+    onToggleTool: toggleTool,
     isBatch: runKind === 'batch',
     pendingAttachments,
     uploading,

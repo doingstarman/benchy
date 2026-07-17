@@ -27,6 +27,8 @@ const TRACE_CSS = `
   }
   @keyframes at-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
   .at-pulse { animation: at-pulse 1.4s ease-in-out infinite; }
+  @keyframes at-spin { to { transform: rotate(360deg) } }
+  .at-spinner { display: inline-block; width: 9px; height: 9px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: at-spin .6s linear infinite; }
 `
 
 export function ActivityTraceStyles() {
@@ -45,6 +47,67 @@ interface ActivityTraceProps {
 
 function secs(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+}
+
+export interface ToolTraceCall {
+  id: string
+  name: string
+  args: unknown
+  result?: string
+  isError?: boolean
+  ms?: number
+}
+
+const TOOL_ICON: Record<string, string> = { calc: '🧮', fetch_url: '🌐', web_search: '🔎' }
+
+// A one-line summary of what a tool was called with, so the row reads as an
+// action rather than a JSON blob.
+function argBrief(name: string, args: unknown): string {
+  if (!args || typeof args !== 'object') return ''
+  const a = args as Record<string, unknown>
+  if (name === 'calc' && typeof a.expression === 'string') return a.expression
+  if (name === 'web_search' && typeof a.query === 'string') return a.query
+  if (name === 'fetch_url' && typeof a.url === 'string') {
+    try { return new URL(a.url).host } catch { return a.url }
+  }
+  const first = Object.values(a)[0]
+  return typeof first === 'string' ? first : ''
+}
+
+// The tools a model reached for on the way to its answer. Distinct from the
+// reasoning block because a tool call is a concrete action with a result, not
+// prose — but it lives in the same "activity" band above the answer.
+export function ToolTrace({ calls }: { calls: ToolTraceCall[] }) {
+  if (calls.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '2px 0 8px' }}>
+      {calls.map(c => {
+        const running = c.result === undefined
+        const brief = argBrief(c.name, c.args)
+        return (
+          <div
+            key={c.id}
+            title={running ? undefined : c.result}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: 'var(--font-mono)',
+              color: c.isError ? 'var(--error)' : 'var(--text-secondary)',
+            }}
+          >
+            <span style={{ flexShrink: 0 }}>{TOOL_ICON[c.name] ?? '🔧'}</span>
+            <span style={{ color: 'var(--text-primary)' }}>{c.name}</span>
+            {brief && <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>· {brief}</span>}
+            {running
+              ? <span className="at-spinner" style={{ flexShrink: 0 }} />
+              : (
+                <span style={{ flexShrink: 0, color: 'var(--text-muted)', opacity: 0.8 }}>
+                  · {c.isError ? '✕' : '✓'}{c.ms != null ? ` ${secs(c.ms)}` : ''}
+                </span>
+              )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function ActivityTrace({ reasoning, reasoningMs, reasoningTokens, status, answerStarted }: ActivityTraceProps) {

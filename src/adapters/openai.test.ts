@@ -189,3 +189,54 @@ describe('openaiAdapter — reasoning', () => {
     expect(done?.type === 'done' && 'reasoningTokens' in done.usage).toBe(false)
   })
 })
+
+describe('openaiAdapter — tools', () => {
+  it('wraps tool specs in the {type:function} shape the API expects', async () => {
+    let sentBody: Record<string, unknown> = {}
+    global.fetch = vi.fn().mockImplementation((_url, init: { body: string }) => {
+      sentBody = JSON.parse(init.body) as Record<string, unknown>
+      return Promise.resolve({ ok: true, body: makeSseStream(['data: [DONE]']) })
+    })
+
+    const gen = openaiAdapter.stream([{ role: 'user', content: 'hi' }], {
+      model: 'm', apiKey: 'sk-test',
+      tools: [{ name: 'calc', description: 'd', parameters: { type: 'object', properties: {} } }],
+    })
+    for await (const _ of gen) { void _ }
+
+    expect(sentBody.tools).toEqual([{
+      type: 'function',
+      function: { name: 'calc', description: 'd', parameters: { type: 'object', properties: {} } },
+    }])
+  })
+
+  it('sends no tools key when the call has none — request is unchanged from before tools', async () => {
+    let sentBody: Record<string, unknown> = {}
+    global.fetch = vi.fn().mockImplementation((_url, init: { body: string }) => {
+      sentBody = JSON.parse(init.body) as Record<string, unknown>
+      return Promise.resolve({ ok: true, body: makeSseStream(['data: [DONE]']) })
+    })
+    const gen = openaiAdapter.stream([{ role: 'user', content: 'hi' }], { model: 'm', apiKey: 'sk-test' })
+    for await (const _ of gen) { void _ }
+    expect('tools' in sentBody).toBe(false)
+  })
+
+  it('assembles a tool call whose arguments arrive as fragments across chunks', async () => {
+    // How chat/completions actually delivers a tool call: id+name first, then
+    // the JSON arguments a few characters at a time.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeSseStream([
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'calc', arguments: '{"exp' } }] } }] })}`,
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'ression":"2+2"}' } }] } }] })}`,
+        'data: [DONE]',
+      ]),
+    })
+
+    const calls = []
+    for await (const chunk of openaiAdapter.stream([{ role: 'user', content: 'x' }], { model: 'm', apiKey: 'sk-test' })) {
+      if (chunk.type === 'tool_call') calls.push(chunk.call)
+    }
+    expect(calls).toEqual([{ id: 'call_1', name: 'calc', args: { expression: '2+2' } }])
+  })
+})

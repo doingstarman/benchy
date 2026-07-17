@@ -18,14 +18,19 @@ let slowMode = false
 // Drives the reasoning path: the adapter emits thinking before the answer, the
 // way OpenRouter/DeepSeek actually stream it.
 let reasoningMode = false
+// Drives the tool path: first pass asks calc to evaluate, second pass answers
+// using the result. 'loop' keeps calling forever to exercise the cap.
+let toolMode: 'off' | 'once' | 'loop' = 'off'
 let capturedMessages: { role: string; content: string }[][] = []
 let capturedSettings: Record<string, unknown>[] = []
+let capturedTools: unknown[][] = []
 
 vi.mock('../adapters/openai.js', () => ({
   openaiAdapter: {
-    async *stream(messages: { role: string; content: string }[], config: { model: string; settings?: Record<string, unknown> }) {
+    async *stream(messages: { role: string; content: string }[], config: { model: string; settings?: Record<string, unknown>; tools?: unknown[] }) {
       capturedMessages.push(messages)
       capturedSettings.push(config.settings ?? {})
+      capturedTools.push(config.tools ?? [])
       if (slowMode) await new Promise(r => setTimeout(r, 80))
       if (reasoningMode) {
         yield { type: 'reasoning', text: 'first I consider' }
@@ -33,6 +38,22 @@ vi.mock('../adapters/openai.js', () => ({
         await new Promise(r => setTimeout(r, 25))
         yield { type: 'reasoning', text: ' then I decide' }
       }
+
+      if (toolMode !== 'off') {
+        const alreadyCalled = messages.some(m => m.role === 'tool')
+        if (toolMode === 'loop' || !alreadyCalled) {
+          yield { type: 'tool_call', call: { id: `c${messages.length}`, name: 'calc', args: { expression: '2 + 2' } } }
+          yield { type: 'done', usage: { inputTokens: 5, outputTokens: 2 } }
+          return
+        }
+        // Second pass: the tool result is in the conversation now.
+        const toolMsg = messages.find(m => m.role === 'tool') as { toolResults?: { content: string }[] } | undefined
+        const answer = toolMsg?.toolResults?.[0]?.content ?? '?'
+        yield { type: 'token', text: `The answer is ${answer}.` }
+        yield { type: 'done', usage: { inputTokens: 7, outputTokens: 4 } }
+        return
+      }
+
       yield { type: 'token', text: `Hello from ${config.model}` }
       yield { type: 'token', text: '!' }
       yield {
@@ -1301,5 +1322,112 @@ describe('closing a model', () => {
       body: JSON.stringify({ models: [] }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('tools', () => {
+  async function runWithTools(toolIds: string[]): Promise<{ id: string; results: Array<Record<string, unknown>> }> {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['what is 2+2'], models: [`${pid}:gpt-4o-mini`], tools: toolIds }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as {
+      data: { id: string; results: Array<Record<string, unknown>> }
+    }
+    return run.data
+  }
+
+  it('runs a tool the model asks for and answers with the result', async () => {
+    toolMode = 'once'
+    try {
+      const run = await runWithTools(['calc'])
+      const cell = run.results[0]
+      expect(cell.text).toBe('The answer is 4.')
+      const activity = cell.toolCalls as Array<{ name: string; result: string; isError: boolean }>
+      expect(activity).toHaveLength(1)
+      expect(activity[0]).toMatchObject({ name: 'calc', result: '4', isError: false })
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('sums usage across the tool round instead of overwriting it', async () => {
+    // Two provider calls (ask + answer): 5+7 in, 2+4 out. Overwriting would
+    // report only the last, hiding the cost of the tool round.
+    toolMode = 'once'
+    try {
+      const run = await runWithTools(['calc'])
+      const m = run.results[0].metrics as { inputTokens: number; outputTokens: number }
+      expect(m.inputTokens).toBe(12)
+      expect(m.outputTokens).toBe(6)
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('sends no tools to the adapter when none are enabled — the pre-tools request is unchanged', async () => {
+    capturedTools = []
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${providers.data[0].id}:gpt-4o-mini`] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    expect(capturedTools.every(t => t.length === 0)).toBe(true)
+  })
+
+  it('offers the enabled tool spec to the adapter', async () => {
+    capturedTools = []
+    toolMode = 'once'
+    try {
+      await runWithTools(['calc'])
+      const names = capturedTools.flat().map(t => (t as { name?: string }).name)
+      expect(names).toContain('calc')
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('stops after the iteration cap instead of looping on tool calls forever', async () => {
+    toolMode = 'loop'
+    try {
+      const run = await runWithTools(['calc'])
+      const cell = run.results[0]
+      expect(String(cell.text)).toContain('stopped after')
+      // 8 rounds, each recording one tool call.
+      expect((cell.toolCalls as unknown[]).length).toBe(8)
+    } finally {
+      toolMode = 'off'
+    }
+  })
+
+  it('reuses the run tools on continue', async () => {
+    toolMode = 'once'
+    try {
+      const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+      const start = await fetch(`${base}/api/benchmark`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: ['first'], models: [`${providers.data[0].id}:gpt-4o-mini`], tools: ['calc'] }),
+      }).then(r => r.json()) as { data: { runId: string } }
+      await waitForRun(start.data.runId)
+
+      capturedTools = []
+      await fetch(`${base}/api/runs/${start.data.runId}/continue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'again' }),
+      })
+      await waitForRun(start.data.runId)
+      const names = capturedTools.flat().map(t => (t as { name?: string }).name)
+      expect(names).toContain('calc')
+    } finally {
+      toolMode = 'off'
+    }
   })
 })

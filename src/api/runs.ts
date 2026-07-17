@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
 import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js'
-import type { Run, Result, Metrics, RunSettings, RunKind } from '../types.js'
+import type { Run, Result, Metrics, RunSettings, RunKind, ToolActivity } from '../types.js'
 
 interface RunRow {
   id: string
@@ -17,6 +17,7 @@ interface RunRow {
   run_settings: string | null
   title: string | null
   kind: RunKind
+  tools: string | null
 }
 
 interface ResultRow {
@@ -33,6 +34,7 @@ interface ResultRow {
   reasoning_tokens: number | null
   reasoning: string | null
   reasoning_ms: number | null
+  tool_calls: string | null
   feedback: string | null
   error: string | null
   created_at: number
@@ -61,6 +63,27 @@ function rowToRun(row: RunRow): Run {
     kind: row.kind ?? 'chat',
     ...(runSettings ? { runSettings } : {}),
     ...(row.title != null ? { title: row.title } : {}),
+    ...(row.tools ? { tools: parseTools(row.tools) } : {}),
+  }
+}
+
+function parseTools(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function parseToolCalls(raw: string | null): ToolActivity[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed as ToolActivity[] : []
+  } catch {
+    return []
   }
 }
 
@@ -81,6 +104,7 @@ function rowToResult(row: ResultRow): Result {
     providerId: row.provider_id,
     text: row.text,
     reasoning: row.reasoning,
+    toolCalls: parseToolCalls(row.tool_calls),
     metrics,
     feedback: row.feedback as Result['feedback'],
     error: row.error,

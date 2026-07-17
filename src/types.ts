@@ -70,6 +70,16 @@ export interface Metrics {
 
 export type RunStatus = 'pending' | 'running' | 'done' | 'error'
 
+// One tool the model invoked, with what it got back. Stored per result so a
+// reopened dialog shows the same trace the live run did.
+export interface ToolActivity {
+  name: string
+  args: unknown
+  result: string
+  isError: boolean
+  ms: number
+}
+
 export interface Result {
   id: string
   runId: string
@@ -79,6 +89,7 @@ export interface Result {
   text: string
   // The model's thinking, kept out of `text` so the answer stays the answer.
   reasoning: string | null
+  toolCalls: ToolActivity[]
   metrics: Metrics
   feedback: 'up' | 'down' | null
   error: string | null
@@ -97,6 +108,7 @@ export interface Run {
   runSettings?: RunSettings
   title?: string | null
   kind: RunKind
+  tools?: string[]
 }
 
 // What a run's prompts[] means. 'chat' = successive turns of one conversation
@@ -116,4 +128,9 @@ export interface BenchmarkRequest {
   // Regenerate: re-run a cell on a throwaway run that copies another turn's
   // attachments (single-prompt only), so a vision re-run keeps its image.
   cloneAttachmentsFrom?: { runId: string; promptIndex: number }
+  // Tool ids the run may use (calc, fetch_url, web_search). Absent/empty ⇒ the
+  // provider request goes out with no tools, exactly as before tools existed.
+  // Deliberately its own field, not part of RunSettings, which is Partial<
+  // ProviderDefaults> — a tool set is not a generation parameter.
+  tools?: string[]
 }

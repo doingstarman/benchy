@@ -14,6 +14,34 @@ function toAnthropicContent(msg: Message): string | Anthropic.ContentBlockParam[
   return blocks
 }
 
+// benchy's neutral messages → Anthropic's shape. Tool results are a `user`
+// message of tool_result blocks; an assistant turn that called tools replays
+// them as tool_use blocks so the model can match results to its requests.
+function toAnthropicMessage(msg: Message): Anthropic.MessageParam {
+  if (msg.role === 'tool' && msg.toolResults?.length) {
+    return {
+      role: 'user',
+      content: msg.toolResults.map(r => ({
+        type: 'tool_result' as const,
+        tool_use_id: r.id,
+        content: r.content,
+        ...(r.isError ? { is_error: true } : {}),
+      })),
+    }
+  }
+
+  if (msg.role === 'assistant' && msg.toolCalls?.length) {
+    const blocks: Anthropic.ContentBlockParam[] = []
+    if (msg.content) blocks.push({ type: 'text', text: msg.content })
+    for (const c of msg.toolCalls) {
+      blocks.push({ type: 'tool_use', id: c.id, name: c.name, input: c.args })
+    }
+    return { role: 'assistant', content: blocks }
+  }
+
+  return { role: msg.role as 'user' | 'assistant', content: toAnthropicContent(msg) }
+}
+
 export const anthropicAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
     const client = new Anthropic({
@@ -40,10 +68,10 @@ export const anthropicAdapter: Adapter = {
         ...(!thinking && config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
         ...(!thinking && config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
         ...(thinking ? { thinking: { type: 'adaptive' as const } } : {}),
-        messages: chatMessages.map(m => ({
-          role: m.role as 'user' | 'assistant',
-          content: toAnthropicContent(m),
-        })),
+        ...(config.tools?.length
+          ? { tools: config.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })) }
+          : {}),
+        messages: chatMessages.map(toAnthropicMessage),
       })
 
       for await (const event of stream) {
@@ -56,6 +84,18 @@ export const anthropicAdapter: Adapter = {
       }
 
       const final = await stream.finalMessage()
+
+      // The assembled message carries fully-parsed tool_use blocks — far cleaner
+      // than reassembling input_json_delta fragments by hand.
+      for (const block of final.content) {
+        if (block.type === 'tool_use') {
+          yield {
+            type: 'tool_call',
+            call: { id: block.id, name: block.name, args: (block.input ?? {}) as Record<string, unknown> },
+          }
+        }
+      }
+
       yield {
         type: 'done',
         usage: {

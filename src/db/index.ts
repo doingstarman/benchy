@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS runs (
   -- What prompts[] MEANS for this run: 'chat' = turns of one conversation,
   -- 'batch'/'pairs' = independent prompts that must never be replayed to the
   -- model as if they were a dialogue.
-  kind TEXT NOT NULL DEFAULT 'chat'
+  kind TEXT NOT NULL DEFAULT 'chat',
+  -- JSON array of tool ids this run enabled; NULL means none.
+  tools TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -36,6 +38,7 @@ CREATE TABLE IF NOT EXISTS results (
   reasoning_tokens INTEGER,
   reasoning TEXT,
   reasoning_ms INTEGER,
+  tool_calls TEXT,
   feedback TEXT,
   error TEXT,
   created_at INTEGER NOT NULL,
@@ -91,6 +94,10 @@ export async function initDb(path?: string): Promise<void> {
     // reads as "this model never showed its thinking" — true, as it happens.
     'ALTER TABLE results ADD COLUMN reasoning TEXT',
     'ALTER TABLE results ADD COLUMN reasoning_ms INTEGER',
+    // The tool calls a model made on the way to its answer, as a JSON array.
+    'ALTER TABLE results ADD COLUMN tool_calls TEXT',
+    // Which tools a run had enabled — NULL/absent for every run before this.
+    'ALTER TABLE runs ADD COLUMN tools TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
