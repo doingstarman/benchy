@@ -768,6 +768,70 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(capturedMessages[0].map(m => m.role)).toEqual(['user', 'assistant', 'user'])
   })
 
+  it('the history search box is a search box, not a pattern language', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+    const tag = `S${Date.now()}`
+
+    const start = async (prompt: string) => {
+      const res = await fetch(`${base}/api/benchmark`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: [prompt], models: [model] }),
+      })
+      const { data } = await res.json() as { data: { runId: string } }
+      await waitForRun(data.runId)
+      return data.runId
+    }
+    await start(`${tag} discount is 50% off`)
+    await start(`${tag} plain text`)
+
+    const search = async (q: string) => {
+      const res = await fetch(`${base}/api/runs?search=${encodeURIComponent(q)}`)
+      const { data } = await res.json() as { data: Array<{ prompts: string[] }> }
+      return data.filter(r => r.prompts[0]?.startsWith(tag))
+    }
+
+    // A literal % used to be a wildcard, so this matched every run ever made.
+    expect(await search('%')).toHaveLength(1)
+    expect((await search('%'))[0].prompts[0]).toContain('50%')
+    // Same for _, LIKE's single-character wildcard.
+    expect(await search('_')).toHaveLength(0)
+    // And the plain case still works.
+    expect(await search(`${tag} plain`)).toHaveLength(1)
+  })
+
+  it('the history model filter matches a model, not any name containing it', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const tag = `M${Date.now()}`
+
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: [`${tag} mini only`], models: [`${pid}:gpt-4o-mini`] }),
+    })
+    const { data } = await res.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    const byModel = async (m: string) => {
+      const r = await fetch(`${base}/api/runs?model=${encodeURIComponent(m)}`)
+      const { data: runs } = await r.json() as { data: Array<{ prompts: string[] }> }
+      return runs.filter(x => x.prompts[0]?.startsWith(tag))
+    }
+
+    // "gpt-4o" is a prefix of "gpt-4o-mini": a substring match claimed this run
+    // used gpt-4o, which it never did.
+    expect(await byModel(`${pid}:gpt-4o`)).toHaveLength(0)
+    expect(await byModel(`${pid}:gpt-4o-mini`)).toHaveLength(1)
+  })
+
+  it('a nonsense page number does not 500', async () => {
+    // parseInt('abc') reached SQLite as NaN → "datatype mismatch".
+    for (const page of ['abc', '0', '-1', '']) {
+      const res = await fetch(`${base}/api/runs?page=${page}`)
+      expect(res.status, `page=${page}`).toBe(200)
+    }
+  })
+
   it('rejects attachments with multiple prompts or unknown ids', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`

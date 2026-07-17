@@ -36,6 +36,12 @@ interface ResultRow {
   created_at: number
 }
 
+// Backslash-escape LIKE's own metacharacters so the query means what it says.
+// Paired with ESCAPE '\' on the LIKE.
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, m => `\\${m}`)
+}
+
 function rowToRun(row: RunRow): Run {
   const runSettings = row.run_settings
     ? JSON.parse(row.run_settings) as RunSettings
@@ -85,7 +91,10 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     const db = getDb()
     const { status, model, date, search, page = '1' } = req.query
     const limit = 50
-    const offset = (parseInt(page, 10) - 1) * limit
+    // A non-numeric page used to reach SQLite as NaN and 500 with "datatype
+    // mismatch"; a zero/negative one silently meant page 1 anyway.
+    const parsedPage = parseInt(page, 10)
+    const offset = (Math.max(1, Number.isFinite(parsedPage) ? parsedPage : 1) - 1) * limit
 
     let query = 'SELECT * FROM runs WHERE 1=1'
     const params: (string | number)[] = []
@@ -93,7 +102,13 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     if (status === 'saved') { query += ' AND saved = 1'; }
     else if (status === 'unsaved') { query += ' AND saved = 0'; }
 
-    if (model) { query += ' AND models LIKE ?'; params.push(`%${model}%`) }
+    // models is a JSON array, so a LIKE substring matched a filter for
+    // "…:gpt-4o" against a run that only ever used "…:gpt-4o-mini". Compare
+    // each element instead.
+    if (model) {
+      query += ' AND EXISTS (SELECT 1 FROM json_each(runs.models) WHERE json_each.value = ?)'
+      params.push(model)
+    }
 
     if (date === 'today') {
       const start = new Date(); start.setHours(0, 0, 0, 0)
@@ -102,7 +117,12 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
       query += ' AND created_at >= ?'; params.push(Date.now() - 7 * 24 * 60 * 60 * 1000)
     }
 
-    if (search) { query += ' AND prompts LIKE ?'; params.push(`%${search}%`) }
+    // The search box is a search box, not a pattern language: % and _ are what
+    // the user typed, not wildcards that quietly match everything.
+    if (search) {
+      query += " AND prompts LIKE ? ESCAPE '\\'"
+      params.push(`%${escapeLike(search)}%`)
+    }
 
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
     params.push(limit, offset)
