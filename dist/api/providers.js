@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { getProviders, upsertProvider, removeProvider } from '../config.js';
 import { humanizeNetworkError, describeHttpError } from '../errors.js';
+// "https://api.x.ai/v1/" + "/models" is "/v1//models", which real servers 404 —
+// so benchy called a perfectly good provider broken. The adapters already strip
+// it before /chat/completions, which is why runs worked while Test connection
+// and Fetch models lied.
+function apiUrl(baseUrl, path) {
+    return `${baseUrl.trim().replace(/\/+$/, '')}${path}`;
+}
 // Static model lists for providers without a /models endpoint
 const STATIC_MODELS = {
     anthropic: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-3-5-haiku-20241022'],
@@ -13,12 +20,26 @@ export async function registerProvidersRoutes(app) {
     });
     app.post('/api/providers', async (req, reply) => {
         const body = req.body;
+        // Validate here, at the boundary: a provider saved without a models array
+        // was stored as-is and then blew up with a 500 the moment anything read
+        // models[0].
+        if (!body || typeof body.name !== 'string' || !body.name.trim()) {
+            return reply.code(400).send({ error: 'name is required' });
+        }
+        if (typeof body.type !== 'string' || !body.type) {
+            return reply.code(400).send({ error: 'type is required' });
+        }
+        if (!Array.isArray(body.models) || !body.models.every(m => typeof m === 'string')) {
+            return reply.code(400).send({ error: 'models must be an array of model ids' });
+        }
         const provider = {
             id: body.id ?? randomUUID(),
-            name: body.name,
+            name: body.name.trim(),
             type: body.type,
             apiKey: body.apiKey,
-            baseUrl: body.baseUrl,
+            // Stored normalized so the trailing slash can't come back to bite the
+            // next caller that builds a URL from it.
+            baseUrl: body.baseUrl?.trim().replace(/\/+$/, ''),
             models: body.models,
             enabled: body.enabled ?? true,
             timeout: body.timeout,
@@ -32,67 +53,61 @@ export async function registerProvidersRoutes(app) {
         await removeProvider(req.params.id);
         return reply.code(204).send();
     });
-    // GET /api/providers/:id/models — fetch available models from provider API
-    app.get('/api/providers/:id/models', async (req, reply) => {
-        const providers = await getProviders();
-        const provider = providers.find(p => p.id === req.params.id);
-        if (!provider)
-            return reply.code(404).send({ error: 'Provider not found' });
-        if (STATIC_MODELS[provider.type])
-            return { data: STATIC_MODELS[provider.type] };
-        if (['http-json', 'script', 'webhook'].includes(provider.type))
+    // POST /api/providers/models — list the models a DRAFT configuration can see.
+    // Takes the candidate settings in the body rather than an id, because the
+    // caller is a form the user hasn't saved yet. It used to read the stored
+    // provider, which forced the UI to save before it could look anything up —
+    // so "Cancel" silently kept whatever you had typed.
+    app.post('/api/providers/models', async (req, reply) => {
+        const { type, apiKey, baseUrl } = req.body ?? {};
+        if (!type)
+            return reply.code(400).send({ error: 'type is required' });
+        if (STATIC_MODELS[type])
+            return { data: STATIC_MODELS[type] };
+        if (['http-json', 'script', 'webhook'].includes(type))
             return { data: [] };
-        const baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
+        const base = baseUrl?.trim() || 'https://api.openai.com/v1';
+        const url = apiUrl(base, '/models');
         try {
-            const res = await fetch(`${baseUrl}/models`, {
-                headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
-            });
+            let res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+            // Some catalogues are public and refuse the key rather than ignore it —
+            // OpenRouter 403s a restricted key on /models while happily streaming
+            // completions with it. The list is public, so just ask anonymously.
+            if (!res.ok && apiKey && (res.status === 401 || res.status === 403)) {
+                res = await fetch(url);
+            }
             if (!res.ok) {
                 const text = await res.text().catch(() => res.statusText);
                 return reply.code(502).send({ error: `/models: ${describeHttpError(res.status, text)}` });
             }
             const json = await res.json();
-            const ids = (json.data ?? []).map((m) => m.id).sort();
-            return { data: ids };
+            return { data: (json.data ?? []).map(m => m.id).sort() };
         }
         catch (err) {
-            return reply.code(502).send({ error: humanizeNetworkError(err, baseUrl) });
+            return reply.code(502).send({ error: humanizeNetworkError(err, base) });
         }
     });
-    // POST /api/providers/:id/test?model=<id>
-    app.post('/api/providers/:id/test', async (req, reply) => {
-        const providers = await getProviders();
-        const provider = providers.find(p => p.id === req.params.id);
-        if (!provider)
-            return reply.code(404).send({ error: 'Provider not found' });
-        const model = req.query.model ?? provider.models[0];
+    // POST /api/providers/test — ask a DRAFT configuration to actually answer.
+    // Body, not id, for the same reason as /models above: you are testing what is
+    // on screen, not what is on disk.
+    app.post('/api/providers/test', async (req, reply) => {
+        const { type, apiKey, baseUrl, model } = req.body ?? {};
+        if (!type)
+            return reply.code(400).send({ error: 'type is required' });
         if (!model)
             return reply.code(400).send({ error: 'No models configured' });
-        const isCompatible = provider.type === 'openai-compatible' || provider.type === 'local';
-        // For openai-compatible: also verify /models endpoint is reachable
-        if (isCompatible && provider.baseUrl) {
-            try {
-                const r = await fetch(`${provider.baseUrl}/models`, {
-                    headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
-                });
-                if (!r.ok) {
-                    const text = await r.text().catch(() => r.statusText);
-                    return { data: { ok: false, error: `/models: ${describeHttpError(r.status, text)}` } };
-                }
-            }
-            catch (err) {
-                return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } };
-            }
-        }
+        // The only question worth asking: does this model answer? It used to gate on
+        // /models first and call a provider broken when that failed — but /models is
+        // a catalogue, not the service. OpenRouter's is public and 403s the very key
+        // that streams completions fine, so a working provider was pronounced dead
+        // without ever being asked to speak.
         try {
             const { getAdapter } = await import('./benchmark.js');
-            const adapter = getAdapter(provider.type);
+            const adapter = getAdapter(type);
             const t0 = Date.now();
-            for await (const chunk of adapter.stream([{ role: 'user', content: 'Hi' }], { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model })) {
+            for await (const chunk of adapter.stream([{ role: 'user', content: 'Hi' }], { apiKey, baseUrl, model })) {
                 if (chunk.type === 'token') {
-                    const ttfs = Date.now() - t0;
-                    const message = isCompatible ? '/models + chat completion succeeded' : 'streamed response received';
-                    return { data: { ok: true, ttfs, message } };
+                    return { data: { ok: true, ttfs: Date.now() - t0, message: 'streamed response received' } };
                 }
                 if (chunk.type === 'error')
                     return { data: { ok: false, error: chunk.message } };
@@ -100,7 +115,7 @@ export async function registerProvidersRoutes(app) {
             return { data: { ok: false, error: 'No response from provider' } };
         }
         catch (err) {
-            return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } };
+            return { data: { ok: false, error: humanizeNetworkError(err, baseUrl) } };
         }
     });
 }

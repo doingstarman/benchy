@@ -21,6 +21,14 @@ export async function createServer(port, dbPath) {
     const app = Fastify({ logger: false });
     // CORS for dev (Vite on 5173 -> backend on 4243)
     await app.register(fastifyCors, { origin: true });
+    // Every route answers {data} or {error}; a *thrown* error would otherwise fall
+    // through to Fastify's own shape, which the frontend's apiFetch can't read —
+    // the user gets a blank 500 and no idea what happened. This tool is localhost
+    // and single-user, so an honest message beats a silent one.
+    app.setErrorHandler((err, _req, reply) => {
+        const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+        return reply.code(status).send({ error: err.message });
+    });
     // API routes
     await registerUploadsRoutes(app);
     await registerVersionRoutes(app);

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js';
+// Backslash-escape LIKE's own metacharacters so the query means what it says.
+// Paired with ESCAPE '\' on the LIKE.
+function escapeLike(value) {
+    return value.replace(/[\\%_]/g, m => `\\${m}`);
+}
 function rowToRun(row) {
     const runSettings = row.run_settings
         ? JSON.parse(row.run_settings)
@@ -14,6 +19,8 @@ function rowToRun(row) {
         totalCalls: row.total_calls,
         completedCalls: row.completed_calls,
         createdAt: row.created_at,
+        // Older rows predate the column; the migration defaults them to 'chat'.
+        kind: row.kind ?? 'chat',
         ...(runSettings ? { runSettings } : {}),
         ...(row.title != null ? { title: row.title } : {}),
     };
@@ -44,7 +51,10 @@ export async function registerRunsRoutes(app) {
         const db = getDb();
         const { status, model, date, search, page = '1' } = req.query;
         const limit = 50;
-        const offset = (parseInt(page, 10) - 1) * limit;
+        // A non-numeric page used to reach SQLite as NaN and 500 with "datatype
+        // mismatch"; a zero/negative one silently meant page 1 anyway.
+        const parsedPage = parseInt(page, 10);
+        const offset = (Math.max(1, Number.isFinite(parsedPage) ? parsedPage : 1) - 1) * limit;
         let query = 'SELECT * FROM runs WHERE 1=1';
         const params = [];
         if (status === 'saved') {
@@ -53,9 +63,12 @@ export async function registerRunsRoutes(app) {
         else if (status === 'unsaved') {
             query += ' AND saved = 0';
         }
+        // models is a JSON array, so a LIKE substring matched a filter for
+        // "…:gpt-4o" against a run that only ever used "…:gpt-4o-mini". Compare
+        // each element instead.
         if (model) {
-            query += ' AND models LIKE ?';
-            params.push(`%${model}%`);
+            query += ' AND EXISTS (SELECT 1 FROM json_each(runs.models) WHERE json_each.value = ?)';
+            params.push(model);
         }
         if (date === 'today') {
             const start = new Date();
@@ -67,9 +80,11 @@ export async function registerRunsRoutes(app) {
             query += ' AND created_at >= ?';
             params.push(Date.now() - 7 * 24 * 60 * 60 * 1000);
         }
+        // The search box is a search box, not a pattern language: % and _ are what
+        // the user typed, not wildcards that quietly match everything.
         if (search) {
-            query += ' AND prompts LIKE ?';
-            params.push(`%${search}%`);
+            query += " AND prompts LIKE ? ESCAPE '\\'";
+            params.push(`%${escapeLike(search)}%`);
         }
         query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
         params.push(limit, offset);
@@ -103,7 +118,7 @@ export async function registerRunsRoutes(app) {
         if (!original)
             return reply.code(404).send({ error: 'Run not found' });
         const newId = randomUUID();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now());
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat');
         // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
         // Attachments are copied (own files + rows) so the fork re-runs with the
         // same media instead of silently dropping it.

@@ -39,11 +39,6 @@ function broadcast(runId, event, data) {
 async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = []) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
-    const provider = providers.find(p => p.id === providerId);
-    if (!provider) {
-        broadcast(runId, 'cell_error', { runId, promptIndex, model: modelKey, error: `Provider "${providerId}" not found` });
-        return;
-    }
     const db = getDb();
     const resultId = randomUUID();
     db.prepare('INSERT INTO results (id, run_id, prompt_index, model, provider_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(resultId, runId, promptIndex, modelKey, providerId, '', Date.now());
@@ -55,6 +50,14 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
     let outputTokens = 0;
     let reasoningTokens;
     try {
+        // A model can name a provider that no longer exists (deleted, or a saved run
+        // reopened). Failing here rather than returning early means it lands in the
+        // normal error path: the row is written, so the failure survives a reload,
+        // and the finally below still counts the call — the run used to sit at
+        // completed < total forever with the error visible only in that live stream.
+        const provider = providers.find(p => p.id === providerId);
+        if (!provider)
+            throw new Error(`Provider "${providerId}" is not configured — it may have been deleted`);
         const adapter = getAdapter(provider.type);
         const effectiveSettings = {
             ...DEFAULT_PROVIDER_SETTINGS,
@@ -97,23 +100,39 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
         db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId);
     }
 }
+// Turns can overlap on one run — a second tab, or a continue fired while an
+// edit is still streaming. Count them so the first to finish doesn't announce
+// the whole run is over.
+const inFlightTurns = new Map();
 function finalizeRun(runId, tasks) {
     const db = getDb();
-    Promise.all(tasks)
-        .then(() => {
-        db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId);
+    inFlightTurns.set(runId, (inFlightTurns.get(runId) ?? 0) + 1);
+    void Promise.all(tasks)
+        .then(() => 'done', () => 'error')
+        .then(status => {
+        const left = (inFlightTurns.get(runId) ?? 1) - 1;
+        if (left > 0) {
+            // Another turn is still streaming; it will close the run out.
+            inFlightTurns.set(runId, left);
+            return;
+        }
+        inFlightTurns.delete(runId);
+        db.prepare('UPDATE runs SET status = ? WHERE id = ?').run(status, runId);
+        // Always terminal, including on the error path: a client that never hears
+        // this sits open in "running" forever.
         broadcast(runId, 'run_done', { runId });
-        sseConnections.delete(runId);
-    })
-        .catch(() => {
-        db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId);
-        sseConnections.delete(runId);
+        // Connections are NOT dropped here — the sockets are still alive and the
+        // close handler owns their lifetime. Deleting the map entry unsubscribed
+        // live clients, so a later turn broadcast into nothing.
     });
 }
 // Binds freshly-uploaded attachments to a specific turn. Rejects ids that
 // don't exist or already belong to a different turn.
-function bindAttachments(ids, runId, promptIndex) {
-    const db = getDb();
+// Split from the binding itself so a caller that is about to destroy something
+// can check the request is acceptable FIRST — edit-turn deleted attachments and
+// only then discovered the request was invalid, taking the user's images with a
+// request it went on to reject.
+function validateAttachments(ids, runId, promptIndex) {
     if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) {
         return 'attachments must be an array of upload id strings';
     }
@@ -125,7 +144,13 @@ function bindAttachments(ids, runId, promptIndex) {
             return `Attachment ${id} already belongs to another message`;
         }
     }
-    const bind = db.prepare('UPDATE attachments SET run_id = ?, prompt_index = ? WHERE id = ?');
+    return null;
+}
+function bindAttachments(ids, runId, promptIndex) {
+    const invalid = validateAttachments(ids, runId, promptIndex);
+    if (invalid)
+        return invalid;
+    const bind = getDb().prepare('UPDATE attachments SET run_id = ?, prompt_index = ? WHERE id = ?');
     for (const id of ids)
         bind.run(runId, promptIndex, id);
     return null;
@@ -163,7 +188,15 @@ async function deleteAttachmentsFrom(runId, promptIndex) {
 // Reconstructs one model's own conversation branch from prior turns —
 // failed turns (error IS NOT NULL) are skipped entirely rather than
 // injected as broken/empty assistant messages.
-async function buildHistory(runId, model, prompts) {
+async function buildHistory(runId, model, prompts, kind) {
+    // A batch is many unrelated questions fanned out to every model, so replaying
+    // them as a dialogue feeds a model three questions it was never asked in
+    // sequence, poisoning every answer after the first. It has no conversation.
+    //
+    // A pairs run does: each model was asked its own prompt, so the rows below
+    // (already filtered to this model) are exactly that model's own thread.
+    if (kind === 'batch')
+        return [];
     const db = getDb();
     const rows = db.prepare('SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index').all(runId, model);
     const history = [];
@@ -198,10 +231,15 @@ export async function registerBenchmarkRoutes(app) {
             return reply.code(400).send({ error: 'cloneAttachmentsFrom needs a string runId and an integer promptIndex' });
         }
         const runId = randomUUID();
-        const totalCalls = pairs ? pairs.length : prompts.length * models.length;
         const db = getDb();
-        const storedPrompts = pairs ? pairs.map(p => p.prompt) : prompts;
-        const storedModels = pairs ? pairs.map(p => p.model) : models;
+        // `pairs: []` is not a pairs run. The guard above tests .length while these
+        // used to test truthiness, so an empty array slipped through and then won
+        // every branch — producing a 202 for an empty run that dropped the prompts
+        // the caller actually sent.
+        const isPairs = !!pairs?.length;
+        const totalCalls = isPairs ? pairs.length : prompts.length * models.length;
+        const storedPrompts = isPairs ? pairs.map(p => p.prompt) : prompts;
+        const storedModels = isPairs ? pairs.map(p => p.model) : models;
         const hasSettings = runSettings && (Object.keys(runSettings.global ?? {}).length > 0 ||
             Object.keys(runSettings.perModel ?? {}).length > 0);
         const runSettingsJson = hasSettings ? JSON.stringify(runSettings) : null;
@@ -210,7 +248,11 @@ export async function registerBenchmarkRoutes(app) {
             if (bindError)
                 return reply.code(400).send({ error: bindError });
         }
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson);
+        // Derived from the request's shape, not trusted from the client: pairs are
+        // one prompt per model, several prompts fanned out to every model is a
+        // batch, and a single prompt is the start of a chat.
+        const kind = pairs?.length ? 'pairs' : storedPrompts.length > 1 ? 'batch' : 'chat';
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind);
         // Regenerate copies the source turn's attachments onto this run so the
         // re-run sees the same media. Done after the INSERT (rows FK-reference it).
         if (cloneAttachmentsFrom) {
@@ -218,7 +260,7 @@ export async function registerBenchmarkRoutes(app) {
         }
         // Fire and forget — SSE stream delivers results
         const providers = await getProviders();
-        const tasks = pairs
+        const tasks = isPairs
             ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings))
             : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings)));
         finalizeRun(runId, tasks);
@@ -236,6 +278,10 @@ export async function registerBenchmarkRoutes(app) {
         const models = JSON.parse(run.models);
         const newPromptIndex = prompts.length;
         const updatedPrompts = [...prompts, prompt];
+        // In a pairs run `models` is aligned to `prompts`, one entry per pair — it
+        // is not the run's model set, and the same model may appear twice. A
+        // follow-up is addressed to each model once, so dedupe before fanning out.
+        const targetModels = run.kind === 'pairs' ? [...new Set(models)] : models;
         if (attachments?.length) {
             const bindError = bindAttachments(attachments, req.params.id, newPromptIndex);
             if (bindError)
@@ -243,10 +289,12 @@ export async function registerBenchmarkRoutes(app) {
         }
         const effectiveRunSettings = runSettings ?? (run.run_settings ? JSON.parse(run.run_settings) : undefined);
         const runSettingsJson = effectiveRunSettings ? JSON.stringify(effectiveRunSettings) : run.run_settings;
-        db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?").run(JSON.stringify(updatedPrompts), models.length, runSettingsJson, req.params.id);
+        db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?").run(JSON.stringify(updatedPrompts), targetModels.length, runSettingsJson, req.params.id);
         const providers = await getProviders();
-        const tasks = models.map(async (model) => {
-            const history = await buildHistory(req.params.id, model, prompts);
+        const tasks = targetModels.map(async (model) => {
+            // In a batch run this returns [] — the new prompt is another independent
+            // question, not a follow-up to the previous ones.
+            const history = await buildHistory(req.params.id, model, prompts, run.kind);
             return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history);
         });
         finalizeRun(req.params.id, tasks);
@@ -267,9 +315,28 @@ export async function registerBenchmarkRoutes(app) {
         if (!Number.isInteger(promptIndex) || promptIndex < 0 || promptIndex >= prompts.length) {
             return reply.code(400).send({ error: `promptIndex out of range (0..${prompts.length - 1})` });
         }
-        // Discarded turns take their attachments (rows + files) with them; on
-        // the edited turn itself, only the re-sent ids survive.
-        await deleteAttachmentsFrom(req.params.id, promptIndex + 1);
+        // Chat forks: later turns follow from this one, so editing it invalidates
+        // them. A batch prompt answers to nobody — editing it re-runs that prompt
+        // alone and leaves its neighbours untouched.
+        const forks = run.kind === 'chat';
+        // In a pairs run prompts[i] belongs to models[i] — but only for the
+        // original pairs. A prompt appended by `continue` sits past the end of
+        // `models` and was addressed to everyone, so it re-runs on everyone.
+        // Indexing blindly gave `undefined` there: the edit deleted every answer,
+        // re-ran nothing, and reported success.
+        const targetModels = run.kind === 'pairs'
+            ? (promptIndex < models.length ? [models[promptIndex]] : [...new Set(models)])
+            : models;
+        // Everything below destroys something. Reject a bad request before that,
+        // or a 400 the user reads as "nothing happened" will already have deleted
+        // their images — from this turn and every later one.
+        if (attachments?.length) {
+            const invalid = validateAttachments(attachments, req.params.id, promptIndex);
+            if (invalid)
+                return reply.code(400).send({ error: invalid });
+        }
+        if (forks)
+            await deleteAttachmentsFrom(req.params.id, promptIndex + 1);
         const keep = new Set(attachments ?? []);
         const ownRows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id = ? AND prompt_index = ?')
             .all(req.params.id, promptIndex);
@@ -284,15 +351,22 @@ export async function registerBenchmarkRoutes(app) {
             if (bindError)
                 return reply.code(400).send({ error: bindError });
         }
-        const updatedPrompts = [...prompts.slice(0, promptIndex), prompt];
-        const dropped = db.prepare('SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?')
-            .get(req.params.id, promptIndex);
-        db.prepare('DELETE FROM results WHERE run_id = ? AND prompt_index >= ?').run(req.params.id, promptIndex);
-        db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls - ? + ?, completed_calls = completed_calls - ? WHERE id = ?").run(JSON.stringify(updatedPrompts), dropped.n, models.length, dropped.n, req.params.id);
+        const updatedPrompts = forks
+            ? [...prompts.slice(0, promptIndex), prompt]
+            : prompts.map((p, i) => i === promptIndex ? prompt : p);
+        const countSql = forks
+            ? 'SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index >= ?'
+            : 'SELECT COUNT(*) AS n FROM results WHERE run_id = ? AND prompt_index = ?';
+        const deleteSql = forks
+            ? 'DELETE FROM results WHERE run_id = ? AND prompt_index >= ?'
+            : 'DELETE FROM results WHERE run_id = ? AND prompt_index = ?';
+        const dropped = db.prepare(countSql).get(req.params.id, promptIndex);
+        db.prepare(deleteSql).run(req.params.id, promptIndex);
+        db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls - ? + ?, completed_calls = completed_calls - ? WHERE id = ?").run(JSON.stringify(updatedPrompts), dropped.n, targetModels.length, dropped.n, req.params.id);
         const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) : undefined;
         const providers = await getProviders();
-        const tasks = models.map(async (model) => {
-            const history = await buildHistory(req.params.id, model, prompts);
+        const tasks = targetModels.map(async (model) => {
+            const history = await buildHistory(req.params.id, model, prompts, run.kind);
             return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history);
         });
         finalizeRun(req.params.id, tasks);
@@ -322,11 +396,14 @@ export async function registerBenchmarkRoutes(app) {
         req.raw.on('close', () => {
             clearInterval(heartbeat);
             const conns = sseConnections.get(runId);
-            if (conns) {
-                const idx = conns.indexOf(reply);
-                if (idx >= 0)
-                    conns.splice(idx, 1);
-            }
+            if (!conns)
+                return;
+            const idx = conns.indexOf(reply);
+            if (idx >= 0)
+                conns.splice(idx, 1);
+            // Last listener gone — drop the entry so the map doesn't grow forever.
+            if (conns.length === 0)
+                sseConnections.delete(runId);
         });
         // Don't resolve — keep connection open
         await new Promise(resolve => req.raw.on('close', resolve));
