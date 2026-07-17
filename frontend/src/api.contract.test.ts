@@ -69,14 +69,34 @@ describe('frontend API client ↔ real server contract', () => {
     expect(list.find(p => p.id === saved.id)?.defaults?.temperature).toBe(0.7)
   })
 
-  it('provider test (body-less POST) reaches the endpoint instead of 400ing', async () => {
+  it('provider test reaches the endpoint and reports a humanized failure', async () => {
     const list = await providersApi.list()
     const provider = list[0]
-    // Unreachable base URL → the call must complete with ok:false and a
-    // humanized error — NOT throw Fastify's empty-JSON-body Bad Request.
-    const result = await providersApi.test(provider.id, provider.models[0])
+    // The draft is what the form holds — testing must not require saving first.
+    // Unreachable base URL → the call completes with ok:false and a humanized
+    // error, rather than throwing on the way there.
+    const result = await providersApi.test({
+      type: provider.type,
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+      model: provider.models[0],
+    })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/Connection refused|Could not reach|Host not found/)
+  })
+
+  it('testing a draft never writes it to the config', async () => {
+    const before = await providersApi.list()
+    await providersApi.test({
+      type: 'openai-compatible',
+      apiKey: 'sk-draft-never-saved',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      model: 'draft-model',
+    })
+    const after = await providersApi.list()
+    // Test used to upsert first, so a provider you only probed was already
+    // stored and Cancel could not take it back.
+    expect(after.map(p => p.id).sort()).toEqual(before.map(p => p.id).sort())
   })
 
   it('fork (body-less POST) creates a new run shell', async () => {

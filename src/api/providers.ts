@@ -17,6 +17,14 @@ interface ProviderBody {
   defaults?: ProviderDefaults
 }
 
+// A candidate configuration — what the form currently holds, saved or not.
+interface ProbeBody {
+  type: ProviderType
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+}
+
 // "https://api.x.ai/v1/" + "/models" is "/v1//models", which real servers 404 —
 // so benchy called a perfectly good provider broken. The adapters already strip
 // it before /chat/completions, which is why runs worked while Test connection
@@ -75,83 +83,69 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     return reply.code(204).send()
   })
 
-  // GET /api/providers/:id/models — fetch available models from provider API
-  app.get<{ Params: { id: string } }>('/api/providers/:id/models', async (req, reply) => {
-    const providers = await getProviders()
-    const provider = providers.find(p => p.id === req.params.id)
-    if (!provider) return reply.code(404).send({ error: 'Provider not found' })
+  // POST /api/providers/models — list the models a DRAFT configuration can see.
+  // Takes the candidate settings in the body rather than an id, because the
+  // caller is a form the user hasn't saved yet. It used to read the stored
+  // provider, which forced the UI to save before it could look anything up —
+  // so "Cancel" silently kept whatever you had typed.
+  app.post<{ Body: ProbeBody }>('/api/providers/models', async (req, reply) => {
+    const { type, apiKey, baseUrl } = req.body ?? {}
+    if (!type) return reply.code(400).send({ error: 'type is required' })
 
-    if (STATIC_MODELS[provider.type]) return { data: STATIC_MODELS[provider.type] }
+    if (STATIC_MODELS[type]) return { data: STATIC_MODELS[type] }
+    if (['http-json', 'script', 'webhook'].includes(type)) return { data: [] }
 
-    if (['http-json', 'script', 'webhook'].includes(provider.type)) return { data: [] }
-
-    const baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1'
+    const base = baseUrl?.trim() || 'https://api.openai.com/v1'
+    const url = apiUrl(base, '/models')
     try {
-      const res = await fetch(apiUrl(baseUrl, '/models'), {
-        headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
-      })
+      let res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} })
+      // Some catalogues are public and refuse the key rather than ignore it —
+      // OpenRouter 403s a restricted key on /models while happily streaming
+      // completions with it. The list is public, so just ask anonymously.
+      if (!res.ok && apiKey && (res.status === 401 || res.status === 403)) {
+        res = await fetch(url)
+      }
       if (!res.ok) {
         const text = await res.text().catch(() => res.statusText)
         return reply.code(502).send({ error: `/models: ${describeHttpError(res.status, text)}` })
       }
       const json = await res.json() as { data?: { id: string }[] }
-      const ids = (json.data ?? []).map((m: { id: string }) => m.id).sort()
-      return { data: ids }
+      return { data: (json.data ?? []).map(m => m.id).sort() }
     } catch (err) {
-      return reply.code(502).send({ error: humanizeNetworkError(err, baseUrl) })
+      return reply.code(502).send({ error: humanizeNetworkError(err, base) })
     }
   })
 
-  // POST /api/providers/:id/test?model=<id>
-  app.post<{ Params: { id: string }; Querystring: { model?: string } }>(
-    '/api/providers/:id/test',
-    async (req, reply) => {
-      const providers = await getProviders()
-      const provider = providers.find(p => p.id === req.params.id)
-      if (!provider) return reply.code(404).send({ error: 'Provider not found' })
+  // POST /api/providers/test — ask a DRAFT configuration to actually answer.
+  // Body, not id, for the same reason as /models above: you are testing what is
+  // on screen, not what is on disk.
+  app.post<{ Body: ProbeBody }>('/api/providers/test', async (req, reply) => {
+    const { type, apiKey, baseUrl, model } = req.body ?? {}
+    if (!type) return reply.code(400).send({ error: 'type is required' })
+    if (!model) return reply.code(400).send({ error: 'No models configured' })
 
-      // Providers saved before models were validated can have no array at all;
-      // that must read as "nothing configured", not crash with a 500.
-      const model = req.query.model ?? provider.models?.[0]
-      if (!model) return reply.code(400).send({ error: 'No models configured' })
+    // The only question worth asking: does this model answer? It used to gate on
+    // /models first and call a provider broken when that failed — but /models is
+    // a catalogue, not the service. OpenRouter's is public and 403s the very key
+    // that streams completions fine, so a working provider was pronounced dead
+    // without ever being asked to speak.
+    try {
+      const { getAdapter } = await import('./benchmark.js')
+      const adapter = getAdapter(type)
+      const t0 = Date.now()
 
-      const isCompatible = provider.type === 'openai-compatible' || provider.type === 'local'
-
-      // For openai-compatible: also verify /models endpoint is reachable
-      if (isCompatible && provider.baseUrl) {
-        try {
-          const r = await fetch(apiUrl(provider.baseUrl, '/models'), {
-            headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
-          })
-          if (!r.ok) {
-            const text = await r.text().catch(() => r.statusText)
-            return { data: { ok: false, error: `/models: ${describeHttpError(r.status, text)}` } }
-          }
-        } catch (err) {
-          return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } }
+      for await (const chunk of adapter.stream(
+        [{ role: 'user', content: 'Hi' }],
+        { apiKey, baseUrl, model },
+      )) {
+        if (chunk.type === 'token') {
+          return { data: { ok: true, ttfs: Date.now() - t0, message: 'streamed response received' } }
         }
+        if (chunk.type === 'error') return { data: { ok: false, error: chunk.message } }
       }
-
-      try {
-        const { getAdapter } = await import('./benchmark.js')
-        const adapter = getAdapter(provider.type)
-        const t0 = Date.now()
-
-        for await (const chunk of adapter.stream(
-          [{ role: 'user', content: 'Hi' }],
-          { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model },
-        )) {
-          if (chunk.type === 'token') {
-            const ttfs = Date.now() - t0
-            const message = isCompatible ? '/models + chat completion succeeded' : 'streamed response received'
-            return { data: { ok: true, ttfs, message } }
-          }
-          if (chunk.type === 'error') return { data: { ok: false, error: chunk.message } }
-        }
-        return { data: { ok: false, error: 'No response from provider' } }
-      } catch (err) {
-        return { data: { ok: false, error: humanizeNetworkError(err, provider.baseUrl) } }
-      }
+      return { data: { ok: false, error: 'No response from provider' } }
+    } catch (err) {
+      return { data: { ok: false, error: humanizeNetworkError(err, baseUrl) } }
     }
-  )
+  })
 }

@@ -72,6 +72,26 @@ export function IconPaperclip(p: IconProps) {
   return <Svg {...p}><path d="M13 7.5l-5.2 5.2a3.2 3.2 0 0 1-4.5-4.5L8.8 2.7a2.1 2.1 0 0 1 3 3l-5.4 5.5a1 1 0 0 1-1.5-1.5L9.5 5" /></Svg>
 }
 
+// Disclosure chevron: points right when closed, down when open.
+export function IconChevron({ open, ...p }: IconProps & { open?: boolean }) {
+  return (
+    <Svg {...p}>
+      <path d={open ? 'M3.5 6l4.5 4.5L12.5 6' : 'M6 3.5L10.5 8 6 12.5'} />
+    </Svg>
+  )
+}
+
+// Sliders — the shape people expect for "settings/tuning".
+export function IconSliders(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M2 4.5h8M13 4.5h1M2 11.5h3M8 11.5h6" />
+      <circle cx="11.5" cy="4.5" r="1.8" />
+      <circle cx="6.5" cy="11.5" r="1.8" />
+    </Svg>
+  )
+}
+
 export function IconFile(p: IconProps) {
   return <Svg {...p}><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z" /><path d="M9 1.5V5h3.5" /></Svg>
 }

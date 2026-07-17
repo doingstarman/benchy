@@ -145,13 +145,10 @@ describe('a trailing slash in baseUrl', () => {
   it('does not make a working provider look broken', async () => {
     // "…/v1/" + "/models" was "…/v1//models" → 404, so Fetch models and Test
     // connection called a provider that ran benchmarks fine unreachable.
-    const { body } = await post<{ data: Provider }>('/api/providers', {
-      name: 'Slashy', type: 'openai-compatible', apiKey: 'k',
-      baseUrl: `${UPSTREAM}/`, models: ['model-a'], enabled: true,
-    })
-
     seenPaths.length = 0
-    const res = await get<{ data: string[] }>(`/api/providers/${body.data.id}/models`)
+    const res = await post<{ data: string[] }>('/api/providers/models', {
+      type: 'openai-compatible', apiKey: 'k', baseUrl: `${UPSTREAM}/`,
+    })
     expect(res.status).toBe(200)
     expect(res.body.data).toEqual(['model-a', 'model-b'])
     expect(seenPaths).toEqual(['/v1/models'])
@@ -189,13 +186,55 @@ describe('provider validation at the boundary', () => {
     expect((await post('/api/providers', { name: 'X', models: [] })).status).toBe(400)
   })
 
-  it('answers honestly when a provider genuinely has no models to test', async () => {
-    const { body } = await post<{ data: Provider }>('/api/providers', {
-      name: 'Empty', type: 'openai-compatible', baseUrl: UPSTREAM, models: [], enabled: true,
-    })
-    // Body-less POST with no Content-Type — exactly how the UI calls this.
-    const res = await fetch(`${base}/api/providers/${body.data.id}/test`, { method: 'POST' })
+  it('answers honestly when there is no model to test', async () => {
+    const res = await post<{ error: string }>('/api/providers/test', { type: 'openai-compatible', baseUrl: UPSTREAM })
     expect(res.status).toBe(400)
-    expect((await res.json() as { error: string }).error).toMatch(/No models configured/)
+    expect(res.body.error).toMatch(/No models configured/)
+  })
+})
+
+describe('probing a draft', () => {
+  it('lists and tests what the form holds, without saving it', async () => {
+    const before = await get<{ data: Provider[] }>('/api/providers')
+
+    const listed = await post<{ data: string[] }>('/api/providers/models', {
+      type: 'openai-compatible', apiKey: 'sk-draft', baseUrl: UPSTREAM,
+    })
+    expect(listed.body.data).toEqual(['model-a', 'model-b'])
+
+    const tested = await post<{ data: { ok: boolean; error?: string } }>('/api/providers/test', {
+      type: 'openai-compatible', apiKey: 'sk-draft', baseUrl: 'http://127.0.0.1:1/v1', model: 'model-a',
+    })
+    expect(tested.body.data.ok).toBe(false)
+
+    // Both used to upsert first: probing a draft stored it, and Cancel could no
+    // longer take it back.
+    const after = await get<{ data: Provider[] }>('/api/providers')
+    expect(after.body.data.map(p => p.id).sort()).toEqual(before.body.data.map(p => p.id).sort())
+  })
+
+  it('falls back to an anonymous catalogue request when the key is refused', async () => {
+    // OpenRouter's /models is public and 403s a restricted key — the very key
+    // that streams completions fine. Refusing the key must not cost the list.
+    const guarded = createHttpServer((req, res) => {
+      if (req.url !== '/v1/models') { res.writeHead(404); res.end(); return }
+      if (req.headers.authorization) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'this key lacks permission' } }))
+        return
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ data: [{ id: 'public-1' }, { id: 'public-2' }] }))
+    })
+    await new Promise<void>(r => guarded.listen(14302, '127.0.0.1', r))
+    try {
+      const res = await post<{ data: string[] }>('/api/providers/models', {
+        type: 'openai-compatible', apiKey: 'sk-restricted', baseUrl: 'http://127.0.0.1:14302/v1',
+      })
+      expect(res.status).toBe(200)
+      expect(res.body.data).toEqual(['public-1', 'public-2'])
+    } finally {
+      await new Promise<void>(r => guarded.close(() => r()))
+    }
   })
 })

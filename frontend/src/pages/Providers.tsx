@@ -3,7 +3,9 @@ import { providersApi } from '../api'
 import { ProviderTile } from '../components/ProviderTile'
 import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
+import { IconChevron, IconSliders } from '../components/icons'
 import { useT, t } from '../i18n'
+import type { ProviderDraft } from '../api'
 import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
 
 const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
@@ -389,11 +391,20 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
           padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{t('providers.advancedDefaults')}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.7 }}>{t('providers.appliedToRuns')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+          <span style={{ color: open ? 'var(--accent)' : 'var(--text-secondary)', display: 'flex', flexShrink: 0 }}>
+            <IconSliders size={14} />
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+            {t('providers.advancedDefaults')}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {t('providers.appliedToRuns')}
+          </span>
         </div>
-        <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>{open ? '∧' : '∨'}</span>
+        <span style={{ color: 'var(--text-muted)', display: 'flex', flexShrink: 0 }}>
+          <IconChevron open={open} size={13} />
+        </span>
       </button>
       {open && (
         <div style={{ padding: '0 14px 16px', display: 'flex', flexDirection: 'column', gap: 0, borderTop: '0.5px solid var(--border)' }}>
@@ -540,7 +551,9 @@ export function Providers() {
         testing: false,
         fetchingModels: false,
         testResult: null,
-        advancedOpen: true,
+        // Tuning is the rare case; opening it by default buried Save below a wall
+      // of sliders nobody asked for.
+      advancedOpen: false,
         defaults: existing.defaults ?? { ...DEFAULT_DEFAULTS },
       }
     }
@@ -567,7 +580,9 @@ export function Providers() {
       testing: false,
       fetchingModels: false,
       testResult: null,
-      advancedOpen: true,
+      // Tuning is the rare case; opening it by default buried Save below a wall
+      // of sliders nobody asked for.
+      advancedOpen: false,
       defaults: { ...DEFAULT_DEFAULTS },
     }
   }
@@ -592,7 +607,9 @@ export function Providers() {
       testing: false,
       fetchingModels: false,
       testResult: null,
-      advancedOpen: true,
+      // Tuning is the rare case; opening it by default buried Save below a wall
+      // of sliders nobody asked for.
+      advancedOpen: false,
       defaults: { ...DEFAULT_DEFAULTS },
     })
   }
@@ -611,7 +628,9 @@ export function Providers() {
       testing: false,
       fetchingModels: false,
       testResult: null,
-      advancedOpen: true,
+      // Tuning is the rare case; opening it by default buried Save below a wall
+      // of sliders nobody asked for.
+      advancedOpen: false,
       defaults: p.defaults ?? { ...DEFAULT_DEFAULTS },
     })
   }
@@ -664,14 +683,21 @@ export function Providers() {
     setModal(null)
   }
 
+  // What the form currently holds — testing and listing act on this, never on
+  // whatever happens to be saved. Both used to upsert first, which meant
+  // clicking Test quietly wrote the provider and Cancel could no longer undo it.
+  function getDraft(m: ModalState): ProviderDraft {
+    const final = getFinalProvider(m)
+    return { type: final.type, apiKey: final.apiKey, baseUrl: final.baseUrl }
+  }
+
   async function handleTest() {
     if (!modal) return
     updateModal({ testing: true, testResult: null })
     try {
-      const saved = await providersApi.upsert(getFinalProvider(modal))
-      syncProviders(saved)
-      const result = await providersApi.test(saved.id, modal.testModelId || undefined)
-      updateModal({ testing: false, testResult: result, provider: saved })
+      const model = modal.testModelId || getFinalModels(modal)[0]
+      const result = await providersApi.test({ ...getDraft(modal), model })
+      updateModal({ testing: false, testResult: result })
     } catch (err) {
       updateModal({ testing: false, testResult: { ok: false, error: err instanceof Error ? err.message : String(err) } })
     }
@@ -681,16 +707,18 @@ export function Providers() {
     if (!modal) return
     updateModal({ fetchingModels: true })
     try {
-      const saved = await providersApi.upsert(getFinalProvider(modal))
-      syncProviders(saved)
-      const fetched = await providersApi.fetchModels(saved.id)
+      const fetched = await providersApi.fetchModels(getDraft(modal))
       setModal(m => {
         if (!m) return m
         const merged = [...new Set([...fetched, ...m.availableModels])]
-        return { ...m, provider: saved, availableModels: merged, fetchingModels: false, manualMode: false }
+        return { ...m, availableModels: merged, fetchingModels: false, manualMode: false }
       })
-    } catch {
-      updateModal({ fetchingModels: false })
+    } catch (err) {
+      // Silently swallowing this left the button spinning and the user guessing.
+      updateModal({
+        fetchingModels: false,
+        testResult: { ok: false, error: err instanceof Error ? err.message : String(err) },
+      })
     }
   }
 

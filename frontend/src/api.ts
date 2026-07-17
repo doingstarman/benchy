@@ -33,12 +33,23 @@ export const providersApi = {
     apiFetch<Provider>('/api/providers', { method: 'POST', body: JSON.stringify(p) }),
   remove: (id: string) =>
     fetch(`/api/providers/${id}`, { method: 'DELETE' }),
-  test: (id: string, model?: string) =>
+  // Test and fetchModels take the DRAFT the form is holding, not a saved id —
+  // otherwise the UI has to save before it can look anything up, and Cancel
+  // stops meaning cancel.
+  test: (draft: ProviderDraft) =>
     apiFetch<{ ok: boolean; ttfs?: number; message?: string; error?: string }>(
-      `/api/providers/${id}/test${model ? `?model=${encodeURIComponent(model)}` : ''}`,
-      { method: 'POST' }
+      '/api/providers/test',
+      { method: 'POST', body: JSON.stringify(draft) }
     ),
-  fetchModels: (id: string) => apiFetch<string[]>(`/api/providers/${id}/models`),
+  fetchModels: (draft: ProviderDraft) =>
+    apiFetch<string[]>('/api/providers/models', { method: 'POST', body: JSON.stringify(draft) }),
+}
+
+export interface ProviderDraft {
+  type: Provider['type']
+  apiKey?: string
+  baseUrl?: string
+  model?: string
 }
 
 // ─── uploads ─────────────────────────────────────────────────────────────────
