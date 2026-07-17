@@ -17,6 +17,14 @@ interface ProviderBody {
   defaults?: ProviderDefaults
 }
 
+// "https://api.x.ai/v1/" + "/models" is "/v1//models", which real servers 404 —
+// so benchy called a perfectly good provider broken. The adapters already strip
+// it before /chat/completions, which is why runs worked while Test connection
+// and Fetch models lied.
+function apiUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.trim().replace(/\/+$/, '')}${path}`
+}
+
 // Static model lists for providers without a /models endpoint
 const STATIC_MODELS: Record<string, string[]> = {
   anthropic: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-3-5-haiku-20241022'],
@@ -31,12 +39,27 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
 
   app.post<{ Body: ProviderBody }>('/api/providers', async (req, reply) => {
     const body = req.body
+    // Validate here, at the boundary: a provider saved without a models array
+    // was stored as-is and then blew up with a 500 the moment anything read
+    // models[0].
+    if (!body || typeof body.name !== 'string' || !body.name.trim()) {
+      return reply.code(400).send({ error: 'name is required' })
+    }
+    if (typeof body.type !== 'string' || !body.type) {
+      return reply.code(400).send({ error: 'type is required' })
+    }
+    if (!Array.isArray(body.models) || !body.models.every(m => typeof m === 'string')) {
+      return reply.code(400).send({ error: 'models must be an array of model ids' })
+    }
+
     const provider: Provider = {
       id: body.id ?? randomUUID(),
-      name: body.name,
+      name: body.name.trim(),
       type: body.type,
       apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
+      // Stored normalized so the trailing slash can't come back to bite the
+      // next caller that builds a URL from it.
+      baseUrl: body.baseUrl?.trim().replace(/\/+$/, ''),
       models: body.models,
       enabled: body.enabled ?? true,
       timeout: body.timeout,
@@ -64,7 +87,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
 
     const baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1'
     try {
-      const res = await fetch(`${baseUrl}/models`, {
+      const res = await fetch(apiUrl(baseUrl, '/models'), {
         headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
       })
       if (!res.ok) {
@@ -87,7 +110,9 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
       const provider = providers.find(p => p.id === req.params.id)
       if (!provider) return reply.code(404).send({ error: 'Provider not found' })
 
-      const model = req.query.model ?? provider.models[0]
+      // Providers saved before models were validated can have no array at all;
+      // that must read as "nothing configured", not crash with a 500.
+      const model = req.query.model ?? provider.models?.[0]
       if (!model) return reply.code(400).send({ error: 'No models configured' })
 
       const isCompatible = provider.type === 'openai-compatible' || provider.type === 'local'
@@ -95,7 +120,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
       // For openai-compatible: also verify /models endpoint is reachable
       if (isCompatible && provider.baseUrl) {
         try {
-          const r = await fetch(`${provider.baseUrl}/models`, {
+          const r = await fetch(apiUrl(provider.baseUrl, '/models'), {
             headers: provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {},
           })
           if (!r.ok) {
