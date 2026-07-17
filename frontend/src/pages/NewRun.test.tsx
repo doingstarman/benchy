@@ -49,10 +49,60 @@ function renderNewRun() {
   )
 }
 
+// History's fork navigates here with the run in router state. Nothing read that
+// state, so the button silently did nothing (while leaving a 'pending' run
+// behind on the server).
+function renderForkedFrom(run: Record<string, unknown>) {
+  return render(
+    <MemoryRouter initialEntries={[{ pathname: '/run', state: { forkFrom: run } }]}>
+      <NewRun />
+    </MemoryRouter>
+  )
+}
+
 // Wait for async providers.list() to resolve and re-render
 async function waitForProviders() {
   return screen.findByPlaceholderText('Ask anything…')
 }
+
+describe('Fork from history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockEs.addEventListener.mockReset()
+    mockEs.close.mockReset()
+  })
+
+  it('loads a chat run back into the composer, ready to re-run', async () => {
+    renderForkedFrom({
+      id: 'r1', kind: 'chat', prompts: ['explain quantum tunnelling'], models: ['mock-p1:gpt-4o'],
+    })
+    // The prompt is actually there — the button used to be inert.
+    expect(await screen.findByDisplayValue('explain quantum tunnelling')).toBeInTheDocument()
+    // …and it is a fresh, unstarted run: the composer, not a results view.
+    expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument()
+  })
+
+  it('rebuilds a batch run as a prompt list, not a single box', async () => {
+    renderForkedFrom({
+      id: 'r2', kind: 'batch', prompts: ['first', 'second'], models: ['mock-p1:gpt-4o'],
+    })
+    expect(await screen.findByDisplayValue('first')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('second')).toBeInTheDocument()
+  })
+
+  it('rebuilds a pairs run with each prompt pinned back to its own model', async () => {
+    renderForkedFrom({
+      id: 'r3', kind: 'pairs',
+      prompts: ['ask-4o', 'ask-mini'],
+      models: ['mock-p1:gpt-4o', 'mock-p1:gpt-4o-mini'],
+    })
+    expect(await screen.findByDisplayValue('ask-4o')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('ask-mini')).toBeInTheDocument()
+    // The pairing is what this mode IS — each prompt sits in its model's box.
+    expect(screen.getByPlaceholderText(/Prompt for gpt-4o…/)).toHaveValue('ask-4o')
+    expect(screen.getByPlaceholderText(/Prompt for gpt-4o-mini…/)).toHaveValue('ask-mini')
+  })
+})
 
 describe('Promptbox — text input', () => {
   beforeEach(() => {

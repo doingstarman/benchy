@@ -28,10 +28,13 @@ export function History() {
 
   useEffect(() => { load() }, [load])
 
-  async function handleFork(e: React.MouseEvent, id: string) {
+  // Fork = "set this test up again, ready to edit and re-run". It loads the run
+  // into the composer; the new run is created when the user actually hits Run.
+  // It used to POST /fork first, which left a 'pending' run nobody ever ran —
+  // and then navigated with state that no page read, so the button did nothing.
+  function handleFork(e: React.MouseEvent, run: Run) {
     e.stopPropagation()
-    const forked = await runsApi.fork(id)
-    navigate(`/run`, { state: { forkFrom: forked } })
+    navigate('/run', { state: { forkFrom: run } })
   }
 
   async function handleDelete(e: React.MouseEvent, id: string) {
@@ -249,7 +252,7 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 6, opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s' }}>
-                      <Button small onClick={e => handleFork(e, run.id)}>{t('history.fork')}</Button>
+                      <Button small onClick={e => handleFork(e, run)}>{t('history.fork')}</Button>
                       <Button variant="danger" small onClick={e => handleDelete(e, run.id)}>{t('history.delete')}</Button>
                     </div>
                   </td>

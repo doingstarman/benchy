@@ -10,7 +10,7 @@ import {
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
 } from '../components/icons'
 import { useT, t } from '../i18n'
-import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind } from '../../../src/types'
+import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   temperature: 0.7,
@@ -864,6 +864,50 @@ export function NewRun() {
     esRef.current?.close()
     regenEsRef.current?.close()
   }, [])
+
+  // History's "fork": load a past run back into the composer, laid out the way
+  // it was built, so it can be tweaked and run again. Nothing is sent until the
+  // user hits Run — forking is not itself a run.
+  useEffect(() => {
+    const forkFrom = (location.state as { forkFrom?: Run } | null)?.forkFrom
+    if (!forkFrom) return
+    navigate('/run', { replace: true, state: null })
+
+    esRef.current?.close()
+    regenEsRef.current?.close()
+    setTurns([])
+    setSessionModels([])
+    setRunId(null)
+    setScreenState('idle')
+    setVote(null)
+    setExpandedCol(null)
+    setEditingTurn(null)
+    setError(null)
+    setPendingAttachments([])
+
+    const kind = forkFrom.kind ?? 'chat'
+    setSelectedModels(new Set(forkFrom.models))
+    setRunKind(kind)
+    // Each kind lives in its own composer: pairs pins a prompt to each model,
+    // a batch is a prompt list, a chat starts from its opening message.
+    if (kind === 'pairs') {
+      setMode(1)
+      setPerModelPrompts(Object.fromEntries(forkFrom.models.map((m, i) => [m, forkFrom.prompts[i] ?? ''])))
+      setPrompt('')
+      setBatchPrompts([''])
+    } else if (kind === 'batch') {
+      setMode(2)
+      setBatchPrompts(forkFrom.prompts.length ? forkFrom.prompts : [''])
+      setPrompt('')
+      setPerModelPrompts({})
+    } else {
+      setMode(0)
+      setPrompt(forkFrom.prompts[0] ?? '')
+      setBatchPrompts([''])
+      setPerModelPrompts({})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   // /run?new=1 (the sidebar's Тест item) drops the current session and starts
   // a fresh dialog; model selection and mode are preferences and survive.
