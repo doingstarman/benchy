@@ -768,6 +768,59 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(capturedMessages[0].map(m => m.role)).toEqual(['user', 'assistant', 'user'])
   })
 
+  it('a client that stays connected keeps receiving across turns', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+
+    // Without the delay the mocked run finishes before a client can attach.
+    slowMode = true
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['turn zero'], models: [model] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+
+    // Hold one stream open for the whole run — a second tab watching the dialog.
+    const events: string[] = []
+    const ac = new AbortController()
+    const stream = await fetch(`${base}/api/benchmark/stream/${data.runId}`, { signal: ac.signal })
+    const pump = (async () => {
+      const reader = stream.body!.getReader()
+      const dec = new TextDecoder()
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          for (const line of dec.decode(value, { stream: true }).split('\n')) {
+            if (line.startsWith('event:')) events.push(line.slice(6).trim())
+          }
+        }
+      } catch { /* aborted */ }
+    })()
+
+    await waitForRun(data.runId)
+    await new Promise(r => setTimeout(r, 150))
+    expect(events).toContain('run_done')
+
+    // finalizeRun used to delete the run's whole connection list here, so this
+    // still-open socket was silently unsubscribed and the next turn streamed
+    // into nothing — the tab sat in "running" forever.
+    events.length = 0
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'turn one' }),
+    })
+    await waitForRun(data.runId)
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(events, 'the same client must see the second turn').toContain('cell_start')
+    expect(events).toContain('run_done')
+
+    ac.abort()
+    await pump
+    slowMode = false
+  })
+
   it('a model naming a missing provider fails like any other cell, not into the void', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const real = `${providers.data[0].id}:gpt-4o-mini`

@@ -116,17 +116,32 @@ async function runCell(
   }
 }
 
+// Turns can overlap on one run — a second tab, or a continue fired while an
+// edit is still streaming. Count them so the first to finish doesn't announce
+// the whole run is over.
+const inFlightTurns = new Map<string, number>()
+
 function finalizeRun(runId: string, tasks: Promise<void>[]): void {
   const db = getDb()
-  Promise.all(tasks)
-    .then(() => {
-      db.prepare("UPDATE runs SET status = 'done' WHERE id = ?").run(runId)
+  inFlightTurns.set(runId, (inFlightTurns.get(runId) ?? 0) + 1)
+
+  void Promise.all(tasks)
+    .then(() => 'done' as const, () => 'error' as const)
+    .then(status => {
+      const left = (inFlightTurns.get(runId) ?? 1) - 1
+      if (left > 0) {
+        // Another turn is still streaming; it will close the run out.
+        inFlightTurns.set(runId, left)
+        return
+      }
+      inFlightTurns.delete(runId)
+      db.prepare('UPDATE runs SET status = ? WHERE id = ?').run(status, runId)
+      // Always terminal, including on the error path: a client that never hears
+      // this sits open in "running" forever.
       broadcast(runId, 'run_done', { runId })
-      sseConnections.delete(runId)
-    })
-    .catch(() => {
-      db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId)
-      sseConnections.delete(runId)
+      // Connections are NOT dropped here — the sockets are still alive and the
+      // close handler owns their lifetime. Deleting the map entry unsubscribed
+      // live clients, so a later turn broadcast into nothing.
     })
 }
 
@@ -451,10 +466,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       req.raw.on('close', () => {
         clearInterval(heartbeat)
         const conns = sseConnections.get(runId)
-        if (conns) {
-          const idx = conns.indexOf(reply)
-          if (idx >= 0) conns.splice(idx, 1)
-        }
+        if (!conns) return
+        const idx = conns.indexOf(reply)
+        if (idx >= 0) conns.splice(idx, 1)
+        // Last listener gone — drop the entry so the map doesn't grow forever.
+        if (conns.length === 0) sseConnections.delete(runId)
       })
 
       // Don't resolve — keep connection open
