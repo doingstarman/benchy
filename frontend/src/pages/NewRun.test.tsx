@@ -273,15 +273,30 @@ describe('Promptbox — mode switching', () => {
 describe('ChipsRow — model selection', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('renders chip for each model from providers', async () => {
+  // One chip per provider, not per model: nineteen models across three providers
+  // used to mean nineteen chips over six rows on the start screen.
+  it('renders one chip per provider with a selected/total count, and no model chips', async () => {
     renderNewRun()
     await waitForProviders()
+
+    // The idle screen and the promptbox each render a row, hence getAllByText.
+    expect(screen.getAllByText('Test Provider').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1/2').length).toBeGreaterThan(0)
+    expect(screen.queryByText('gpt-4o-mini')).not.toBeInTheDocument()
+  })
+
+  it('opens the provider popover on click and lists its models', async () => {
+    const user = userEvent.setup()
+    renderNewRun()
+    await waitForProviders()
+
+    await user.click(screen.getAllByText('Test Provider')[0])
 
     expect(screen.getByText('gpt-4o')).toBeInTheDocument()
     expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument()
   })
 
-  it('toggling an inactive chip adds it to selection', async () => {
+  it('ticking a model in the popover adds it to the selection', async () => {
     const user = userEvent.setup()
     renderNewRun()
     await waitForProviders()
@@ -290,12 +305,12 @@ describe('ChipsRow — model selection', () => {
     const textarea = screen.getByPlaceholderText('Ask anything…')
     await user.type(textarea, 'q')
 
-    // Initially gpt-4o is selected (first model), so click gpt-4o-mini to add
-    const miniChip = screen.getByText('gpt-4o-mini')
-    await user.click(miniChip)
+    // gpt-4o is selected by default — add gpt-4o-mini from the popover
+    await user.click(screen.getAllByText('Test Provider')[0])
+    await user.click(screen.getByText('gpt-4o-mini'))
 
-    // callCount should now be 2 (both models selected)
     expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getAllByText('2/2').length).toBeGreaterThan(0)
   })
 
   it('cannot deselect the last remaining model', async () => {
@@ -304,11 +319,25 @@ describe('ChipsRow — model selection', () => {
     const textarea = await waitForProviders()
     await user.type(textarea, 'q')
 
-    // Only gpt-4o is selected by default — clicking it should not deselect
-    const chip = screen.getByText('gpt-4o')
-    await user.click(chip)
+    await user.click(screen.getAllByText('Test Provider')[0])
+    await user.click(screen.getByText('gpt-4o'))
 
     // callCount stays 1 (still one model selected)
+    expect(screen.getByText('1')).toBeInTheDocument()
+  })
+
+  it('clearing a provider that holds the whole selection keeps one model', async () => {
+    const user = userEvent.setup()
+    renderNewRun()
+    const textarea = await waitForProviders()
+    await user.type(textarea, 'q')
+
+    await user.click(screen.getAllByText('Test Provider')[0])
+    await user.click(screen.getByText('select all'))
+    expect(screen.getByText('2')).toBeInTheDocument()
+
+    // "clear" would empty the picker and leave Run permanently dead.
+    await user.click(screen.getByText('clear'))
     expect(screen.getByText('1')).toBeInTheDocument()
   })
 })
@@ -347,7 +376,8 @@ describe('Promptbox — textarea resize behaviour', () => {
 
     await user.type(textarea, 'first part')
 
-    // Trigger a re-render by toggling a chip (changes selectedModels state)
+    // Trigger a re-render by toggling a model (changes selectedModels state)
+    fireEvent.click(screen.getAllByText('Test Provider')[0])
     fireEvent.click(screen.getByText('gpt-4o-mini'))
 
     // Value must survive the re-render — would fail if Promptbox remounts

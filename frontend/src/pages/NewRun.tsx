@@ -200,100 +200,202 @@ const ANIM_CSS = `
 
 // ─── ChipsRow ─────────────────────────────────────────────────────────────
 
-interface ChipsRowProps {
+export interface ProviderGroup {
+  id: string
+  name: string
   models: { key: string; label: string }[]
-  // Models whose provider is enabled but has no credentials yet — shown greyed
-  // so they don't silently vanish, and route to Providers on click.
-  needsKeyModels: { key: string; label: string }[]
+  // Enabled, has models, but no key and no base URL — nothing here is runnable
+  // yet. One chip that routes to Providers, never one dead chip per model.
+  needsKey: boolean
+}
+
+interface ChipsRowProps {
+  groups: ProviderGroup[]
   selectedModels: Set<string>
   onToggle: (key: string) => void
-  onToggleAll: () => void
+  onToggleProvider: (id: string) => void
   onAdd: () => void
   wrap: boolean
 }
 
-export function ChipsRow({ models, needsKeyModels, selectedModels, onToggle, onToggleAll, onAdd, wrap }: ChipsRowProps) {
-  const allSelected = models.length > 0 && models.every(m => selectedModels.has(m.key))
+const POPOVER_W = 280
+// Below this a search field costs more attention than it saves.
+const SEARCH_FROM = 8
+
+// One chip per provider, not per model. The two jobs — "what am I about to run?"
+// and "pick from everything I have" — look identical at three models and fall
+// apart at nineteen (six rows of chips) or at OpenRouter's three hundred. The
+// chip answers the first at a glance; its popover answers the second.
+export function ChipsRow({ groups, selectedModels, onToggle, onToggleProvider, onAdd, wrap }: ChipsRowProps) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [anchorLeft, setAnchorLeft] = useState(0)
+  const [query, setQuery] = useState('')
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const open = groups.find(g => g.id === openId) ?? null
+
+  useEffect(() => {
+    if (!openId) return
+    const onDown = (e: MouseEvent) => { if (!wrapRef.current?.contains(e.target as Node)) setOpenId(null) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenId(null) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [openId])
+
+  function onChipClick(g: ProviderGroup, el: HTMLElement) {
+    if (g.needsKey) { onAdd(); return }
+    if (openId === g.id) { setOpenId(null); return }
+    const wrapEl = wrapRef.current
+    if (wrapEl) {
+      const raw = el.getBoundingClientRect().left - wrapEl.getBoundingClientRect().left
+      setAnchorLeft(Math.max(0, Math.min(raw, wrapEl.clientWidth - POPOVER_W)))
+    }
+    setQuery('')
+    setOpenId(g.id)
+  }
+
+  const q = query.trim().toLowerCase()
+  const shown = open ? open.models.filter(m => !q || m.label.toLowerCase().includes(q)) : []
+  const openAllSelected = !!open && open.models.length > 0 && open.models.every(m => selectedModels.has(m.key))
+
   return (
-    <div
-      className="chips-row"
-      style={{
-        display: 'flex',
-        flexWrap: wrap ? 'wrap' : 'nowrap',
-        gap: 6,
-        overflowX: wrap ? 'visible' : 'auto',
-        scrollbarWidth: 'none',
-        ...(wrap ? { justifyContent: 'center', maxWidth: 640 } : {}),
-      }}
-    >
-      {models.length > 1 && (
-        <button
-          onClick={onToggleAll}
-          title={allSelected ? t('title.deselectAll') : t('title.selectAll')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
-            padding: '5px 11px',
-            border: `0.5px solid ${allSelected ? 'var(--accent-dim)' : 'var(--border)'}`,
-            borderRadius: 20,
-            background: allSelected ? 'var(--accent-bg)' : 'var(--bg-elevated)',
-            cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
-            color: allSelected ? 'var(--accent)' : 'var(--text-secondary)',
-          }}
-        >
-          {allSelected ? '✓ all' : 'all'}
-        </button>
-      )}
-      {models.map(({ key, label }) => {
-        const active = selectedModels.has(key)
-        return (
-          <button
-            key={key}
-            onClick={() => onToggle(key)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
-              padding: '5px 11px',
-              border: `0.5px solid ${active ? 'var(--accent-dim)' : 'var(--border)'}`,
-              borderRadius: 20,
-              background: active ? 'var(--accent-bg)' : 'var(--bg-elevated)',
-              cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
-              color: active ? 'var(--accent)' : 'var(--text-muted)',
-            }}
-          >
-            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: active ? 'var(--accent)' : 'var(--border-hover)' }} />
-            {label}
-          </button>
-        )
-      })}
-      {needsKeyModels.map(({ key, label }) => (
-        <button
-          key={key}
-          onClick={onAdd}
-          title={t('run.needsKeyHint')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
-            padding: '5px 11px',
-            border: '0.5px dashed var(--border)', borderRadius: 20,
-            background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
-            color: 'var(--border-hover)',
-          }}
-        >
-          <span style={{ flexShrink: 0, fontSize: 10 }}>🔑</span>
-          {label}
-          <span style={{ fontSize: 10, opacity: 0.8 }}>· {t('run.needsKey')}</span>
-        </button>
-      ))}
-      {models.length === 0 && needsKeyModels.length === 0 && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{t('run.noProviders')}</span>
-      )}
-      <button
-        onClick={onAdd}
+    <div ref={wrapRef} style={{ position: 'relative', ...(wrap ? { maxWidth: 640 } : { minWidth: 0 }) }}>
+      <div
+        className="chips-row"
         style={{
-          padding: '5px 11px', border: '0.5px dashed var(--border)', borderRadius: 20, flexShrink: 0,
-          background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--border-hover)',
+          display: 'flex',
+          flexWrap: wrap ? 'wrap' : 'nowrap',
+          gap: 6,
+          overflowX: wrap ? 'visible' : 'auto',
+          scrollbarWidth: 'none',
+          ...(wrap ? { justifyContent: 'center' } : {}),
         }}
       >
-        + add
-      </button>
+        {groups.map(g => {
+          const count = g.models.filter(m => selectedModels.has(m.key)).length
+          const active = count > 0
+          return (
+            <button
+              key={g.id}
+              onClick={e => onChipClick(g, e.currentTarget)}
+              title={g.needsKey ? t('run.needsKeyHint') : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                padding: '5px 11px',
+                border: g.needsKey
+                  ? '0.5px dashed var(--border)'
+                  : `0.5px solid ${active ? 'var(--accent-dim)' : 'var(--border)'}`,
+                borderRadius: 20,
+                background: g.needsKey ? 'transparent' : active ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)',
+                color: g.needsKey ? 'var(--border-hover)' : active ? 'var(--accent)' : 'var(--text-muted)',
+              }}
+            >
+              {g.needsKey
+                ? <span style={{ flexShrink: 0, fontSize: 10 }}>🔑</span>
+                : <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: active ? 'var(--accent)' : 'var(--border-hover)' }} />}
+              <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</span>
+              {g.needsKey
+                ? <span style={{ fontSize: 10, opacity: 0.8 }}>· {t('run.needsKey')}</span>
+                : g.models.length > 1 && (
+                  <span style={{ fontSize: 11, opacity: 0.75, flexShrink: 0 }}>{count}/{g.models.length}</span>
+                )}
+            </button>
+          )
+        })}
+        {groups.length === 0 && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{t('run.noProviders')}</span>
+        )}
+        <button
+          onClick={onAdd}
+          style={{
+            padding: '5px 11px', border: '0.5px dashed var(--border)', borderRadius: 20, flexShrink: 0,
+            background: 'transparent', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--border-hover)',
+          }}
+        >
+          + add
+        </button>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: anchorLeft, marginTop: 6, width: POPOVER_W, zIndex: 30,
+            background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.55)', padding: 8, textAlign: 'left',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {open.name}
+            </span>
+            {open.models.length > 1 && (
+              <button
+                onClick={() => onToggleProvider(open.id)}
+                style={{
+                  background: 'none', border: 0, padding: 0, cursor: 'pointer', flexShrink: 0,
+                  fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent)',
+                }}
+              >
+                {openAllSelected ? t('run.clearAll') : t('run.selectAll')}
+              </button>
+            )}
+          </div>
+          {open.models.length > SEARCH_FROM && (
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={t('run.searchModels')}
+              autoFocus
+              style={{
+                width: '100%', marginBottom: 6, padding: '5px 8px', boxSizing: 'border-box',
+                background: 'var(--bg-base)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-primary)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none',
+              }}
+            />
+          )}
+          <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {shown.map(m => {
+              const on = selectedModels.has(m.key)
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => onToggle(m.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                    padding: '5px 6px', border: 0, borderRadius: 'var(--radius-sm)',
+                    background: on ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer',
+                    fontSize: 12, fontFamily: 'var(--font-mono)',
+                    color: on ? 'var(--accent)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 12, height: 12, flexShrink: 0, borderRadius: 3, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: 9, lineHeight: 1,
+                      border: `0.5px solid ${on ? 'var(--accent)' : 'var(--border-hover)'}`,
+                      background: on ? 'var(--accent)' : 'transparent',
+                      color: 'var(--bg-base)',
+                    }}
+                  >
+                    {on ? '✓' : ''}
+                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                </button>
+              )
+            })}
+            {shown.length === 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', padding: '5px 6px' }}>
+                {t('run.noMatch')}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1003,16 +1105,14 @@ export function NewRun() {
     bottomRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
   }, [turns.length])
 
-  const connectedModels = providers
-    .filter(p => p.enabled && (p.apiKey || p.baseUrl))
-    .flatMap(p => p.models.map(m => ({ key: `${p.id}:${m}`, label: m })))
-
-  // Enabled providers that have models but no way to reach them yet (no key and
-  // no base URL). Their models used to just disappear from the picker — a new
-  // user who added OpenAI without a key had no idea why gpt-4o wasn't there.
-  const needsKeyModels = providers
-    .filter(p => p.enabled && !p.apiKey && !p.baseUrl && p.models.length > 0)
-    .flatMap(p => p.models.map(m => ({ key: `${p.id}:${m}`, label: m })))
+  const providerGroups: ProviderGroup[] = providers
+    .filter(p => p.enabled && p.models.length > 0)
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      needsKey: !p.apiKey && !p.baseUrl,
+      models: p.models.map(m => ({ key: `${p.id}:${m}`, label: m })),
+    }))
 
   function toggleModel(key: string) {
     setSelectedModels(prev => {
@@ -1023,13 +1123,18 @@ export function NewRun() {
     })
   }
 
-  function toggleAllModels() {
-    const allKeys = connectedModels.map(m => m.key)
-    setSelectedModels(prev =>
-      // All already selected → collapse back to the minimum (first model),
-      // mirroring the "at least one stays selected" rule of toggleModel.
-      prev.size === allKeys.length ? new Set(allKeys.slice(0, 1)) : new Set(allKeys)
-    )
+  function toggleProviderModels(id: string) {
+    const keys = providerGroups.find(g => g.id === id)?.models.map(m => m.key) ?? []
+    setSelectedModels(prev => {
+      const next = new Set(prev)
+      if (keys.every(k => prev.has(k))) {
+        for (const k of keys) next.delete(k)
+        // Same "at least one stays selected" rule as toggleModel — clearing the
+        // only provider must not leave the Run button permanently dead.
+        if (next.size === 0 && keys.length > 0) next.add(keys[0])
+      } else for (const k of keys) next.add(k)
+      return next
+    })
   }
 
   const filledPairs = [...selectedModels]
@@ -1406,11 +1511,10 @@ export function NewRun() {
   }
 
   const chipsRowProps: Omit<ChipsRowProps, 'wrap'> = {
-    models: connectedModels,
-    needsKeyModels,
+    groups: providerGroups,
     selectedModels,
     onToggle: toggleModel,
-    onToggleAll: toggleAllModels,
+    onToggleProvider: toggleProviderModels,
     onAdd: () => navigate('/providers'),
   }
 
