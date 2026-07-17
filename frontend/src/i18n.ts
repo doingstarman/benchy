@@ -144,6 +144,7 @@ export const DICT: Record<string, Entry> = {
   'history.noRuns': { en: 'No runs yet.', ru: 'Пока нет тестов.' },
   'history.namePlaceholder': { en: 'Test name…', ru: 'Название теста…' },
   'history.rename': { en: 'Rename', ru: 'Переименовать' },
+  'history.scores': { en: 'scores', ru: 'оценки' },
   'history.fork': { en: 'fork', ru: 'форк' },
   'history.delete': { en: 'delete', ru: 'удалить' },
   'history.confirmDelete': { en: 'Delete this run?', ru: 'Удалить этот тест?' },

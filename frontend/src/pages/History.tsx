@@ -149,7 +149,10 @@ export function History() {
               return (
                 <tr
                   key={run.id}
-                  onClick={() => navigate(`/results/${run.id}`)}
+                  // A run is a dialog, wherever you open it from. This used to
+                  // land on the read-only results view — a dead end you could
+                  // not continue from, unlike the same dialog in the sidebar.
+                  onClick={() => navigate(`/run?session=${run.id}`)}
                   onMouseEnter={() => setHoveredId(run.id)}
                   onMouseLeave={() => setHoveredId(null)}
                   style={{
@@ -252,6 +255,12 @@ export function History() {
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 6, opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s' }}>
+                      {/* The row opens the dialog now, so the scoring view needs
+                          its own way in — it is the only place that records
+                          per-answer feedback. */}
+                      <Button small onClick={e => { e.stopPropagation(); navigate(`/results/${run.id}`) }}>
+                        {t('history.scores')}
+                      </Button>
                       <Button small onClick={e => handleFork(e, run)}>{t('history.fork')}</Button>
                       <Button variant="danger" small onClick={e => handleDelete(e, run.id)}>{t('history.delete')}</Button>
                     </div>
