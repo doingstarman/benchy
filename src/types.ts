@@ -19,6 +19,11 @@ export interface ProviderDefaults {
   timeoutMs?: number | null
   retries?: number | null
   streaming?: boolean | null
+  // Anthropic and Google only think when asked to, and asking changes the
+  // measurement (slower, more tokens). Off by default so an ordinary run stays
+  // byte-for-byte what it was. OpenAI-compatible providers ignore this: their
+  // reasoning already rides along in the stream for free.
+  extendedThinking?: boolean | null
 }
 
 export type RunSettingsOverrides = Partial<ProviderDefaults>
@@ -59,6 +64,8 @@ export interface Metrics {
   inputTokens: number | null
   outputTokens: number | null
   reasoningTokens: number | null
+  // How long the model spent thinking before its first answer token.
+  reasoningMs: number | null
 }
 
 export type RunStatus = 'pending' | 'running' | 'done' | 'error'
@@ -70,6 +77,8 @@ export interface Result {
   model: string
   providerId: string
   text: string
+  // The model's thinking, kept out of `text` so the answer stays the answer.
+  reasoning: string | null
   metrics: Metrics
   feedback: 'up' | 'down' | null
   error: string | null

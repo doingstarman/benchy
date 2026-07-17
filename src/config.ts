@@ -14,6 +14,7 @@ export const DEFAULT_PROVIDER_SETTINGS: Required<ProviderDefaults> = {
   timeoutMs: 60000,
   retries: 2,
   streaming: true,
+  extendedThinking: false,
 }
 
 interface Config {

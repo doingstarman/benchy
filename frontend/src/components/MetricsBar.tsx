@@ -6,10 +6,11 @@ interface MetricsBarProps {
   inputTokens: number | null
   outputTokens: number | null
   reasoningTokens?: number | null
+  reasoningMs?: number | null
   isFastest?: boolean
 }
 
-export function MetricsBar({ ttfs, totalTime, inputTokens, outputTokens, reasoningTokens, isFastest }: MetricsBarProps) {
+export function MetricsBar({ ttfs, totalTime, inputTokens, outputTokens, reasoningTokens, reasoningMs, isFastest }: MetricsBarProps) {
   const { t } = useT()
   return (
     <div style={{
@@ -40,6 +41,14 @@ export function MetricsBar({ ttfs, totalTime, inputTokens, outputTokens, reasoni
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>think</span>
           <span style={{ color: 'var(--info)' }}>{reasoningTokens}</span>
+        </span>
+      )}
+      {/* Shown independently of the token count: a provider can stream the
+          thinking text without ever reporting how many tokens it cost. */}
+      {reasoningMs != null && reasoningMs > 0 && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>think&nbsp;time</span>
+          <span style={{ color: 'var(--info)' }}>{(reasoningMs / 1000).toFixed(1)}s</span>
         </span>
       )}
       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

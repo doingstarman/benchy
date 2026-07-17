@@ -31,6 +31,8 @@ interface ResultRow {
   input_tokens: number | null
   output_tokens: number | null
   reasoning_tokens: number | null
+  reasoning: string | null
+  reasoning_ms: number | null
   feedback: string | null
   error: string | null
   created_at: number
@@ -69,6 +71,7 @@ function rowToResult(row: ResultRow): Result {
     inputTokens: row.input_tokens,
     outputTokens: row.output_tokens,
     reasoningTokens: row.reasoning_tokens,
+    reasoningMs: row.reasoning_ms,
   }
   return {
     id: row.id,
@@ -77,6 +80,7 @@ function rowToResult(row: ResultRow): Result {
     model: row.model,
     providerId: row.provider_id,
     text: row.text,
+    reasoning: row.reasoning,
     metrics,
     feedback: row.feedback as Result['feedback'],
     error: row.error,

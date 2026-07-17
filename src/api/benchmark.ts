@@ -57,6 +57,12 @@ async function runCell(
   const t0 = Date.now()
   let ttfs: number | null = null
   let fullText = ''
+  let reasoningText = ''
+  // Wall-clock from the first thought to the first answer token. Not derivable
+  // from ttfs: a model can think for 20s before saying anything, and that gap is
+  // exactly what the metric is for.
+  let reasoningStart: number | null = null
+  let reasoningMs: number | null = null
   let inputTokens = 0
   let outputTokens = 0
   let reasoningTokens: number | undefined
@@ -86,8 +92,17 @@ async function runCell(
     for await (const chunk of stream) {
       if (chunk.type === 'token') {
         if (ttfs === null) ttfs = Date.now() - t0
+        // The thinking phase ends the moment the answer starts.
+        if (reasoningStart !== null && reasoningMs === null) reasoningMs = Date.now() - reasoningStart
         fullText += chunk.text
         broadcast(runId, 'cell_token', { runId, promptIndex, model: modelKey, text: chunk.text })
+      } else if (chunk.type === 'reasoning') {
+        // Deliberately does NOT set ttfs: that stays "time to first answer
+        // token", or every thinking model's TTFS collapses to near-zero and
+        // stops comparing against every run recorded before this feature.
+        if (reasoningStart === null) reasoningStart = Date.now()
+        reasoningText += chunk.text
+        broadcast(runId, 'cell_reasoning', { runId, promptIndex, model: modelKey, text: chunk.text })
       } else if (chunk.type === 'done') {
         inputTokens = chunk.usage.inputTokens
         outputTokens = chunk.usage.outputTokens
@@ -98,13 +113,16 @@ async function runCell(
     }
 
     const totalTime = Date.now() - t0
+    // A model that thought and then produced nothing still spent that time.
+    if (reasoningStart !== null && reasoningMs === null) reasoningMs = Date.now() - reasoningStart
+
     db.prepare(
-      'UPDATE results SET text = ?, ttfs = ?, total_time = ?, input_tokens = ?, output_tokens = ?, reasoning_tokens = ? WHERE id = ?'
-    ).run(fullText, ttfs, totalTime, inputTokens, outputTokens, reasoningTokens ?? null, resultId)
+      'UPDATE results SET text = ?, ttfs = ?, total_time = ?, input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, reasoning = ?, reasoning_ms = ? WHERE id = ?'
+    ).run(fullText, ttfs, totalTime, inputTokens, outputTokens, reasoningTokens ?? null, reasoningText || null, reasoningMs, resultId)
 
     broadcast(runId, 'cell_done', {
       runId, promptIndex, model: modelKey,
-      ttfs, totalTime,
+      ttfs, totalTime, reasoningMs,
       usage: { inputTokens, outputTokens, ...(reasoningTokens != null ? { reasoningTokens } : {}) },
     })
   } catch (err) {
@@ -238,6 +256,11 @@ async function buildHistory(runId: string, model: string, prompts: string[], kin
   // (already filtered to this model) are exactly that model's own thread.
   if (kind === 'batch') return []
 
+  // `reasoning` is stored but deliberately NOT replayed here. Providers do not
+  // want their own thinking back as assistant text: DeepSeek rejects the
+  // request outright, and an Anthropic thinking block replayed as plain prose
+  // is no longer a thinking block. History is the answers only — the reasoning
+  // is for the human reading the trace, and reaches the UI via GET /api/runs/:id.
   const db = getDb()
   const rows = db.prepare(
     'SELECT prompt_index, text FROM results WHERE run_id = ? AND model = ? AND error IS NULL ORDER BY prompt_index'

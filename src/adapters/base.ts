@@ -6,6 +6,10 @@ export interface Usage {
 
 export type Chunk =
   | { type: 'token'; text: string }
+  // The model's own thinking, not part of the answer. Kept separate all the way
+  // to the UI: TTFS must stay "time to first answer token", or every thinking
+  // model's TTFS collapses and no longer compares against past runs.
+  | { type: 'reasoning'; text: string }
   | { type: 'done'; usage: Usage }
   | { type: 'error'; message: string }
 

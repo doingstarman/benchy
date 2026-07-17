@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS results (
   input_tokens INTEGER,
   output_tokens INTEGER,
   reasoning_tokens INTEGER,
+  reasoning TEXT,
+  reasoning_ms INTEGER,
   feedback TEXT,
   error TEXT,
   created_at INTEGER NOT NULL,
@@ -85,6 +87,10 @@ export async function initDb(path?: string): Promise<void> {
     'ALTER TABLE runs ADD COLUMN title TEXT',
     // Existing runs predate the distinction; 'chat' preserves their behaviour.
     "ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+    // Reasoning text was thrown away before chat 2.0. Old rows stay NULL, which
+    // reads as "this model never showed its thinking" — true, as it happens.
+    'ALTER TABLE results ADD COLUMN reasoning TEXT',
+    'ALTER TABLE results ADD COLUMN reasoning_ms INTEGER',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

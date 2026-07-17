@@ -171,8 +171,36 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
 
       const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
+      // A mock model whose name says it thinks, thinks — otherwise the reasoning
+      // UI can only be exercised against a real paid provider, and each of the
+      // three shapes is emitted by a different one. `-think` streams a reasoning
+      // field (OpenRouter/DeepSeek), `-tagged` inlines <think> tags (qwen/Ollama),
+      // and `-quiet` reports a token count with no text at all (OpenAI o-series).
+      const thinkStyle = /-think/.test(model) ? 'field'
+        : /-tagged/.test(model) ? 'tags'
+        : /-quiet/.test(model) ? 'quiet'
+        : null
+      const thoughts = ['Разбираю вопрос по частям.', ' Взвешиваю варианты.', ' Выбираю самый прямой ответ.']
+      const emit = (delta: Record<string, unknown>) => write({
+        id, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta, finish_reason: null }],
+      })
+
       // Simulate time-to-first-token
       await sleep(ttfsDelay)
+
+      if (thinkStyle === 'field') {
+        for (const th of thoughts) { emit({ reasoning_content: th }); await sleep(220) }
+      } else if (thinkStyle === 'tags') {
+        // Deliberately split the tag across chunks — that is exactly how it
+        // arrives from a real endpoint, and what the parser exists for.
+        emit({ content: '<thi' })
+        emit({ content: 'nk>' })
+        for (const th of thoughts) { emit({ content: th }); await sleep(220) }
+        emit({ content: '</think>' })
+      } else if (thinkStyle === 'quiet') {
+        await sleep(900)
+      }
 
       // Stream words one by one
       for (let i = 0; i < words.length; i++) {
@@ -188,7 +216,12 @@ export async function registerMockRoutes(app: FastifyInstance): Promise<void> {
       write({
         id, object: 'chat.completion.chunk', created, model,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        usage: { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens },
+        usage: {
+          prompt_tokens: inputTokens,
+          completion_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+          ...(thinkStyle ? { completion_tokens_details: { reasoning_tokens: 128 } } : {}),
+        },
       })
 
       reply.raw.write('data: [DONE]\n\n')

@@ -15,16 +15,30 @@ const pngBytes = (...tail: number[]): Buffer => Buffer.from([0x89, 0x50, 0x4e, 0
 // Only the external HTTP calls to providers are mocked — everything else is real
 // slowMode adds a delay so SSE clients can connect before run_done fires
 let slowMode = false
+// Drives the reasoning path: the adapter emits thinking before the answer, the
+// way OpenRouter/DeepSeek actually stream it.
+let reasoningMode = false
 let capturedMessages: { role: string; content: string }[][] = []
+let capturedSettings: Record<string, unknown>[] = []
 
 vi.mock('../adapters/openai.js', () => ({
   openaiAdapter: {
-    async *stream(messages: { role: string; content: string }[], config: { model: string }) {
+    async *stream(messages: { role: string; content: string }[], config: { model: string; settings?: Record<string, unknown> }) {
       capturedMessages.push(messages)
+      capturedSettings.push(config.settings ?? {})
       if (slowMode) await new Promise(r => setTimeout(r, 80))
+      if (reasoningMode) {
+        yield { type: 'reasoning', text: 'first I consider' }
+        // A real gap: reasoningMs must measure it, and ttfs must not stop here.
+        await new Promise(r => setTimeout(r, 25))
+        yield { type: 'reasoning', text: ' then I decide' }
+      }
       yield { type: 'token', text: `Hello from ${config.model}` }
       yield { type: 'token', text: '!' }
-      yield { type: 'done', usage: { inputTokens: 10, outputTokens: 3 } }
+      yield {
+        type: 'done',
+        usage: { inputTokens: 10, outputTokens: 3, ...(reasoningMode ? { reasoningTokens: 42 } : {}) },
+      }
     },
   },
 }))
@@ -1118,5 +1132,108 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
       body: JSON.stringify({ promptIndex: 5, prompt: 'x' }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('reasoning', () => {
+  async function runWithReasoning(): Promise<{ id: string; results: Array<Record<string, unknown>> }> {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    reasoningMode = true
+    try {
+      const body = await startBenchmark(['think about it'], [`${pid}:gpt-4o-mini`])
+      await waitForRun(body.data!.runId)
+      const run = await fetch(`${base}/api/runs/${body.data!.runId}`).then(r => r.json()) as {
+        data: { id: string; results: Array<Record<string, unknown>> }
+      }
+      return run.data
+    } finally {
+      reasoningMode = false
+    }
+  }
+
+  it('survives a reload — the whole point of storing it rather than only streaming it', async () => {
+    // GET /api/runs/:id is a completely separate path from the SSE stream, with
+    // no shared serializer. Reasoning reached the browser live and still went
+    // missing on refresh right up until this column existed.
+    const run = await runWithReasoning()
+    const cell = run.results[0]
+
+    expect(cell.reasoning).toBe('first I consider then I decide')
+    expect(cell.text).toBe('Hello from gpt-4o-mini!')
+  })
+
+  it('keeps reasoning out of the answer text', async () => {
+    const run = await runWithReasoning()
+    expect(String(run.results[0].text)).not.toContain('I consider')
+  })
+
+  it('reports reasoning tokens and think time in metrics', async () => {
+    const run = await runWithReasoning()
+    const metrics = run.results[0].metrics as { reasoningTokens: number | null; reasoningMs: number | null }
+
+    expect(metrics.reasoningTokens).toBe(42)
+    // The mock sleeps 25ms between its two thoughts.
+    expect(metrics.reasoningMs).toBeGreaterThanOrEqual(20)
+  })
+
+  it('does not let reasoning claim TTFS', async () => {
+    // If a reasoning chunk set ttfs, every thinking model's TTFS would collapse
+    // to near-zero and stop comparing against every run recorded before this
+    // feature existed. TTFS is time to first ANSWER token, and must therefore
+    // sit past the mock's 25ms thinking gap.
+    const run = await runWithReasoning()
+    const metrics = run.results[0].metrics as { ttfs: number | null }
+    expect(metrics.ttfs).toBeGreaterThanOrEqual(20)
+  })
+
+  it('leaves reasoning null for a model that never thinks', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const body = await startBenchmark(['plain'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+    const run = await fetch(`${base}/api/runs/${body.data!.runId}`).then(r => r.json()) as {
+      data: { results: Array<Record<string, unknown>> }
+    }
+    expect(run.data.results[0].reasoning).toBeNull()
+  })
+
+  it('does not replay reasoning back to the provider on continue', async () => {
+    // DeepSeek rejects a request that carries its own reasoning_content back,
+    // and an Anthropic thinking block replayed as prose is no longer a thinking
+    // block. History is answers only.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const model = `${providers.data[0].id}:gpt-4o-mini`
+    reasoningMode = true
+    let runId: string
+    try {
+      const body = await startBenchmark(['first'], [model])
+      runId = body.data!.runId
+      await waitForRun(runId)
+    } finally {
+      reasoningMode = false
+    }
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second' }),
+    })
+    await waitForRun(runId)
+
+    const sent = JSON.stringify(capturedMessages)
+    expect(sent).toContain('Hello from gpt-4o-mini')
+    expect(sent).not.toContain('I consider')
+  })
+
+  it('sends no extendedThinking to the adapter unless the run asks for it', async () => {
+    // The invariant the whole feature rests on: an ordinary run must go out
+    // exactly as it did before chat 2.0.
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    capturedSettings = []
+    const body = await startBenchmark(['plain'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+
+    expect(capturedSettings[0].extendedThinking).toBe(false)
   })
 })

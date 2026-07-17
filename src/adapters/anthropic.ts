@@ -25,13 +25,21 @@ export const anthropicAdapter: Adapter = {
     const chatMessages = messages.filter(m => m.role !== 'system')
     const system = systemMessages.map(m => m.content).join('\n') || undefined
 
+    // Claude never thinks unless asked, so this is opt-in rather than passive
+    // observation. Adaptive is the only accepted form on 4.6+ — `budget_tokens`
+    // is rejected outright on Opus 4.8/4.7 and Fable 5.
+    const thinking = config.settings?.extendedThinking === true
+
     try {
       const stream = client.messages.stream({
         model: config.model,
         max_tokens: config.settings?.maxOutputTokens ?? 4096,
         ...(system ? { system } : {}),
-        ...(config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
-        ...(config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
+        // Thinking pins temperature to 1; sending benchy's default 0.7
+        // alongside it is a 400 on every single request.
+        ...(!thinking && config.settings?.temperature != null ? { temperature: config.settings.temperature } : {}),
+        ...(!thinking && config.settings?.topP != null ? { top_p: config.settings.topP } : {}),
+        ...(thinking ? { thinking: { type: 'adaptive' as const } } : {}),
         messages: chatMessages.map(m => ({
           role: m.role as 'user' | 'assistant',
           content: toAnthropicContent(m),
@@ -39,8 +47,11 @@ export const anthropicAdapter: Adapter = {
       })
 
       for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        if (event.type !== 'content_block_delta') continue
+        if (event.delta.type === 'text_delta') {
           yield { type: 'token', text: event.delta.text }
+        } else if (event.delta.type === 'thinking_delta') {
+          yield { type: 'reasoning', text: event.delta.thinking }
         }
       }
 

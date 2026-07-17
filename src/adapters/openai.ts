@@ -1,5 +1,6 @@
-import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
+import type { Adapter, AdapterConfig, Chunk, Message, Usage } from './base.js'
 import { humanizeNetworkError, describeHttpError } from '../errors.js'
+import { ThinkTagParser } from './think-tags.js'
 
 // The chat completions API takes images as data-URL content parts; PDFs are
 // not accepted there at all.
@@ -66,7 +67,8 @@ export const openaiAdapter: Adapter = {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let usage = { inputTokens: 0, outputTokens: 0 }
+    let usage: Usage = { inputTokens: 0, outputTokens: 0 }
+    const think = new ThinkTagParser()
 
     while (true) {
       const { done, value } = await reader.read()
@@ -91,9 +93,14 @@ export const openaiAdapter: Adapter = {
         // usage chunk (stream_options)
         if (parsed.usage && typeof parsed.usage === 'object') {
           const u = parsed.usage as Record<string, unknown>
+          const details = u.completion_tokens_details as Record<string, unknown> | undefined
+          const reasoning = Number(details?.reasoning_tokens ?? 0)
           usage = {
             inputTokens: Number(u.prompt_tokens ?? 0),
             outputTokens: Number(u.completion_tokens ?? 0),
+            // The only reasoning signal OpenAI itself gives over chat/completions:
+            // a count, never the text.
+            ...(reasoning > 0 ? { reasoningTokens: reasoning } : {}),
           }
         }
 
@@ -101,6 +108,14 @@ export const openaiAdapter: Adapter = {
         if (!choices?.length) continue
 
         const delta = choices[0].delta as Record<string, unknown> | undefined
+
+        // Providers disagree on the field name for the same thing: OpenRouter
+        // sends `reasoning`, DeepSeek and vLLM send `reasoning_content`.
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning
+        if (typeof reasoning === 'string' && reasoning.length > 0) {
+          yield { type: 'reasoning', text: reasoning }
+        }
+
         const text = delta?.content
         if (typeof text === 'string' && text.length > 0) {
           if (firstToken) {
@@ -108,11 +123,13 @@ export const openaiAdapter: Adapter = {
             // ttfs is measured by benchmark.ts from the outside
             void t0
           }
-          yield { type: 'token', text }
+          // Endpoints with no reasoning field inline it as <think>…</think>.
+          for (const part of think.push(text)) yield part
         }
       }
     }
 
+    for (const part of think.flush()) yield part
     yield { type: 'done', usage }
   },
 }

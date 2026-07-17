@@ -4,11 +4,13 @@ import { providersApi, benchmarkApi, runsApi, uploadsApi } from '../api'
 import { splitFencedSegments } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
-import { Button, IconButton } from '../components/ui'
+import { Button, IconButton, PillToggle } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
-  IconPlay, IconStop, IconPaperclip, IconPencil, IconFile,
+  IconPlay, IconStop, IconPaperclip, IconPencil, IconFile, IconChevron,
 } from '../components/icons'
+import { ActivityTrace, ActivityTraceStyles } from '../components/ActivityTrace'
+import { useShowReasoning } from '../prefs'
 import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run } from '../../../src/types'
 
@@ -22,14 +24,18 @@ const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   timeoutMs: 60000,
   retries: 2,
   streaming: true,
+  extendedThinking: false,
 }
 
 interface UIResult {
   text: string
+  reasoning: string
   ttfs: number | null
   totalTime: number | null
   inputTokens: number | null
   outputTokens: number | null
+  reasoningTokens: number | null
+  reasoningMs: number | null
   status: 'pending' | 'streaming' | 'done' | 'error'
   error?: string
 }
@@ -175,9 +181,63 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMet
   )
 }
 
+// ─── MetricsStrip ─────────────────────────────────────────────────────────
+//
+// Three headline numbers stay on screen; the rest live one click away. TTFS
+// deliberately still means "time to first ANSWER token" — a thinking model's
+// TTFS therefore includes its think time, and THINK TIME is what splits that
+// number apart.
+function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: boolean }) {
+  const [open, setOpen] = useState(false)
+  const { t } = useT()
+
+  const headline = [
+    { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
+    { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
+    { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
+  ]
+  const extra = [
+    { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
+    { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
+  ]
+
+  const cell = (l: string, v: string, best: boolean, last: boolean) => (
+    <div key={l} style={{ flex: 1, padding: '0 10px', borderRight: last ? 'none' : '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-sans)', marginBottom: 1 }}>{l}</div>
+      <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 500, color: best ? 'var(--accent)' : v === '—' ? 'var(--border-hover)' : 'var(--text-secondary)' }}>{v}</div>
+    </div>
+  )
+
+  return (
+    <div style={{ borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ height: 38, display: 'flex' }}>
+        {headline.map(({ l, v, best }) => cell(l, v, best, false))}
+        <button
+          onClick={() => setOpen(o => !o)}
+          title={open ? t('common.collapse') : t('metrics.more')}
+          style={{
+            width: 28, flexShrink: 0, background: 'none', border: 0, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: open ? 'var(--accent)' : 'var(--text-muted)',
+          }}
+        >
+          <IconChevron open={open} size={11} />
+        </button>
+      </div>
+      {open && (
+        <div style={{ height: 38, display: 'flex', borderTop: '0.5px solid var(--border)' }}>
+          {extra.map(({ l, v }, i) => cell(l, v, false, i === extra.length - 1))}
+          <div style={{ width: 28, flexShrink: 0 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function pendingResults(models: string[]): Map<string, UIResult> {
   return new Map(models.map(key => [key, {
-    text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending',
+    text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null,
+    reasoningTokens: null, reasoningMs: null, status: 'pending',
   }]))
 }
 
@@ -523,6 +583,40 @@ export function Promptbox({
     return () => document.removeEventListener('mousedown', onDown)
   }, [settingsOpen])
 
+  // Boolean twin of overrideSlider: same set / inherited / reset semantics, so a
+  // per-model tab can turn thinking on for one model without touching the rest.
+  function overrideToggle(key: keyof RunSettingsOverrides, label: string, hint: string) {
+    const isSet = key in currentTabOverrides && currentTabOverrides[key] != null
+    const inherited = currentTabInherited[key as keyof typeof currentTabInherited] === true
+    const on = isSet ? currentTabOverrides[key] === true : inherited
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <PillToggle
+            on={on}
+            onToggle={() => updateTabOverrides({ ...currentTabOverrides, [key]: !on })}
+            labelOn={label}
+            labelOff={label}
+            title={hint}
+          />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 0 }}>{hint}</span>
+        </div>
+        <button
+          onClick={() => resetOverride(key)}
+          title={t('title.resetInherited')}
+          style={{
+            visibility: isSet ? 'visible' : 'hidden',
+            background: 'none', border: 'none', color: 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0,
+          }}
+        >
+          ↺
+        </button>
+      </div>
+    )
+  }
+
   function overrideSlider(
     key: keyof RunSettingsOverrides,
     label: string,
@@ -641,6 +735,11 @@ export function Promptbox({
               {overrideSlider('topK', 'Top K', { min: 1, max: 100, step: 1, allowAuto: true })}
               {overrideSlider('maxOutputTokens', 'Max tokens', { min: 1, max: 32000, step: 64 })}
             </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.reasoningSection')}</div>
+            {overrideToggle('extendedThinking', t('run.extendedThinking'), t('run.extendedThinkingHint'))}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -898,6 +997,7 @@ function notifyRunsChanged() {
 
 export function NewRun() {
   const { t } = useT()
+  const showReasoning = useShowReasoning()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -1049,10 +1149,13 @@ export function NewRun() {
           : {}),
         results: new Map(run.results.filter(res => res.promptIndex === i).map(res => [res.model, {
           text: res.text,
+          reasoning: res.reasoning ?? '',
           ttfs: res.metrics.ttfs,
           totalTime: res.metrics.totalTime,
           inputTokens: res.metrics.inputTokens,
           outputTokens: res.metrics.outputTokens,
+          reasoningTokens: res.metrics.reasoningTokens,
+          reasoningMs: res.metrics.reasoningMs,
           status: (res.error ? 'error' : 'done') as UIResult['status'],
           ...(res.error ? { error: res.error } : {}),
         }])),
@@ -1159,29 +1262,44 @@ export function NewRun() {
     }))
   }
 
+  // Both live streams need identical cell handling and differ only in which turn
+  // an event belongs to: the run's own stream trusts the event, while the
+  // throwaway regenerate run always reports promptIndex 0 and must be remapped
+  // onto the visible turn. These used to be two hand-copied blocks, so every new
+  // event had to be remembered twice — and whatever was forgotten went missing
+  // on regenerate only, which is the kind of bug nobody reports.
+  function wireCellEvents(es: EventSource, indexOf: (eventIndex: number) => number) {
+    const on = <T,>(type: string, fn: (data: T & { promptIndex: number; model: string }) => void) =>
+      es.addEventListener(type, e => {
+        const data = JSON.parse((e as MessageEvent).data) as T & { promptIndex: number; model: string }
+        fn(data)
+      })
+
+    on('cell_start', ({ promptIndex, model }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, status: 'streaming' })))
+
+    on<{ text: string }>('cell_token', ({ promptIndex, model, text }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, text: r.text + text, status: 'streaming' })))
+
+    on<{ text: string }>('cell_reasoning', ({ promptIndex, model, text }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, reasoning: r.reasoning + text, status: 'streaming' })))
+
+    on<{ ttfs: number; totalTime: number; reasoningMs: number | null; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number } }>(
+      'cell_done',
+      ({ promptIndex, model, ttfs, totalTime, reasoningMs, usage }) =>
+        updateTurnResult(indexOf(promptIndex), model, r => ({
+          ...r, status: 'done', ttfs, totalTime, reasoningMs,
+          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+          reasoningTokens: usage.reasoningTokens ?? null,
+        })),
+    )
+
+    on<{ error: string }>('cell_error', ({ promptIndex, model, error: msg }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, status: 'error', error: msg })))
+  }
+
   function wireSSE(es: EventSource) {
-    es.addEventListener('cell_start', e => {
-      const { promptIndex, model } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
-    })
-    es.addEventListener('cell_token', e => {
-      const { promptIndex, model, text } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; text: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
-    })
-    es.addEventListener('cell_done', e => {
-      const { promptIndex, model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
-        promptIndex: number; model: string; ttfs: number; totalTime: number
-        usage: { inputTokens: number; outputTokens: number }
-      }
-      updateTurnResult(promptIndex, model, r => ({
-        ...r, status: 'done', ttfs, totalTime,
-        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
-      }))
-    })
-    es.addEventListener('cell_error', e => {
-      const { promptIndex, model, error: msg } = JSON.parse((e as MessageEvent).data) as { promptIndex: number; model: string; error: string }
-      updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
-    })
+    wireCellEvents(es, i => i)
     es.addEventListener('run_done', () => es.close())
     es.onerror = () => es.close()
   }
@@ -1309,7 +1427,7 @@ export function NewRun() {
     const savedPrompt = turn.prompt
     setTurns(prev => prev.map(t => t.promptIndex !== promptIndex ? t : {
       ...t,
-      results: new Map(t.results).set(modelKey, { text: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, status: 'pending' }),
+      results: new Map(t.results).set(modelKey, { text: '', reasoning: '', ttfs: null, totalTime: null, inputTokens: null, outputTokens: null, reasoningTokens: null, reasoningMs: null, status: 'pending' }),
     }))
     try {
       // Carry the turn's attachments onto the throwaway regenerate run so a
@@ -1320,29 +1438,8 @@ export function NewRun() {
       const es = new EventSource(`/api/benchmark/stream/${regenRunId}`)
       regenEsRef.current = es
       // Regenerate results land on a throwaway run with its own promptIndex 0 —
-      // remap it onto this turn's promptIndex so wireSSE finds the right cell.
-      es.addEventListener('cell_start', e => {
-        const { model } = JSON.parse((e as MessageEvent).data) as { model: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'streaming' }))
-      })
-      es.addEventListener('cell_token', e => {
-        const { model, text } = JSON.parse((e as MessageEvent).data) as { model: string; text: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, text: r.text + text, status: 'streaming' }))
-      })
-      es.addEventListener('cell_done', e => {
-        const { model, ttfs, totalTime, usage } = JSON.parse((e as MessageEvent).data) as {
-          model: string; ttfs: number; totalTime: number
-          usage: { inputTokens: number; outputTokens: number }
-        }
-        updateTurnResult(promptIndex, model, r => ({
-          ...r, status: 'done', ttfs, totalTime,
-          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
-        }))
-      })
-      es.addEventListener('cell_error', e => {
-        const { model, error: msg } = JSON.parse((e as MessageEvent).data) as { model: string; error: string }
-        updateTurnResult(promptIndex, model, r => ({ ...r, status: 'error', error: msg }))
-      })
+      // ignore it and pin every event to the turn being regenerated.
+      wireCellEvents(es, () => promptIndex)
       // The regenerate run is a throwaway — its tokens are already remapped onto
       // the visible turn. Reap it on clean completion (row + any cloned
       // attachment files, via the delete cascade) so repeated regeneration
@@ -1461,18 +1558,7 @@ export function NewRun() {
           )}
         </div>
 
-        <div style={{ height: 38, display: 'flex', borderBottom: '0.5px solid var(--border)', flexShrink: 0 }}>
-          {[
-            { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
-            { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
-            { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
-          ].map(({ l, v, best }, i) => (
-            <div key={l} style={{ flex: 1, padding: '0 10px', borderRight: i < 2 ? '0.5px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-sans)', marginBottom: 1 }}>{l}</div>
-              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 500, color: best ? 'var(--accent)' : v === '—' ? 'var(--border-hover)' : 'var(--text-secondary)' }}>{v}</div>
-            </div>
-          ))}
-        </div>
+        <MetricsStrip result={r} isFastest={isFastest} />
 
         {isError ? (
           <div style={{ flex: 1, padding: 12, overflowY: 'auto' }}>
@@ -1488,6 +1574,15 @@ export function NewRun() {
             className="col-body"
             style={{ flex: 1, overflowY: 'auto', padding: 12, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word' }}
           >
+            {showReasoning && (
+              <ActivityTrace
+                reasoning={r.reasoning}
+                reasoningMs={r.reasoningMs}
+                reasoningTokens={r.reasoningTokens}
+                status={r.status}
+                answerStarted={r.text.length > 0}
+              />
+            )}
             {r.text
               ? splitFencedSegments(r.text).map((seg, si) =>
                   seg.type === 'code'
@@ -1549,7 +1644,7 @@ export function NewRun() {
   if (screenState === 'idle') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
-        <style>{ANIM_CSS}</style>
+        <style>{ANIM_CSS}</style><ActivityTraceStyles />
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',
@@ -1571,7 +1666,7 @@ export function NewRun() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 16, gap: 12 }}>
-      <style>{ANIM_CSS}</style>
+      <style>{ANIM_CSS}</style><ActivityTraceStyles />
 
       {expandedCol && (() => {
         const [expandedPromptIndex, expandedModel] = [expandedCol.slice(0, expandedCol.indexOf(':')), expandedCol.slice(expandedCol.indexOf(':') + 1)]
