@@ -673,6 +673,76 @@ describe('Benchmark API — real server + real DB + mocked adapters', () => {
     expect(new Set(run.data.results.map(r => r.promptIndex))).toEqual(new Set([0, 1, 2]))
   })
 
+  it('editing a pairs prompt re-runs only the model it was paired with', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const A = `${pid}:gpt-4o-mini`
+    const B = `${pid}:gpt-4o`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: [{ prompt: 'for-A', model: A }, { prompt: 'for-B', model: B }] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    let run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as {
+      data: { kind: string; results: Array<{ promptIndex: number; model: string }> }
+    }
+    expect(run.data.kind).toBe('pairs')
+    expect(run.data.results).toHaveLength(2)
+
+    // prompts[0] belongs to A alone. B must not be dragged into answering it.
+    await fetch(`${base}/api/runs/${data.runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptIndex: 0, prompt: 'edited-for-A' }),
+    })
+    await waitForRun(data.runId)
+
+    run = await fetch(`${base}/api/runs/${data.runId}`).then(r => r.json()) as typeof run
+    expect(run.data.results).toHaveLength(2)
+    const atZero = run.data.results.filter(r => r.promptIndex === 0)
+    expect(atZero).toHaveLength(1)
+    expect(atZero[0].model).toBe(A)
+    // B's own pair is untouched.
+    const atOne = run.data.results.filter(r => r.promptIndex === 1)
+    expect(atOne).toHaveLength(1)
+    expect(atOne[0].model).toBe(B)
+  })
+
+  it('a pairs run continues each model on its own thread, not the batch void', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const pid = providers.data[0].id
+    const A = `${pid}:gpt-4o-mini`
+    const B = `${pid}:gpt-4o`
+
+    const startRes = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs: [{ prompt: 'A-first', model: A }, { prompt: 'B-first', model: B }] }),
+    })
+    const { data } = await startRes.json() as { data: { runId: string } }
+    await waitForRun(data.runId)
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${data.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'follow-up' }),
+    })
+    await waitForRun(data.runId)
+
+    // Each model carries ITS OWN prompt + reply + the follow-up — and never the
+    // other model's prompt, which was addressed to somebody else entirely.
+    expect(capturedMessages).toHaveLength(2)
+    for (const messages of capturedMessages) {
+      expect(messages.map(m => m.role)).toEqual(['user', 'assistant', 'user'])
+      expect(messages[2].content).toBe('follow-up')
+      const own = messages[0].content
+      expect(['A-first', 'B-first']).toContain(own)
+      const foreign = own === 'A-first' ? 'B-first' : 'A-first'
+      expect(messages.some(m => m.content === foreign)).toBe(false)
+    }
+  })
+
   it('still replays a chat run as a conversation', async () => {
     const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
     const model = `${providers.data[0].id}:gpt-4o-mini`

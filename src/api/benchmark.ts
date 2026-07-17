@@ -204,11 +204,13 @@ async function deleteAttachmentsFrom(runId: string, promptIndex: number): Promis
 // failed turns (error IS NOT NULL) are skipped entirely rather than
 // injected as broken/empty assistant messages.
 async function buildHistory(runId: string, model: string, prompts: string[], kind: RunKind): Promise<Message[]> {
-  // Only a chat's prompts are a conversation. A batch (many independent prompts
-  // fanned out) or pairs run must never be replayed as a dialogue — doing so
-  // feeds the model three unrelated questions as if it had been asked them in
-  // sequence, silently poisoning every answer after the first.
-  if (kind !== 'chat') return []
+  // A batch is many unrelated questions fanned out to every model, so replaying
+  // them as a dialogue feeds a model three questions it was never asked in
+  // sequence, poisoning every answer after the first. It has no conversation.
+  //
+  // A pairs run does: each model was asked its own prompt, so the rows below
+  // (already filtered to this model) are exactly that model's own thread.
+  if (kind === 'batch') return []
 
   const db = getDb()
   const rows = db.prepare(
@@ -355,6 +357,13 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       // alone and leaves its neighbours untouched.
       const forks = run.kind === 'chat'
 
+      // In a pairs run prompts[i] belongs to models[i] and to nobody else, so
+      // only that model re-runs. Fanning the edit out to every model made other
+      // models answer a question that was never addressed to them.
+      const targetModels = run.kind === 'pairs'
+        ? (models[promptIndex] ? [models[promptIndex]] : [])
+        : models
+
       if (forks) await deleteAttachmentsFrom(req.params.id, promptIndex + 1)
       const keep = new Set(attachments ?? [])
       const ownRows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id = ? AND prompt_index = ?')
@@ -384,11 +393,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       db.prepare(deleteSql).run(req.params.id, promptIndex)
       db.prepare(
         "UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls - ? + ?, completed_calls = completed_calls - ? WHERE id = ?"
-      ).run(JSON.stringify(updatedPrompts), dropped.n, models.length, dropped.n, req.params.id)
+      ).run(JSON.stringify(updatedPrompts), dropped.n, targetModels.length, dropped.n, req.params.id)
 
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
-      const tasks = models.map(async model => {
+      const tasks = targetModels.map(async model => {
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
         return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history)
       })
