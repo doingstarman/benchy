@@ -60,7 +60,7 @@ describe('published tarball', () => {
     // it); otherwise a legitimately complete tarball false-fails here.
     const lastSource = execFileSync('git', [
       'log', '-1', '--full-history', '--format=%h', '--',
-      'src', 'frontend/src', 'package.json',
+      'src', 'frontend/src', 'frontend/index.html', 'frontend/public', 'package.json',
       ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
     ], { cwd: ROOT, encoding: 'utf8' }).trim()
 

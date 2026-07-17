@@ -55,9 +55,12 @@ if (inTarball !== onDisk) {
 // merge (it's TREESAME to the merged branch) and returns an ancestor, so a
 // release cut on a merge commit false-failed as "predates the source" even
 // though the tarball, built from that merge, contained every commit.
+// frontend/index.html and frontend/public are build inputs too — they ship into
+// frontend/dist. Watch them, or a change there (a favicon, the HTML head) stamps
+// a build the guard thinks predates its own "source".
 const lastSource = git([
   'log', '-1', '--full-history', '--format=%h', '--',
-  'src', 'frontend/src', 'package.json',
+  'src', 'frontend/src', 'frontend/index.html', 'frontend/public', 'package.json',
   ':(exclude)src/test', ':(exclude)*.test.ts', ':(exclude)*.test.tsx',
 ]).trim()
 const { sha, builtAt } = JSON.parse(onDisk)
