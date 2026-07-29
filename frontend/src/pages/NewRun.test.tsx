@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { NewRun, __resetNewRunSessionForTests } from './NewRun'
+import { skillsApi, benchmarkApi } from '../api'
 
 // NewRun persists its session in a module-level variable so it survives
 // React Router navigation (only resets on an actual page reload) — tests
@@ -31,6 +32,9 @@ vi.mock('../api', () => ({
     list: vi.fn().mockResolvedValue([]),
     get: vi.fn().mockResolvedValue({ id: 'x', prompts: [], models: [], results: [] }),
   },
+  toolsApi: { list: vi.fn().mockResolvedValue([]) },
+  skillsApi: { list: vi.fn().mockResolvedValue([]) },
+  mcpApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
 // EventSource is not available in jsdom — stub it so run flow doesn't throw
@@ -383,5 +387,57 @@ describe('Promptbox — textarea resize behaviour', () => {
     // Value must survive the re-render — would fail if Promptbox remounts
     expect(textarea).toHaveValue('first part')
     expect(textarea).toHaveFocus()
+  })
+})
+
+describe('slash menu — library artifacts', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('typing "/" opens the menu, picking a skill adds a chip and clears the query', async () => {
+    vi.mocked(skillsApi.list).mockResolvedValue([
+      { id: 's1', name: 'Pirate', instruction: 'Talk like a pirate', toolIds: [], enabled: true },
+    ])
+    const user = userEvent.setup()
+    renderNewRun()
+    const ta = await waitForProviders()
+
+    await user.type(ta, '/pir')
+    // The menu row for the skill appears.
+    const row = await screen.findByText('Pirate')
+    await user.click(row)
+
+    // The "/pir" query is stripped from the textarea…
+    expect(ta).toHaveValue('')
+    // …and a chip for the selected skill remains.
+    expect(screen.getByText('Pirate')).toBeInTheDocument()
+  })
+
+  it('a selected skill is sent as skills[] on run', async () => {
+    vi.mocked(skillsApi.list).mockResolvedValue([
+      { id: 's1', name: 'Pirate', instruction: 'arr', toolIds: [], enabled: true },
+    ])
+    const user = userEvent.setup()
+    renderNewRun()
+    const ta = await waitForProviders()
+
+    await user.type(ta, '/pir')
+    await user.click(await screen.findByText('Pirate'))
+    await user.type(ta, 'hello')
+    await user.keyboard('{Enter}')
+
+    expect(benchmarkApi.start).toHaveBeenCalledWith(expect.objectContaining({ skills: ['s1'] }))
+  })
+
+  it('built-in tools are offered and toggle into the run', async () => {
+    const user = userEvent.setup()
+    renderNewRun()
+    const ta = await waitForProviders()
+
+    await user.type(ta, '/calc')
+    await user.click(await screen.findByText('calc'))
+    await user.type(ta, 'q')
+    await user.keyboard('{Enter}')
+
+    expect(benchmarkApi.start).toHaveBeenCalledWith(expect.objectContaining({ tools: ['calc'] }))
   })
 })

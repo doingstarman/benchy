@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { providersApi, benchmarkApi, runsApi, uploadsApi } from '../api'
+import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi } from '../api'
 import { splitFencedSegments } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
@@ -12,7 +12,7 @@ import {
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning } from '../prefs'
 import { useT, t } from '../i18n'
-import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run } from '../../../src/types'
+import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   temperature: 0.7,
@@ -503,6 +503,13 @@ interface PromptboxProps {
   // per-model generation setting — hence its own props, not part of runSettings.
   selectedTools: Set<string>
   onToggleTool: (id: string) => void
+  // The library catalog the "/" menu offers, plus the skill/mcp selections it
+  // toggles. Tools reuse selectedTools above.
+  artifacts: ArtifactItem[]
+  selectedSkills: Set<string>
+  onToggleSkill: (id: string) => void
+  selectedMcp: Set<string>
+  onToggleMcp: (id: string) => void
   systemPrompt: string
   onSystemPromptChange: (v: string) => void
   // In a batch, the follow-up box adds another independent prompt — it is not a
@@ -515,13 +522,104 @@ interface PromptboxProps {
   onRemoveAttachment: (id: string) => void
 }
 
+// One row in the "/" menu — a tool, skill, or MCP server. `disabled` marks MCP,
+// which the library stores but can't yet run.
+export interface ArtifactItem {
+  kind: 'tool' | 'skill' | 'mcp'
+  id: string
+  name: string
+  desc?: string
+  disabled?: boolean
+}
+
+const ARTIFACT_ICON: Record<ArtifactItem['kind'], string> = { tool: '🔧', skill: '✦', mcp: '🔌' }
+
+// The three built-in tools, offered in the "/" menu alongside custom artifacts.
+const BUILTIN_TOOL_ITEMS: ArtifactItem[] = [
+  { kind: 'tool', id: 'calc', name: 'calc', desc: 'arithmetic' },
+  { kind: 'tool', id: 'fetch_url', name: 'fetch_url', desc: 'fetch a web page' },
+  { kind: 'tool', id: 'web_search', name: 'web_search', desc: 'search the web' },
+]
+
+// The "/" dropdown. Module-level so it never remounts mid-keystroke. onMouseDown
+// (not onClick) + preventDefault so picking doesn't blur the textarea first —
+// blur closes the menu.
+function SlashMenu({ items, activeIndex, selectionOf, onPick }: {
+  items: ArtifactItem[]
+  activeIndex: number
+  selectionOf: (k: ArtifactItem['kind']) => Set<string>
+  onPick: (item: ArtifactItem) => void
+}) {
+  return (
+    <div style={{
+      position: 'absolute', bottom: 'calc(100% - 6px)', left: 14, right: 14, maxHeight: 240, overflowY: 'auto',
+      zIndex: 40, background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+      borderRadius: 'var(--radius-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.55)', padding: 4,
+    }}>
+      {items.map((it, i) => {
+        const on = selectionOf(it.kind).has(it.id)
+        return (
+          <button
+            key={`${it.kind}:${it.id}`}
+            onMouseDown={e => { e.preventDefault(); onPick(it) }}
+            disabled={it.disabled}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+              padding: '6px 8px', border: 'none', borderRadius: 'var(--radius-sm)',
+              background: i === activeIndex ? 'var(--accent-bg)' : 'transparent',
+              cursor: it.disabled ? 'default' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: 12,
+              color: it.disabled ? 'var(--text-muted)' : 'var(--text-primary)', opacity: it.disabled ? 0.6 : 1,
+            }}
+          >
+            <span style={{ flexShrink: 0 }}>{ARTIFACT_ICON[it.kind]}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+            {it.desc && <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {it.desc}</span>}
+            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 10, color: 'var(--text-muted)' }}>
+              {it.disabled ? t('nav.soon') : on ? '✓' : ''}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Chips for the artifacts selected for this run, shown above the prompt.
+function ArtifactChips({ artifacts, selectedTools, selectedSkills, selectedMcp, onToggleTool, onToggleSkill, onToggleMcp }: {
+  artifacts: ArtifactItem[]
+  selectedTools: Set<string>; selectedSkills: Set<string>; selectedMcp: Set<string>
+  onToggleTool: (id: string) => void; onToggleSkill: (id: string) => void; onToggleMcp: (id: string) => void
+}) {
+  const setOf = (k: ArtifactItem['kind']) => k === 'skill' ? selectedSkills : k === 'mcp' ? selectedMcp : selectedTools
+  const toggleOf = (k: ArtifactItem['kind']) => k === 'skill' ? onToggleSkill : k === 'mcp' ? onToggleMcp : onToggleTool
+  const chips = artifacts.filter(a => setOf(a.kind).has(a.id))
+  if (chips.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+      {chips.map(a => (
+        <span key={`${a.kind}:${a.id}`} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px',
+          border: '0.5px solid var(--accent-dim)', background: 'var(--accent-bg)', borderRadius: 20,
+          fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--accent)',
+        }}>
+          <span>{ARTIFACT_ICON[a.kind]}</span>{a.name}
+          <button onClick={() => toggleOf(a.kind)(a.id)} title={t('common.close')}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, fontSize: 12, lineHeight: 1 }}>✕</button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function Promptbox({
   simplified, mode, onModeChange, selectedCount, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
-  selectedTools, onToggleTool, systemPrompt, onSystemPromptChange,
+  selectedTools, onToggleTool,
+  artifacts, selectedSkills, onToggleSkill, selectedMcp, onToggleMcp,
+  systemPrompt, onSystemPromptChange,
   isBatch,
   pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
@@ -529,6 +627,57 @@ export function Promptbox({
   const [activeTab, setActiveTab] = useState<string>('all')
   const [dragOver, setDragOver] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+
+  // ── "/" command menu ──────────────────────────────────────────────────────
+  // Open when the caret sits in a "/word" that starts the input or a new word.
+  const [slash, setSlash] = useState<{ query: string; start: number } | null>(null)
+  const [slashIdx, setSlashIdx] = useState(0)
+
+  const selectionOf = (kind: ArtifactItem['kind']) =>
+    kind === 'skill' ? selectedSkills : kind === 'mcp' ? selectedMcp : selectedTools
+  const toggleOf = (kind: ArtifactItem['kind']) =>
+    kind === 'skill' ? onToggleSkill : kind === 'mcp' ? onToggleMcp : onToggleTool
+
+  const slashMatches = slash
+    ? artifacts.filter(a => a.name.toLowerCase().includes(slash.query.toLowerCase()))
+    : []
+
+  // Derive the slash state from the textarea's value + caret after any edit.
+  function refreshSlash(value: string, caret: number) {
+    let p = caret - 1
+    while (p >= 0 && !/\s/.test(value[p])) p--
+    const wordStart = p + 1
+    if (value[wordStart] === '/' && wordStart < caret) {
+      setSlash({ query: value.slice(wordStart + 1, caret), start: wordStart })
+      setSlashIdx(0)
+    } else {
+      setSlash(null)
+    }
+  }
+
+  function pickArtifact(item: ArtifactItem) {
+    if (item.disabled) return
+    toggleOf(item.kind)(item.id)
+    // Strip the "/query" that triggered the menu; the artifact lives in a chip now.
+    if (slash) {
+      const el = promptRef.current
+      const caret = el?.selectionStart ?? prompt.length
+      const next = prompt.slice(0, slash.start) + prompt.slice(caret)
+      onPromptChange(next)
+      requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(slash.start, slash.start) })
+    }
+    setSlash(null)
+  }
+
+  function slashKeyDown(e: React.KeyboardEvent): boolean {
+    if (!slash || slashMatches.length === 0) return false
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % slashMatches.length); return true }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx(i => (i - 1 + slashMatches.length) % slashMatches.length); return true }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickArtifact(slashMatches[slashIdx]); return true }
+    if (e.key === 'Escape') { e.preventDefault(); setSlash(null); return true }
+    return false
+  }
   const boxRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachEnabled = simplified || mode === 0
@@ -928,18 +1077,28 @@ export function Promptbox({
           )}
         </div>
       ) : (
-        <div style={{ padding: '12px 14px 0' }}>
+        <div style={{ padding: '12px 14px 0', position: 'relative' }}>
           {attachEnabled && pendingAttachments.length > 0 && (
             <div style={{ marginBottom: 8 }}>
               <AttachmentStrip attachments={pendingAttachments} onRemove={onRemoveAttachment} />
             </div>
           )}
+          <ArtifactChips
+            artifacts={artifacts}
+            selectedTools={selectedTools} selectedSkills={selectedSkills} selectedMcp={selectedMcp}
+            onToggleTool={onToggleTool} onToggleSkill={onToggleSkill} onToggleMcp={onToggleMcp}
+          />
           <textarea
+            ref={promptRef}
             className="nr-ta"
+            title={t('run.slashHint')}
             value={prompt}
-            onChange={e => onPromptChange(e.target.value)}
+            onChange={e => { onPromptChange(e.target.value); refreshSlash(e.target.value, e.target.selectionStart ?? e.target.value.length) }}
+            onSelect={e => refreshSlash(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
+            onBlur={() => requestAnimationFrame(() => setSlash(null))}
             onPaste={handlePaste}
             onKeyDown={e => {
+              if (slashKeyDown(e)) return
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 if (!disabled) onRun()
@@ -952,6 +1111,9 @@ export function Promptbox({
               resize: 'none', lineHeight: 1.65, minHeight: 48, maxHeight: 120, overflowY: 'auto',
             }}
           />
+          {slash && slashMatches.length > 0 && (
+            <SlashMenu items={slashMatches} activeIndex={slashIdx} selectionOf={selectionOf} onPick={pickArtifact} />
+          )}
         </div>
       )}
 
@@ -1042,6 +1204,8 @@ interface SavedSession {
   runId: string | null
   selectedModels: Set<string>
   selectedTools: Set<string>
+  selectedSkills: Set<string>
+  selectedMcp: Set<string>
   systemPrompt: string
   mode: PromptMode
   prompt: string
@@ -1089,8 +1253,15 @@ export function NewRun() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
   // Which tools this run enables. Empty by default — an ordinary run sends no
-  // tools and measures exactly what it measured before tools existed.
+  // tools and measures exactly what it measured before tools existed. Holds both
+  // built-in ids (calc…) and custom HTTP-tool ids.
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => savedSession?.selectedTools ?? new Set())
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(() => savedSession?.selectedSkills ?? new Set())
+  const [selectedMcp, setSelectedMcp] = useState<Set<string>>(() => savedSession?.selectedMcp ?? new Set())
+  // The library, loaded once — the "/" menu and chips draw their names from here.
+  const [customTools, setCustomTools] = useState<CustomTool[]>([])
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([])
   // One system prompt for every model in the run — kept out of runSettings since
   // it isn't a generation parameter.
   const [systemPrompt, setSystemPrompt] = useState<string>(() => savedSession?.systemPrompt ?? '')
@@ -1124,7 +1295,7 @@ export function NewRun() {
 
   useEffect(() => {
     savedSession = {
-      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools, systemPrompt,
+      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools, selectedSkills, selectedMcp, systemPrompt,
       mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
@@ -1264,6 +1435,8 @@ export function NewRun() {
       // Follow-ups reuse the run's tools server-side, so reflect them in the
       // toggles too — otherwise the UI claims tools are off on a run that has them.
       setSelectedTools(new Set(run.tools ?? []))
+      setSelectedSkills(new Set(run.skills ?? []))
+      setSelectedMcp(new Set(run.mcp ?? []))
       setSystemPrompt(run.systemPrompt ?? '')
       setRunKind(run.kind ?? 'chat')
       setRunId(run.id)
@@ -1287,6 +1460,12 @@ export function NewRun() {
         return all.length > 0 ? new Set([all[0]]) : prev
       })
     }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    Promise.all([toolsApi.list(), skillsApi.list(), mcpApi.list()])
+      .then(([ts, ss, ms]) => { setCustomTools(ts); setSkills(ss); setMcpServers(ms) })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -1327,13 +1506,16 @@ export function NewRun() {
     })
   }
 
-  function toggleTool(id: string) {
-    setSelectedTools(prev => {
+  function toggleIn(set: React.Dispatch<React.SetStateAction<Set<string>>>) {
+    return (id: string) => set(prev => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
   }
+  const toggleTool = toggleIn(setSelectedTools)
+  const toggleSkill = toggleIn(setSelectedSkills)
+  const toggleMcp = toggleIn(setSelectedMcp)
 
   function toggleProviderModels(id: string) {
     const keys = providerGroups.find(g => g.id === id)?.models.map(m => m.key) ?? []
@@ -1442,12 +1624,14 @@ export function NewRun() {
 
     const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
     const tools = selectedTools.size ? [...selectedTools] : undefined
+    const skillIds = selectedSkills.size ? [...selectedSkills] : undefined
+    const mcpIds = selectedMcp.size ? [...selectedMcp] : undefined
     const sys = systemPrompt.trim() || undefined
     const req = effectiveMode === 0
-      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools, systemPrompt: sys }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
       : effectiveMode === 1
-        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools, systemPrompt: sys }
-        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools, systemPrompt: sys }
+        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
+        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
@@ -1763,6 +1947,15 @@ export function NewRun() {
     onAdd: () => navigate('/providers'),
   }
 
+  // The "/" menu catalog: built-in tools, then enabled custom tools and skills,
+  // then MCP servers (shown but not runnable yet).
+  const artifactCatalog: ArtifactItem[] = [
+    ...BUILTIN_TOOL_ITEMS,
+    ...customTools.filter(t => t.enabled).map(t => ({ kind: 'tool' as const, id: t.id, name: t.name, desc: t.description })),
+    ...skills.filter(s => s.enabled).map(s => ({ kind: 'skill' as const, id: s.id, name: s.name, desc: s.instruction.slice(0, 40) })),
+    ...mcpServers.filter(m => m.enabled).map(m => ({ kind: 'mcp' as const, id: m.id, name: m.name, disabled: true })),
+  ]
+
   const promptboxProps: Omit<PromptboxProps, 'simplified'> = {
     mode,
     onModeChange: setMode,
@@ -1784,6 +1977,11 @@ export function NewRun() {
     providerDefaultsByModel,
     selectedTools,
     onToggleTool: toggleTool,
+    artifacts: artifactCatalog,
+    selectedSkills,
+    onToggleSkill: toggleSkill,
+    selectedMcp,
+    onToggleMcp: toggleMcp,
     systemPrompt,
     onSystemPromptChange: setSystemPrompt,
     isBatch: runKind === 'batch',

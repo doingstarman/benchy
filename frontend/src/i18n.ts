@@ -284,6 +284,7 @@ export const DICT: Record<string, Entry> = {
     en: 'Instructions sent to every model before the prompt — e.g. "You are a terse expert. Answer in one sentence."',
     ru: 'Инструкции всем моделям перед промптом — напр. «Ты немногословный эксперт. Отвечай одним предложением».',
   },
+  'run.slashHint': { en: '/ for tools & skills', ru: '/ — тулы и скиллы' },
   'run.toolCalc': { en: 'Calculator', ru: 'Калькулятор' },
   'run.toolFetch': { en: 'Fetch URL', ru: 'Загрузка URL' },
   'run.toolSearch': { en: 'Web search', ru: 'Веб-поиск' },

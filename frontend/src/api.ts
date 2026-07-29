@@ -155,6 +155,8 @@ export interface BenchmarkRequest {
   cloneAttachmentsFrom?: { runId: string; promptIndex: number }
   tools?: string[]
   systemPrompt?: string
+  skills?: string[]
+  mcp?: string[]
 }
 
 export const benchmarkApi = {
