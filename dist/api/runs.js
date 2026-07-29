@@ -24,6 +24,7 @@ function rowToRun(row) {
         ...(runSettings ? { runSettings } : {}),
         ...(row.title != null ? { title: row.title } : {}),
         ...(row.tools ? { tools: parseTools(row.tools) } : {}),
+        ...(row.system_prompt != null ? { systemPrompt: row.system_prompt } : {}),
     };
 }
 function parseTools(raw) {
@@ -144,7 +145,7 @@ export async function registerRunsRoutes(app) {
         if (!original)
             return reply.code(404).send({ error: 'Run not found' });
         const newId = randomUUID();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null);
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null, original.system_prompt ?? null);
         // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
         // Attachments are copied (own files + rows) so the fork re-runs with the
         // same media instead of silently dropping it.

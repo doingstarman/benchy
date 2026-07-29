@@ -2,9 +2,7 @@
 import { program } from 'commander';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { createServer } from './server.js';
 import { findPidsOnPort } from './ports.js';
-import { getUpdateStatus } from './version.js';
 function resolveConfigDir(path) {
     if (path === '~')
         return homedir();
@@ -22,6 +20,9 @@ async function startServer(opts) {
         throw new Error(`Invalid port: ${opts.port}`);
     }
     const url = `http://localhost:${port}`;
+    // Loaded here, not at the top, so a broken server module never reaches the
+    // `update`/`stop` commands (see the import note above).
+    const { createServer } = await import('./server.js');
     try {
         await createServer(port);
     }
@@ -33,7 +34,9 @@ async function startServer(opts) {
     }
     console.log(`benchy running at ${url}`);
     // Best-effort update notice — never blocks startup, silent when offline or in
-    // a dev build (which has no stamped version).
+    // a dev build (which has no stamped version). Lazy-imported so `stop`/`update`
+    // stay clear of the version module too.
+    const { getUpdateStatus } = await import('./version.js');
     void getUpdateStatus()
         .then(info => {
         if (!info.hasUpdate)

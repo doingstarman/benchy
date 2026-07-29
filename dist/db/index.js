@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS runs (
   -- model as if they were a dialogue.
   kind TEXT NOT NULL DEFAULT 'chat',
   -- JSON array of tool ids this run enabled; NULL means none.
-  tools TEXT
+  tools TEXT,
+  -- One system prompt sent to every model in the run; NULL means none.
+  system_prompt TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -93,6 +95,7 @@ export async function initDb(path) {
         'ALTER TABLE results ADD COLUMN tool_calls TEXT',
         // Which tools a run had enabled — NULL/absent for every run before this.
         'ALTER TABLE runs ADD COLUMN tools TEXT',
+        'ALTER TABLE runs ADD COLUMN system_prompt TEXT',
     ]) {
         try {
             db.exec(sql);

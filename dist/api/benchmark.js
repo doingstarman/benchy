@@ -50,7 +50,7 @@ async function prepareTools(ids) {
     const specs = [...tools.values()].map(t => t.spec);
     return { tools, specs };
 }
-async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = [], tools = new Map(), toolSpecs = []) {
+async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = [], tools = new Map(), toolSpecs = [], systemPrompt) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
     const db = getDb();
@@ -91,8 +91,11 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
         };
         const attachments = await loadAttachments(runId, promptIndex);
         // The running conversation. Tool rounds append to it; without tools the loop
-        // runs exactly once and this is just the single request as before.
+        // runs exactly once and this is just the single request as before. The
+        // system prompt is prepended fresh on every call (it is never part of the
+        // stored per-turn history), so it applies to continues and edits too.
         const convo = [
+            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
             ...history,
             { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) },
         ];
@@ -356,7 +359,7 @@ async function buildHistory(runId, model, prompts, kind) {
 }
 export async function registerBenchmarkRoutes(app) {
     app.post('/api/benchmark', async (req, reply) => {
-        const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools } = req.body;
+        const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools, systemPrompt } = req.body;
         if (!pairs?.length && (!prompts?.length || !models?.length)) {
             return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' });
         }
@@ -397,7 +400,8 @@ export async function registerBenchmarkRoutes(app) {
         const kind = pairs?.length ? 'pairs' : storedPrompts.length > 1 ? 'batch' : 'chat';
         const validTools = Array.isArray(tools) ? tools.filter(t => typeof t === 'string') : [];
         const toolsJson = validTools.length ? JSON.stringify(validTools) : null;
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson);
+        const sysPrompt = typeof systemPrompt === 'string' && systemPrompt.trim() ? systemPrompt : null;
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson, sysPrompt);
         // Regenerate copies the source turn's attachments onto this run so the
         // re-run sees the same media. Done after the INSERT (rows FK-reference it).
         if (cloneAttachmentsFrom) {
@@ -407,8 +411,8 @@ export async function registerBenchmarkRoutes(app) {
         const providers = await getProviders();
         const { tools: toolMap, specs: toolSpecs } = await prepareTools(validTools);
         const tasks = isPairs
-            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs))
-            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs)));
+            ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined))
+            : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined)));
         finalizeRun(runId, tasks);
         return reply.code(202).send({ data: { runId } });
     });
@@ -442,7 +446,7 @@ export async function registerBenchmarkRoutes(app) {
             // In a batch run this returns [] — the new prompt is another independent
             // question, not a follow-up to the previous ones.
             const history = await buildHistory(req.params.id, model, prompts, run.kind);
-            return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs);
+            return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined);
         });
         finalizeRun(req.params.id, tasks);
         return reply.code(202).send({ data: { runId: req.params.id, promptIndex: newPromptIndex } });
@@ -515,7 +519,7 @@ export async function registerBenchmarkRoutes(app) {
         const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run));
         const tasks = targetModels.map(async (model) => {
             const history = await buildHistory(req.params.id, model, prompts, run.kind);
-            return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs);
+            return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined);
         });
         finalizeRun(req.params.id, tasks);
         return reply.code(202).send({ data: { runId: req.params.id, promptIndex } });

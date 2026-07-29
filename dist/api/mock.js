@@ -158,7 +158,12 @@ export async function registerMockRoutes(app) {
             ? [...messages].reverse().find(m => m.role === 'tool')?.content
             : undefined;
         const toolAck = typeof toolResult === 'string' ? `Инструмент вернул: ${toolResult}. ` : '';
-        const text = ack + toolAck + getResponse(model, lastUserMsg);
+        // Echo the system prompt so a mock run visibly proves it reached the
+        // adapter — same idea as the attachment and tool acknowledgements.
+        const systemContent = messages.find(m => m.role === 'system')?.content;
+        const sysText = typeof systemContent === 'string' ? systemContent : undefined;
+        const sysAck = sysText ? `[система: ${sysText}] ` : '';
+        const text = sysAck + ack + toolAck + getResponse(model, lastUserMsg);
         const words = text.split(' ');
         const ttfsDelay = getTtfsMs(model);
         const wordDelay = Math.max(20, Math.min(60, (3000 - ttfsDelay) / words.length));
