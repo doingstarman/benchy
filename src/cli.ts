@@ -2,9 +2,16 @@
 import { program } from 'commander'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { createServer } from './server.js'
 import { findPidsOnPort } from './ports.js'
-import { getUpdateStatus } from './version.js'
+
+// NOTHING server-related is imported at the top on purpose. cli.js is the entry
+// for every command including `update`, and `./server.js` transitively pulls in
+// the whole app (adapters, the tool registry, native deps). A static import of
+// it means one broken module anywhere in that graph crashes EVERY command at
+// load — which is exactly how the undici bug bricked `benchy update`, leaving
+// no in-band way to recover. Only `start` loads the server, and it does so
+// lazily below. Keep it that way: `update` and `stop` must survive a server
+// that won't even import.
 
 interface StartOptions {
   port: string
@@ -32,6 +39,10 @@ async function startServer(opts: StartOptions): Promise<void> {
 
   const url = `http://localhost:${port}`
 
+  // Loaded here, not at the top, so a broken server module never reaches the
+  // `update`/`stop` commands (see the import note above).
+  const { createServer } = await import('./server.js')
+
   try {
     await createServer(port)
   } catch (err) {
@@ -43,7 +54,9 @@ async function startServer(opts: StartOptions): Promise<void> {
   console.log(`benchy running at ${url}`)
 
   // Best-effort update notice — never blocks startup, silent when offline or in
-  // a dev build (which has no stamped version).
+  // a dev build (which has no stamped version). Lazy-imported so `stop`/`update`
+  // stay clear of the version module too.
+  const { getUpdateStatus } = await import('./version.js')
   void getUpdateStatus()
     .then(info => {
       if (!info.hasUpdate) return

@@ -77,4 +77,21 @@ describe('findPidsOnPort', () => {
     expect(findPidsOnPort(4242, 'win32', () => '')).toEqual([])
     expect(findPidsOnPort(4242, 'linux', () => '')).toEqual([])
   })
+
+  // `update` and `stop` must keep working even when the server module won't
+  // import — that is the whole recovery path. A static top-level import of
+  // ./server.js (which transitively pulls in adapters, the tool registry and
+  // native deps) makes one broken module crash EVERY command at load, which is
+  // how the undici bug bricked `benchy update` with no in-band way out. Only
+  // `start` may load the server, and only via a dynamic import inside its action.
+  it('does not statically import the server chain into the CLI entry', () => {
+    const cli = readFileSync(join(process.cwd(), 'src', 'cli.ts'), 'utf-8')
+    const staticImports = cli
+      .split('\n')
+      .filter(line => /^\s*import\b/.test(line) && /from\s*['"]/.test(line))
+    const forbidden = staticImports.filter(line => /['"]\.\/(server|version)\.js['"]/.test(line))
+    expect(forbidden, `server-chain modules must be dynamically imported, found:\n${forbidden.join('\n')}`).toEqual([])
+    // And the lazy import must actually be present in start's path.
+    expect(cli).toContain("await import('./server.js')")
+  })
 })
