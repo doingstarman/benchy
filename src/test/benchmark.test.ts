@@ -127,11 +127,11 @@ afterAll(async () => {
   delete process.env.BENCHY_DIR
 })
 
-async function startBenchmark(prompts: string[], models: string[]) {
+async function startBenchmark(prompts: string[], models: string[], extra?: Record<string, unknown>) {
   const res = await fetch(`${base}/api/benchmark`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompts, models }),
+    body: JSON.stringify({ prompts, models, ...extra }),
   })
   return res.json() as Promise<{ data?: { runId: string }; error?: string }>
 }
@@ -1476,5 +1476,51 @@ describe('reasoning + tools timing', () => {
     } finally {
       reasoningToolMode = false
     }
+  })
+})
+
+describe('system prompt', () => {
+  it('prepends a system message to every model in the run', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    capturedMessages = []
+    const body = await startBenchmark(['hi'], [`${providers.data[0].id}:gpt-4o-mini`], { systemPrompt: 'You are terse.' })
+    await waitForRun(body.data!.runId)
+
+    const sent = capturedMessages[0]
+    expect(sent[0]).toEqual({ role: 'system', content: 'You are terse.' })
+    expect(sent[sent.length - 1]).toMatchObject({ role: 'user', content: 'hi' })
+  })
+
+  it('sends no system message when none is set — the request is unchanged', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    capturedMessages = []
+    const body = await startBenchmark(['hi'], [`${providers.data[0].id}:gpt-4o-mini`])
+    await waitForRun(body.data!.runId)
+    expect(capturedMessages[0].some(m => m.role === 'system')).toBe(false)
+  })
+
+  it('reuses the run system prompt on continue', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const start = await startBenchmark(['first'], [`${providers.data[0].id}:gpt-4o-mini`], { systemPrompt: 'Be brief.' })
+    await waitForRun(start.data!.runId)
+
+    capturedMessages = []
+    await fetch(`${base}/api/runs/${start.data!.runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'again' }),
+    })
+    await waitForRun(start.data!.runId)
+
+    // System message leads the continued turn too, and the prior answer is in history.
+    expect(capturedMessages[0][0]).toEqual({ role: 'system', content: 'Be brief.' })
+    expect(JSON.stringify(capturedMessages[0])).toContain('Hello from gpt-4o-mini')
+  })
+
+  it('exposes the system prompt on GET /api/runs/:id for reload', async () => {
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    const start = await startBenchmark(['q'], [`${providers.data[0].id}:gpt-4o-mini`], { systemPrompt: 'Stored prompt.' })
+    await waitForRun(start.data!.runId)
+    const run = await fetch(`${base}/api/runs/${start.data!.runId}`).then(r => r.json()) as { data: { systemPrompt?: string } }
+    expect(run.data.systemPrompt).toBe('Stored prompt.')
   })
 })

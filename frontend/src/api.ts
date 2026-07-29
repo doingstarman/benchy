@@ -133,6 +133,7 @@ export interface BenchmarkRequest {
   attachments?: string[]
   cloneAttachmentsFrom?: { runId: string; promptIndex: number }
   tools?: string[]
+  systemPrompt?: string
 }
 
 export const benchmarkApi = {

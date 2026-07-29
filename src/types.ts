@@ -109,6 +109,7 @@ export interface Run {
   title?: string | null
   kind: RunKind
   tools?: string[]
+  systemPrompt?: string | null
 }
 
 // What a run's prompts[] means. 'chat' = successive turns of one conversation
@@ -133,4 +134,7 @@ export interface BenchmarkRequest {
   // Deliberately its own field, not part of RunSettings, which is Partial<
   // ProviderDefaults> — a tool set is not a generation parameter.
   tools?: string[]
+  // One system prompt prepended for every model in the run, so the comparison
+  // holds the instructions constant. Absent/empty ⇒ no system message is sent.
+  systemPrompt?: string
 }

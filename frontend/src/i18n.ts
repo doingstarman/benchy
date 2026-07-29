@@ -245,6 +245,12 @@ export const DICT: Record<string, Entry> = {
     en: 'Same tools for every model — off by default. Tools consume input tokens on every call and change how a model responds.',
     ru: 'Одни инструменты для всех моделей, по умолчанию выкл. Инструменты тратят входные токены в каждом вызове и меняют поведение модели.',
   },
+  'run.systemSection': { en: 'System prompt', ru: 'Системный промпт' },
+  'run.systemHint': { en: 'same for every model', ru: 'один для всех моделей' },
+  'run.systemPlaceholder': {
+    en: 'Instructions sent to every model before the prompt — e.g. "You are a terse expert. Answer in one sentence."',
+    ru: 'Инструкции всем моделям перед промптом — напр. «Ты немногословный эксперт. Отвечай одним предложением».',
+  },
   'run.toolCalc': { en: 'Calculator', ru: 'Калькулятор' },
   'run.toolFetch': { en: 'Fetch URL', ru: 'Загрузка URL' },
   'run.toolSearch': { en: 'Web search', ru: 'Веб-поиск' },

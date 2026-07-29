@@ -18,6 +18,7 @@ interface RunRow {
   title: string | null
   kind: RunKind
   tools: string | null
+  system_prompt: string | null
 }
 
 interface ResultRow {
@@ -64,6 +65,7 @@ function rowToRun(row: RunRow): Run {
     ...(runSettings ? { runSettings } : {}),
     ...(row.title != null ? { title: row.title } : {}),
     ...(row.tools ? { tools: parseTools(row.tools) } : {}),
+    ...(row.system_prompt != null ? { systemPrompt: row.system_prompt } : {}),
   }
 }
 
@@ -193,8 +195,8 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
 
     const newId = randomUUID()
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null)
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null, original.system_prompt ?? null)
     // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
     // Attachments are copied (own files + rows) so the fork re-runs with the
     // same media instead of silently dropping it.

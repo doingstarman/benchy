@@ -67,6 +67,7 @@ async function runCell(
   history: Message[] = [],
   tools: Map<string, Tool> = new Map(),
   toolSpecs: ToolSpec[] = [],
+  systemPrompt?: string,
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
@@ -115,8 +116,11 @@ async function runCell(
     const attachments = await loadAttachments(runId, promptIndex)
 
     // The running conversation. Tool rounds append to it; without tools the loop
-    // runs exactly once and this is just the single request as before.
+    // runs exactly once and this is just the single request as before. The
+    // system prompt is prepended fresh on every call (it is never part of the
+    // stored per-turn history), so it applies to continues and edits too.
     const convo: Message[] = [
+      ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
       ...history,
       { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) },
     ]
@@ -279,6 +283,7 @@ interface RunRow {
   kind: RunKind
   run_settings: string | null
   tools: string | null
+  system_prompt: string | null
 }
 
 // Parse a run's stored tool ids. A follow-up reuses whatever the run started
@@ -406,7 +411,7 @@ async function buildHistory(runId: string, model: string, prompts: string[], kin
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools } = req.body
+    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools, systemPrompt } = req.body
     if (!pairs?.length && (!prompts?.length || !models?.length)) {
       return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
     }
@@ -453,10 +458,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
     const validTools = Array.isArray(tools) ? tools.filter(t => typeof t === 'string') : []
     const toolsJson = validTools.length ? JSON.stringify(validTools) : null
+    const sysPrompt = typeof systemPrompt === 'string' && systemPrompt.trim() ? systemPrompt : null
 
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson)
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson, sysPrompt)
 
     // Regenerate copies the source turn's attachments onto this run so the
     // re-run sees the same media. Done after the INSERT (rows FK-reference it).
@@ -468,8 +474,8 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     const providers = await getProviders()
     const { tools: toolMap, specs: toolSpecs } = await prepareTools(validTools)
     const tasks = isPairs
-      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs))
-      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs)))
+      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined))
+      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined)))
 
     finalizeRun(runId, tasks)
 
@@ -514,7 +520,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
         // In a batch run this returns [] — the new prompt is another independent
         // question, not a follow-up to the previous ones.
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs)
+        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined)
       })
 
       finalizeRun(req.params.id, tasks)
@@ -599,7 +605,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run))
       const tasks = targetModels.map(async model => {
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs)
+        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined)
       })
 
       finalizeRun(req.params.id, tasks)

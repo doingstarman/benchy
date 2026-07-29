@@ -503,6 +503,8 @@ interface PromptboxProps {
   // per-model generation setting — hence its own props, not part of runSettings.
   selectedTools: Set<string>
   onToggleTool: (id: string) => void
+  systemPrompt: string
+  onSystemPromptChange: (v: string) => void
   // In a batch, the follow-up box adds another independent prompt — it is not a
   // reply to anything, and must not invite the user to treat it as one.
   isBatch?: boolean
@@ -519,7 +521,7 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel,
-  selectedTools, onToggleTool,
+  selectedTools, onToggleTool, systemPrompt, onSystemPromptChange,
   isBatch,
   pendingAttachments, uploading, onFilesPicked, onRemoveAttachment,
 }: PromptboxProps) {
@@ -527,9 +529,26 @@ export function Promptbox({
   const [activeTab, setActiveTab] = useState<string>('all')
   const [dragOver, setDragOver] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachEnabled = simplified || mode === 0
   const disabled = callCount === 0 || isRunning || uploading
+
+  // The popover grows upward from the box; with a system prompt + generation +
+  // reasoning + tools + reliability it can be taller than the space above,
+  // clipping its top off-screen. Cap it to the room actually available and let
+  // it scroll inside instead.
+  const [popoverMaxH, setPopoverMaxH] = useState<number>()
+  useEffect(() => {
+    if (!settingsOpen) return
+    const measure = () => {
+      const top = boxRef.current?.getBoundingClientRect().top ?? 0
+      setPopoverMaxH(Math.max(200, top - 24))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [settingsOpen])
 
   function handlePaste(e: React.ClipboardEvent) {
     if (!attachEnabled) return
@@ -558,6 +577,9 @@ export function Promptbox({
     perModelCounts[mk] = Object.values(ov).filter(v => v != null).length
   }
   const activeCount = globalCount + Object.values(perModelCounts).reduce((s, n) => s + n, 0)
+  // The settings button lights up for anything non-default in the popover — a
+  // system prompt or an enabled tool, not just generation overrides.
+  const anyActive = activeCount > 0 || systemPrompt.trim().length > 0 || selectedTools.size > 0
 
   // Current tab's overrides and inherited base
   const currentTabOverrides: RunSettingsOverrides = validTab === 'all'
@@ -683,6 +705,7 @@ export function Promptbox({
 
   return (
     <div
+      ref={boxRef}
       onDragOver={e => { if (attachEnabled) { e.preventDefault(); setDragOver(true) } }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
@@ -701,6 +724,7 @@ export function Promptbox({
           borderRadius: 10, padding: '14px 16px',
           boxShadow: '0 8px 32px rgba(0,0,0,0.35)', zIndex: 50,
           display: 'flex', flexDirection: 'column', gap: 14,
+          maxHeight: popoverMaxH, overflowY: 'auto',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>{t('run.runSettings')}</span>
@@ -743,6 +767,28 @@ export function Promptbox({
               {t('run.inheritsGlobal', { n: globalCount })}
             </div>
           )}
+
+          {/* System prompt is run-wide (same for every model), so it sits above
+              the per-model generation settings and ignores the model tabs. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.systemSection')}</div>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t('run.systemHint')}</span>
+            </div>
+            <textarea
+              value={systemPrompt}
+              onChange={e => onSystemPromptChange(e.target.value)}
+              placeholder={t('run.systemPlaceholder')}
+              rows={3}
+              style={{
+                width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 56,
+                padding: '8px 10px', background: 'var(--bg-base)',
+                border: `0.5px solid ${systemPrompt.trim() ? 'var(--accent-dim)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
+                fontSize: 12, fontFamily: 'var(--font-mono)', lineHeight: 1.5, outline: 'none',
+              }}
+            />
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('providers.generation')}</div>
@@ -935,18 +981,18 @@ export function Promptbox({
           title={t('title.runSettings')}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: settingsOpen || activeCount > 0 ? 'var(--accent-bg)' : 'none',
-            border: settingsOpen || activeCount > 0 ? '0.5px solid var(--accent-dim)' : '0.5px solid transparent',
+            background: settingsOpen || anyActive ? 'var(--accent-bg)' : 'none',
+            border: settingsOpen || anyActive ? '0.5px solid var(--accent-dim)' : '0.5px solid transparent',
             borderRadius: 6, padding: '3px 6px', cursor: 'pointer', gap: 4,
           }}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}>
-            <line x1="2" y1="4" x2="14" y2="4" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
-            <circle cx="5" cy="4" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
-            <line x1="2" y1="8" x2="14" y2="8" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
-            <circle cx="10" cy="8" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
-            <line x1="2" y1="12" x2="14" y2="12" stroke={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
-            <circle cx="6" cy="12" r="1.5" fill={activeCount > 0 ? 'var(--accent)' : 'var(--text-muted)'}/>
+            <line x1="2" y1="4" x2="14" y2="4" stroke={anyActive ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="5" cy="4" r="1.5" fill={anyActive ? 'var(--accent)' : 'var(--text-muted)'}/>
+            <line x1="2" y1="8" x2="14" y2="8" stroke={anyActive ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="10" cy="8" r="1.5" fill={anyActive ? 'var(--accent)' : 'var(--text-muted)'}/>
+            <line x1="2" y1="12" x2="14" y2="12" stroke={anyActive ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="6" cy="12" r="1.5" fill={anyActive ? 'var(--accent)' : 'var(--text-muted)'}/>
           </svg>
           {activeCount > 0 && (
             <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{activeCount}</span>
@@ -996,6 +1042,7 @@ interface SavedSession {
   runId: string | null
   selectedModels: Set<string>
   selectedTools: Set<string>
+  systemPrompt: string
   mode: PromptMode
   prompt: string
   perModelPrompts: Record<string, string>
@@ -1044,6 +1091,9 @@ export function NewRun() {
   // Which tools this run enables. Empty by default — an ordinary run sends no
   // tools and measures exactly what it measured before tools existed.
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => savedSession?.selectedTools ?? new Set())
+  // One system prompt for every model in the run — kept out of runSettings since
+  // it isn't a generation parameter.
+  const [systemPrompt, setSystemPrompt] = useState<string>(() => savedSession?.systemPrompt ?? '')
   const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
@@ -1074,7 +1124,7 @@ export function NewRun() {
 
   useEffect(() => {
     savedSession = {
-      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools,
+      screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools, systemPrompt,
       mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
     }
   })
@@ -1214,6 +1264,7 @@ export function NewRun() {
       // Follow-ups reuse the run's tools server-side, so reflect them in the
       // toggles too — otherwise the UI claims tools are off on a run that has them.
       setSelectedTools(new Set(run.tools ?? []))
+      setSystemPrompt(run.systemPrompt ?? '')
       setRunKind(run.kind ?? 'chat')
       setRunId(run.id)
       setScreenState('done')
@@ -1391,11 +1442,12 @@ export function NewRun() {
 
     const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
     const tools = selectedTools.size ? [...selectedTools] : undefined
+    const sys = systemPrompt.trim() || undefined
     const req = effectiveMode === 0
-      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools }
+      ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools, systemPrompt: sys }
       : effectiveMode === 1
-        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools }
-        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools }
+        ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools, systemPrompt: sys }
+        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools, systemPrompt: sys }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
@@ -1732,6 +1784,8 @@ export function NewRun() {
     providerDefaultsByModel,
     selectedTools,
     onToggleTool: toggleTool,
+    systemPrompt,
+    onSystemPromptChange: setSystemPrompt,
     isBatch: runKind === 'batch',
     pendingAttachments,
     uploading,
