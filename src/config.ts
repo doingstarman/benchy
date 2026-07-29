@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Provider, ProviderDefaults } from './types.js'
+import type { Provider, ProviderDefaults, CustomTool, Skill, McpServer } from './types.js'
 
 export const DEFAULT_PROVIDER_SETTINGS: Required<ProviderDefaults> = {
   temperature: 0.7,
@@ -27,6 +27,10 @@ interface Config {
   // Optional: enables the web_search tool. Without a key the tool is not even
   // offered to models, so tool runs never depend on a search key existing.
   search?: SearchConfig
+  // Library artifacts — user-authored, same trust model as providers.
+  customTools?: CustomTool[]
+  skills?: Skill[]
+  mcpServers?: McpServer[]
 }
 
 export async function getSearchConfig(): Promise<SearchConfig | undefined> {
@@ -34,6 +38,16 @@ export async function getSearchConfig(): Promise<SearchConfig | undefined> {
   const s = config.search
   if (!s || !s.apiKey || (s.provider !== 'brave' && s.provider !== 'tavily')) return undefined
   return s
+}
+
+export async function getCustomTools(): Promise<CustomTool[]> {
+  return (await readConfig()).customTools ?? []
+}
+export async function getSkills(): Promise<Skill[]> {
+  return (await readConfig()).skills ?? []
+}
+export async function getMcpServers(): Promise<McpServer[]> {
+  return (await readConfig()).mcpServers ?? []
 }
 
 function getBenchyDir(): string {
@@ -141,6 +155,60 @@ export async function removeProvider(id: string): Promise<void> {
   return serialize(async () => {
     const config = await readConfig()
     config.providers = config.providers.filter(p => p.id !== id)
+    await writeConfig(config)
+  })
+}
+
+export async function upsertCustomTool(tool: CustomTool): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const list = config.customTools ?? []
+    const idx = list.findIndex(t => t.id === tool.id)
+    if (idx >= 0) list[idx] = tool; else list.push(tool)
+    config.customTools = list
+    await writeConfig(config)
+  })
+}
+export async function removeCustomTool(id: string): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    config.customTools = (config.customTools ?? []).filter(t => t.id !== id)
+    await writeConfig(config)
+  })
+}
+
+export async function upsertSkill(skill: Skill): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const list = config.skills ?? []
+    const idx = list.findIndex(s => s.id === skill.id)
+    if (idx >= 0) list[idx] = skill; else list.push(skill)
+    config.skills = list
+    await writeConfig(config)
+  })
+}
+export async function removeSkill(id: string): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    config.skills = (config.skills ?? []).filter(s => s.id !== id)
+    await writeConfig(config)
+  })
+}
+
+export async function upsertMcpServer(server: McpServer): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const list = config.mcpServers ?? []
+    const idx = list.findIndex(m => m.id === server.id)
+    if (idx >= 0) list[idx] = server; else list.push(server)
+    config.mcpServers = list
+    await writeConfig(config)
+  })
+}
+export async function removeMcpServer(id: string): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    config.mcpServers = (config.mcpServers ?? []).filter(m => m.id !== id)
     await writeConfig(config)
   })
 }

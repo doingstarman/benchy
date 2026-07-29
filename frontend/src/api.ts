@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, Run, Result, AttachmentMeta } from '../../src/types'
+import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -50,6 +50,27 @@ export interface ProviderDraft {
   apiKey?: string
   baseUrl?: string
   model?: string
+}
+
+// ─── library (tools / skills / mcp) ──────────────────────────────────────────
+
+export const toolsApi = {
+  list: () => apiFetch<CustomTool[]>('/api/tools'),
+  upsert: (t: Omit<CustomTool, 'id'> & { id?: string }) =>
+    apiFetch<CustomTool>('/api/tools', { method: 'POST', body: JSON.stringify(t) }),
+  remove: (id: string) => fetch(`/api/tools/${id}`, { method: 'DELETE' }),
+}
+export const skillsApi = {
+  list: () => apiFetch<Skill[]>('/api/skills'),
+  upsert: (s: Omit<Skill, 'id'> & { id?: string }) =>
+    apiFetch<Skill>('/api/skills', { method: 'POST', body: JSON.stringify(s) }),
+  remove: (id: string) => fetch(`/api/skills/${id}`, { method: 'DELETE' }),
+}
+export const mcpApi = {
+  list: () => apiFetch<McpServer[]>('/api/mcp'),
+  upsert: (m: Omit<McpServer, 'id'> & { id?: string }) =>
+    apiFetch<McpServer>('/api/mcp', { method: 'POST', body: JSON.stringify(m) }),
+  remove: (id: string) => fetch(`/api/mcp/${id}`, { method: 'DELETE' }),
 }
 
 // ─── uploads ─────────────────────────────────────────────────────────────────

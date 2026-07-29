@@ -1524,3 +1524,73 @@ describe('system prompt', () => {
     expect(run.data.systemPrompt).toBe('Stored prompt.')
   })
 })
+
+describe('library artifacts', () => {
+  it('a skill folds its instruction into system and its tools into the run', async () => {
+    // Skill = instruction + tool refs; selecting it must add both.
+    const { upsertSkill, writeConfig } = await import('../config.js')
+    await writeConfig({ providers: [] })
+    const providers = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    // Re-seed the mock provider the suite relies on (writeConfig wiped it).
+    await fetch(`${base}/api/providers`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'OpenAI', type: 'openai', apiKey: 'sk-fake', models: ['gpt-4o-mini'], enabled: true }),
+    })
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+    void providers
+
+    await upsertSkill({ id: 'sk1', name: 'Pirate', instruction: 'Talk like a pirate', toolIds: ['calc'], enabled: true })
+
+    capturedMessages = []
+    capturedTools = []
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`], skills: ['sk1'], systemPrompt: 'Be brief' }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+
+    const sent = capturedMessages[0]
+    // System prompt AND the skill instruction both present.
+    expect(sent[0].role).toBe('system')
+    expect(sent[0].content).toContain('Be brief')
+    expect(sent[0].content).toContain('Talk like a pirate')
+    // The skill's tool reached the adapter.
+    expect(capturedTools[0].map(t => (t as { name?: string }).name)).toContain('calc')
+
+    // Raw selections stored on the run (not the expanded set).
+    const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as { data: { skills?: string[]; tools?: string[] } }
+    expect(run.data.skills).toEqual(['sk1'])
+  })
+
+  it('a custom HTTP tool selected by id reaches the adapter as a spec', async () => {
+    const { upsertCustomTool } = await import('../config.js')
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+    await upsertCustomTool({
+      id: 'ct1', name: 'lookup', description: 'd', url: 'http://127.0.0.1:1/x', enabled: true,
+      parameters: { type: 'object', properties: {} },
+    })
+    capturedTools = []
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`], tools: ['ct1'] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    expect(capturedTools[0].map(t => (t as { name?: string }).name)).toContain('lookup')
+  })
+
+  it('no artifacts selected → request carries no tools or system message (unchanged)', async () => {
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+    capturedTools = []
+    capturedMessages = []
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    expect(capturedTools[0]).toEqual([])
+    expect(capturedMessages[0].some(m => m.role === 'system')).toBe(false)
+  })
+})

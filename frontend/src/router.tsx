@@ -4,6 +4,7 @@ import { NewRun } from './pages/NewRun'
 import { Results } from './pages/Results'
 import { History } from './pages/History'
 import { Providers } from './pages/Providers'
+import { Library } from './pages/Library'
 import { Settings } from './pages/Settings'
 
 export function AppRouter() {
@@ -16,6 +17,7 @@ export function AppRouter() {
           <Route path="results/:runId" element={<Results />} />
           <Route path="history" element={<History />} />
           <Route path="providers" element={<Providers />} />
+          <Route path="library" element={<Library />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

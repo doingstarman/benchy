@@ -13,6 +13,7 @@ import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads
 import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec } from '../adapters/base.js'
 import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../types.js'
 import { resolveTools, type Tool } from '../tools/index.js'
+import { getCustomTools, getSkills } from '../config.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -39,14 +40,37 @@ function broadcast(runId: string, event: string, data: unknown) {
 // after this many rounds, keep whatever text it produced, and mark the trace.
 const MAX_TOOL_ITERATIONS = 8
 
-// Resolve a run's tool ids into a dispatch map + the specs sent to providers.
-// web_search silently drops out when no key is set, so specs and map always
-// agree — a model is never offered a tool the loop can't run.
+// Resolve a run's tool ids (built-in + custom) into a dispatch map + the specs
+// sent to providers. web_search silently drops out when no key is set, so specs
+// and map always agree — a model is never offered a tool the loop can't run.
 async function prepareTools(ids: string[] | undefined): Promise<{ tools: Map<string, Tool>; specs: ToolSpec[] }> {
   if (!ids?.length) return { tools: new Map(), specs: [] }
-  const tools = await resolveTools(ids)
+  const tools = await resolveTools(ids, await getCustomTools())
   const specs = [...tools.values()].map(t => t.spec)
   return { tools, specs }
+}
+
+// A run's raw selections (tool ids, skill ids) plus its own system prompt become
+// the FINAL tool set and system prompt. Each selected, enabled skill folds its
+// tool ids into the set and its instruction into the system prompt — so a skill
+// is just "instruction + these tools", expanded here once, before runCell.
+async function expandSelections(
+  toolIds: string[],
+  skillIds: string[],
+  systemPrompt?: string,
+): Promise<{ finalToolIds: string[]; finalSystemPrompt?: string }> {
+  if (skillIds.length === 0) return { finalToolIds: toolIds, finalSystemPrompt: systemPrompt }
+  const skills = await getSkills()
+  const tools = new Set(toolIds)
+  const instructions: string[] = []
+  for (const id of skillIds) {
+    const skill = skills.find(s => s.id === id && s.enabled)
+    if (!skill) continue
+    for (const t of skill.toolIds) tools.add(t)
+    if (skill.instruction.trim()) instructions.push(skill.instruction.trim())
+  }
+  const parts = [...(systemPrompt?.trim() ? [systemPrompt.trim()] : []), ...instructions]
+  return { finalToolIds: [...tools], finalSystemPrompt: parts.length ? parts.join('\n\n') : undefined }
 }
 
 interface ToolActivity {
@@ -284,14 +308,16 @@ interface RunRow {
   run_settings: string | null
   tools: string | null
   system_prompt: string | null
+  skills: string | null
+  mcp: string | null
 }
 
-// Parse a run's stored tool ids. A follow-up reuses whatever the run started
-// with, so the model keeps the same toolset across the whole conversation.
-function runToolIds(run: RunRow): string[] {
-  if (!run.tools) return []
+// Parse a stored JSON string array. A follow-up reuses whatever the run started
+// with, so the model keeps the same toolset/skills across the conversation.
+function parseIdList(raw: string | null): string[] {
+  if (!raw) return []
   try {
-    const parsed = JSON.parse(run.tools) as unknown
+    const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
   } catch {
     return []
@@ -411,7 +437,7 @@ async function buildHistory(runId: string, model: string, prompts: string[], kin
 
 export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: BenchmarkRequest }>('/api/benchmark', async (req, reply) => {
-    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools, systemPrompt } = req.body
+    const { prompts, models, pairs, runSettings, attachments, cloneAttachmentsFrom, tools, systemPrompt, skills, mcp } = req.body
     if (!pairs?.length && (!prompts?.length || !models?.length)) {
       return reply.code(400).send({ error: 'provide pairs[] or prompts[]+models[]' })
     }
@@ -456,13 +482,20 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     // batch, and a single prompt is the start of a chat.
     const kind: RunKind = pairs?.length ? 'pairs' : storedPrompts.length > 1 ? 'batch' : 'chat'
 
-    const validTools = Array.isArray(tools) ? tools.filter(t => typeof t === 'string') : []
+    const strList = (x: unknown): string[] => Array.isArray(x) ? x.filter((v): v is string => typeof v === 'string') : []
+    // Stored RAW (the run's intent), not expanded: skills fold into tools + system
+    // only at dispatch, so an edited skill definition applies to later turns too.
+    const validTools = strList(tools)
+    const validSkills = strList(skills)
+    const validMcp = strList(mcp)
     const toolsJson = validTools.length ? JSON.stringify(validTools) : null
+    const skillsJson = validSkills.length ? JSON.stringify(validSkills) : null
+    const mcpJson = validMcp.length ? JSON.stringify(validMcp) : null
     const sysPrompt = typeof systemPrompt === 'string' && systemPrompt.trim() ? systemPrompt : null
 
     db.prepare(
-      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson, sysPrompt)
+      'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools, system_prompt, skills, mcp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson, sysPrompt, skillsJson, mcpJson)
 
     // Regenerate copies the source turn's attachments onto this run so the
     // re-run sees the same media. Done after the INSERT (rows FK-reference it).
@@ -472,10 +505,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
-    const { tools: toolMap, specs: toolSpecs } = await prepareTools(validTools)
+    const { finalToolIds, finalSystemPrompt } = await expandSelections(validTools, validSkills, sysPrompt ?? undefined)
+    const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
     const tasks = isPairs
-      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined))
-      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, sysPrompt ?? undefined)))
+      ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt))
+      : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt)))
 
     finalizeRun(runId, tasks)
 
@@ -515,12 +549,13 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       ).run(JSON.stringify(updatedPrompts), targetModels.length, runSettingsJson, req.params.id)
 
       const providers = await getProviders()
-      const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run))
+      const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined)
+      const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
       const tasks = targetModels.map(async model => {
         // In a batch run this returns [] — the new prompt is another independent
         // question, not a follow-up to the previous ones.
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined)
+        return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt)
       })
 
       finalizeRun(req.params.id, tasks)
@@ -602,10 +637,11 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
-      const { tools: toolMap, specs: toolSpecs } = await prepareTools(runToolIds(run))
+      const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined)
+      const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
       const tasks = targetModels.map(async model => {
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
-        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, run.system_prompt ?? undefined)
+        return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt)
       })
 
       finalizeRun(req.params.id, tasks)

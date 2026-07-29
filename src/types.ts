@@ -46,6 +46,50 @@ export interface Provider {
   defaults?: ProviderDefaults
 }
 
+// ─── Library artifacts (user-authored, stored in config.json) ────────────────
+
+// JSON-Schema object for a tool's arguments. Kept loose — providers forward it
+// near-verbatim and each has its own strictness.
+export interface ToolParams {
+  type: 'object'
+  properties: Record<string, unknown>
+  required?: string[]
+}
+
+// A user-defined tool that POSTs its arguments to an HTTP endpoint and hands the
+// response back to the model. The URL is author-configured (not model-chosen),
+// so it may point at localhost — same trust model as a provider baseUrl.
+export interface CustomTool {
+  id: string
+  name: string          // the function name models call — ^[a-z0-9_]+$
+  description: string
+  parameters: ToolParams
+  url: string           // POST endpoint (localhost allowed)
+  apiKey?: string       // optional Bearer
+  enabled: boolean
+}
+
+// Instruction + the tools it turns on. Selecting a skill for a run merges its
+// instruction into the system prompt and its toolIds into the run's tool set.
+export interface Skill {
+  id: string
+  name: string
+  instruction: string
+  toolIds: string[]     // built-in and custom tool ids this skill enables
+  enabled: boolean
+}
+
+// Registry-only in this iteration: stored and shown, not yet connected/called.
+export interface McpServer {
+  id: string
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  url?: string          // sse/http
+  command?: string      // stdio
+  apiKey?: string
+  enabled: boolean
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -110,6 +154,8 @@ export interface Run {
   kind: RunKind
   tools?: string[]
   systemPrompt?: string | null
+  skills?: string[]
+  mcp?: string[]
 }
 
 // What a run's prompts[] means. 'chat' = successive turns of one conversation
@@ -137,4 +183,8 @@ export interface BenchmarkRequest {
   // One system prompt prepended for every model in the run, so the comparison
   // holds the instructions constant. Absent/empty ⇒ no system message is sent.
   systemPrompt?: string
+  // Selected skill ids (fold into tools + system at dispatch) and MCP-server ids
+  // (registry-only for now — stored, not yet executed).
+  skills?: string[]
+  mcp?: string[]
 }
