@@ -128,6 +128,22 @@ describe('CRUD /api/tools', () => {
     const res = await post('/api/tools', { name: 'ok_name', url: 'ftp://x' })
     expect(res.status).toBe(400)
   })
+
+  it('rejects a name that collides with a built-in tool', async () => {
+    // Would silently overwrite the SSRF-guarded fetch_url in resolveTools.
+    for (const reserved of ['calc', 'fetch_url', 'web_search']) {
+      expect((await post('/api/tools', { name: reserved, url: TOOL_URL })).status).toBe(400)
+    }
+  })
+
+  it('rejects a duplicate custom name', async () => {
+    expect((await post('/api/tools', { name: 'dup', url: TOOL_URL })).status).toBe(201)
+    expect((await post('/api/tools', { name: 'dup', url: TOOL_URL })).status).toBe(400)
+  })
+
+  it('rejects an over-long name (breaks provider tool schemas)', async () => {
+    expect((await post('/api/tools', { name: 'a'.repeat(65), url: TOOL_URL })).status).toBe(400)
+  })
 })
 
 describe('CRUD /api/skills', () => {

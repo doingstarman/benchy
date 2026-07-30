@@ -584,26 +584,35 @@ function SlashMenu({ items, activeIndex, selectionOf, onPick }: {
   )
 }
 
-// Chips for the artifacts selected for this run, shown above the prompt.
+// Chips for the artifacts selected for this run. Iterates the SELECTION sets,
+// not the catalog, so a still-selected artifact that was since disabled or
+// deleted (a "ghost") still shows a removable chip (name falls back to its id)
+// rather than becoming an invisible, unclearable selection. Rendered above every
+// prompt mode, so a skill picked in mode 0 stays visible after switching modes.
 function ArtifactChips({ artifacts, selectedTools, selectedSkills, selectedMcp, onToggleTool, onToggleSkill, onToggleMcp }: {
   artifacts: ArtifactItem[]
   selectedTools: Set<string>; selectedSkills: Set<string>; selectedMcp: Set<string>
   onToggleTool: (id: string) => void; onToggleSkill: (id: string) => void; onToggleMcp: (id: string) => void
 }) {
-  const setOf = (k: ArtifactItem['kind']) => k === 'skill' ? selectedSkills : k === 'mcp' ? selectedMcp : selectedTools
+  const nameOf = (kind: ArtifactItem['kind'], id: string) =>
+    artifacts.find(a => a.kind === kind && a.id === id)?.name ?? id
   const toggleOf = (k: ArtifactItem['kind']) => k === 'skill' ? onToggleSkill : k === 'mcp' ? onToggleMcp : onToggleTool
-  const chips = artifacts.filter(a => setOf(a.kind).has(a.id))
+  const chips: { kind: ArtifactItem['kind']; id: string }[] = [
+    ...[...selectedTools].map(id => ({ kind: 'tool' as const, id })),
+    ...[...selectedSkills].map(id => ({ kind: 'skill' as const, id })),
+    ...[...selectedMcp].map(id => ({ kind: 'mcp' as const, id })),
+  ]
   if (chips.length === 0) return null
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-      {chips.map(a => (
-        <span key={`${a.kind}:${a.id}`} style={{
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '10px 14px 0' }}>
+      {chips.map(c => (
+        <span key={`${c.kind}:${c.id}`} style={{
           display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px',
           border: '0.5px solid var(--accent-dim)', background: 'var(--accent-bg)', borderRadius: 20,
           fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--accent)',
         }}>
-          <span>{ARTIFACT_ICON[a.kind]}</span>{a.name}
-          <button onClick={() => toggleOf(a.kind)(a.id)} title={t('common.close')}
+          <span>{ARTIFACT_ICON[c.kind]}</span>{nameOf(c.kind, c.id)}
+          <button onClick={() => toggleOf(c.kind)(c.id)} title={t('common.close')}
             style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, fontSize: 12, lineHeight: 1 }}>✕</button>
         </span>
       ))}
@@ -633,6 +642,9 @@ export function Promptbox({
   // Open when the caret sits in a "/word" that starts the input or a new word.
   const [slash, setSlash] = useState<{ query: string; start: number } | null>(null)
   const [slashIdx, setSlashIdx] = useState(0)
+  // The token position the user dismissed with Escape — kept closed until the
+  // token moves, so a caret nudge doesn't immediately re-open the same menu.
+  const [dismissedStart, setDismissedStart] = useState<number | null>(null)
 
   const selectionOf = (kind: ArtifactItem['kind']) =>
     kind === 'skill' ? selectedSkills : kind === 'mcp' ? selectedMcp : selectedTools
@@ -643,27 +655,40 @@ export function Promptbox({
     ? artifacts.filter(a => a.name.toLowerCase().includes(slash.query.toLowerCase()))
     : []
 
-  // Derive the slash state from the textarea's value + caret after any edit.
-  function refreshSlash(value: string, caret: number) {
+  // The bounds of the "/word" the caret sits in, or null. Word = from a "/" that
+  // starts the input or follows whitespace, to the next whitespace or the end.
+  function slashWordAt(value: string, caret: number): { start: number; end: number } | null {
     let p = caret - 1
     while (p >= 0 && !/\s/.test(value[p])) p--
-    const wordStart = p + 1
-    if (value[wordStart] === '/' && wordStart < caret) {
-      setSlash({ query: value.slice(wordStart + 1, caret), start: wordStart })
-      setSlashIdx(0)
-    } else {
-      setSlash(null)
-    }
+    const start = p + 1
+    if (value[start] !== '/' || start >= caret) return null
+    let end = start + 1
+    while (end < value.length && !/\s/.test(value[end])) end++
+    return { start, end }
+  }
+
+  // Derive the slash state from the textarea's value + caret after any edit.
+  function refreshSlash(value: string, caret: number) {
+    const word = slashWordAt(value, caret)
+    if (!word) { setSlash(null); setDismissedStart(null); return }
+    // Stay closed if this exact token was just Escaped.
+    if (word.start === dismissedStart) { setSlash(null); return }
+    setDismissedStart(null)
+    setSlash({ query: value.slice(word.start + 1, caret), start: word.start })
+    setSlashIdx(0)
   }
 
   function pickArtifact(item: ArtifactItem) {
     if (item.disabled) return
     toggleOf(item.kind)(item.id)
-    // Strip the "/query" that triggered the menu; the artifact lives in a chip now.
+    // Strip the WHOLE "/word" (not just up to the caret — the caret may sit
+    // mid-token), leaving any text after it; the artifact lives in a chip now.
     if (slash) {
       const el = promptRef.current
       const caret = el?.selectionStart ?? prompt.length
-      const next = prompt.slice(0, slash.start) + prompt.slice(caret)
+      const word = slashWordAt(prompt, caret)
+      const end = word && word.start === slash.start ? word.end : caret
+      const next = prompt.slice(0, slash.start) + prompt.slice(end)
       onPromptChange(next)
       requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(slash.start, slash.start) })
     }
@@ -675,7 +700,7 @@ export function Promptbox({
     if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % slashMatches.length); return true }
     if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx(i => (i - 1 + slashMatches.length) % slashMatches.length); return true }
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickArtifact(slashMatches[slashIdx]); return true }
-    if (e.key === 'Escape') { e.preventDefault(); setSlash(null); return true }
+    if (e.key === 'Escape') { e.preventDefault(); setDismissedStart(slash.start); setSlash(null); return true }
     return false
   }
   const boxRef = useRef<HTMLDivElement>(null)
@@ -1013,6 +1038,14 @@ export function Promptbox({
         </div>
       )}
 
+      {/* Selected-artifact chips sit above every prompt mode, so a skill picked
+          in mode 0 stays visible and removable after switching to 1/2. */}
+      <ArtifactChips
+        artifacts={artifacts}
+        selectedTools={selectedTools} selectedSkills={selectedSkills} selectedMcp={selectedMcp}
+        onToggleTool={onToggleTool} onToggleSkill={onToggleSkill} onToggleMcp={onToggleMcp}
+      />
+
       {!simplified && mode === 1 ? (
         <div>
           {selectedModels.map((key, i, arr) => (
@@ -1083,11 +1116,6 @@ export function Promptbox({
               <AttachmentStrip attachments={pendingAttachments} onRemove={onRemoveAttachment} />
             </div>
           )}
-          <ArtifactChips
-            artifacts={artifacts}
-            selectedTools={selectedTools} selectedSkills={selectedSkills} selectedMcp={selectedMcp}
-            onToggleTool={onToggleTool} onToggleSkill={onToggleSkill} onToggleMcp={onToggleMcp}
-          />
           <textarea
             ref={promptRef}
             className="nr-ta"

@@ -5,11 +5,15 @@ import {
   getSkills, upsertSkill, removeSkill,
   getMcpServers, upsertMcpServer, removeMcpServer,
 } from '../config.js'
+import { TOOL_IDS } from '../tools/index.js'
 import type { CustomTool, Skill, McpServer, ToolParams } from '../types.js'
 
 // The name a model calls the tool by — must be a valid function identifier for
-// every provider's tool-calling schema.
-const TOOL_NAME_RE = /^[a-z0-9_]+$/i
+// every provider's tool-calling schema. Capped at 64: OpenAI/Anthropic reject
+// longer tool names, so an over-long one would fail every provider call in the
+// run rather than error here.
+const TOOL_NAME_RE = /^[a-z0-9_]{1,64}$/i
+const RESERVED_TOOL_NAMES = new Set<string>(TOOL_IDS)
 
 function parseParams(x: unknown): ToolParams | null {
   if (!x || typeof x !== 'object') return null
@@ -27,7 +31,19 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
   app.post<{ Body: Partial<CustomTool> }>('/api/tools', async (req, reply) => {
     const b = req.body
     if (!b || typeof b.name !== 'string' || !TOOL_NAME_RE.test(b.name.trim())) {
-      return reply.code(400).send({ error: 'name is required and must match [a-z0-9_]' })
+      return reply.code(400).send({ error: 'name is required, must match [a-z0-9_] and be at most 64 chars' })
+    }
+    const name = b.name.trim()
+    // A custom name that equals a built-in id would silently overwrite the safe
+    // built-in in resolveTools' name→tool map (e.g. shadowing the SSRF-guarded
+    // fetch_url with an unguarded POST). Reserve them.
+    if (RESERVED_TOOL_NAMES.has(name.toLowerCase())) {
+      return reply.code(400).send({ error: `"${name}" is a built-in tool name — choose another` })
+    }
+    // Two custom tools with the same name collide the same way (last wins).
+    const existing = await getCustomTools()
+    if (existing.some(t => t.name === name && t.id !== b.id)) {
+      return reply.code(400).send({ error: `a custom tool named "${name}" already exists` })
     }
     if (typeof b.url !== 'string' || !/^https?:\/\//i.test(b.url.trim())) {
       return reply.code(400).send({ error: 'url must be an http(s) endpoint' })
@@ -35,8 +51,8 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     const params = parseParams(b.parameters) ?? { type: 'object' as const, properties: {} }
     const tool: CustomTool = {
       id: b.id ?? randomUUID(),
-      name: b.name.trim(),
-      description: typeof b.description === 'string' ? b.description : '',
+      name,
+      description: typeof b.description === 'string' ? b.description.slice(0, 1024) : '',
       parameters: params,
       url: b.url.trim(),
       ...(b.apiKey ? { apiKey: b.apiKey } : {}),

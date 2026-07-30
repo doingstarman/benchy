@@ -440,4 +440,22 @@ describe('slash menu — library artifacts', () => {
 
     expect(benchmarkApi.start).toHaveBeenCalledWith(expect.objectContaining({ tools: ['calc'] }))
   })
+
+  it('a picked skill chip stays visible after switching prompt modes', async () => {
+    // The chip renders above every mode, so a skill picked in mode 0 is not
+    // silently applied-but-invisible in "prompt per model" / "many prompts".
+    vi.mocked(skillsApi.list).mockResolvedValue([
+      { id: 's1', name: 'Pirate', instruction: 'arr', toolIds: [], enabled: true },
+    ])
+    const user = userEvent.setup()
+    renderNewRun()
+    const ta = await waitForProviders()
+
+    await user.type(ta, '/pir')
+    await user.click(await screen.findByText('Pirate'))
+    await user.click(screen.getByText('prompt per model'))
+
+    // Still a removable chip, not a hidden selection.
+    expect(screen.getByText('Pirate')).toBeInTheDocument()
+  })
 })
