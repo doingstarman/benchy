@@ -21,6 +21,15 @@ export async function getSearchConfig() {
         return undefined;
     return s;
 }
+export async function getCustomTools() {
+    return (await readConfig()).customTools ?? [];
+}
+export async function getSkills() {
+    return (await readConfig()).skills ?? [];
+}
+export async function getMcpServers() {
+    return (await readConfig()).mcpServers ?? [];
+}
 function getBenchyDir() {
     return process.env.BENCHY_DIR ?? join(homedir(), '.benchy');
 }
@@ -122,6 +131,66 @@ export async function removeProvider(id) {
     return serialize(async () => {
         const config = await readConfig();
         config.providers = config.providers.filter(p => p.id !== id);
+        await writeConfig(config);
+    });
+}
+export async function upsertCustomTool(tool) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const list = config.customTools ?? [];
+        const idx = list.findIndex(t => t.id === tool.id);
+        if (idx >= 0)
+            list[idx] = tool;
+        else
+            list.push(tool);
+        config.customTools = list;
+        await writeConfig(config);
+    });
+}
+export async function removeCustomTool(id) {
+    return serialize(async () => {
+        const config = await readConfig();
+        config.customTools = (config.customTools ?? []).filter(t => t.id !== id);
+        await writeConfig(config);
+    });
+}
+export async function upsertSkill(skill) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const list = config.skills ?? [];
+        const idx = list.findIndex(s => s.id === skill.id);
+        if (idx >= 0)
+            list[idx] = skill;
+        else
+            list.push(skill);
+        config.skills = list;
+        await writeConfig(config);
+    });
+}
+export async function removeSkill(id) {
+    return serialize(async () => {
+        const config = await readConfig();
+        config.skills = (config.skills ?? []).filter(s => s.id !== id);
+        await writeConfig(config);
+    });
+}
+export async function upsertMcpServer(server) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const list = config.mcpServers ?? [];
+        const idx = list.findIndex(m => m.id === server.id);
+        if (idx >= 0)
+            list[idx] = server;
+        else
+            list.push(server);
+        config.mcpServers = list;
+        await writeConfig(config);
+    });
+}
+export async function removeMcpServer(id) {
+    return serialize(async () => {
+        const config = await readConfig();
+        config.mcpServers = (config.mcpServers ?? []).filter(m => m.id !== id);
         await writeConfig(config);
     });
 }

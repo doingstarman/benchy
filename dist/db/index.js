@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS runs (
   -- JSON array of tool ids this run enabled; NULL means none.
   tools TEXT,
   -- One system prompt sent to every model in the run; NULL means none.
-  system_prompt TEXT
+  system_prompt TEXT,
+  -- JSON arrays of selected skill ids / MCP-server ids; NULL means none.
+  skills TEXT,
+  mcp TEXT
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -96,6 +99,9 @@ export async function initDb(path) {
         // Which tools a run had enabled — NULL/absent for every run before this.
         'ALTER TABLE runs ADD COLUMN tools TEXT',
         'ALTER TABLE runs ADD COLUMN system_prompt TEXT',
+        // Selected skill ids and MCP-server ids for the run (JSON arrays; NULL none).
+        'ALTER TABLE runs ADD COLUMN skills TEXT',
+        'ALTER TABLE runs ADD COLUMN mcp TEXT',
     ]) {
         try {
             db.exec(sql);

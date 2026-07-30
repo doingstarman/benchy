@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { initDb } from './db/index.js';
 import { registerProvidersRoutes } from './api/providers.js';
+import { registerLibraryRoutes } from './api/library.js';
 import { registerRunsRoutes } from './api/runs.js';
 import { registerBenchmarkRoutes } from './api/benchmark.js';
 import { registerMockRoutes } from './api/mock.js';
@@ -33,6 +34,7 @@ export async function createServer(port, dbPath) {
     await registerUploadsRoutes(app);
     await registerVersionRoutes(app);
     await registerProvidersRoutes(app);
+    await registerLibraryRoutes(app);
     await registerRunsRoutes(app);
     await registerBenchmarkRoutes(app);
     await registerMockRoutes(app);
