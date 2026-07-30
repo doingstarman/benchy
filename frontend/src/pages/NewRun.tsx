@@ -1981,7 +1981,7 @@ export function NewRun() {
     ...BUILTIN_TOOL_ITEMS,
     ...customTools.filter(t => t.enabled).map(t => ({ kind: 'tool' as const, id: t.id, name: t.name, desc: t.description })),
     ...skills.filter(s => s.enabled).map(s => ({ kind: 'skill' as const, id: s.id, name: s.name, desc: s.instruction.slice(0, 40) })),
-    ...mcpServers.filter(m => m.enabled).map(m => ({ kind: 'mcp' as const, id: m.id, name: m.name, disabled: true })),
+    ...mcpServers.filter(m => m.enabled).map(m => ({ kind: 'mcp' as const, id: m.id, name: m.name, desc: m.url ?? m.command })),
   ]
 
   const promptboxProps: Omit<PromptboxProps, 'simplified'> = {

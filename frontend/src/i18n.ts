@@ -99,7 +99,7 @@ export const DICT: Record<string, Entry> = {
   'library.skillTools': { en: 'Tools this skill turns on', ru: 'Инструменты, которые включает скилл' },
   'library.transport': { en: 'Transport', ru: 'Транспорт' },
   'library.command': { en: 'Command', ru: 'Команда' },
-  'library.mcpSoon': { en: 'Registry only — connecting and calling MCP tools comes in a later release.', ru: 'Только реестр — подключение и вызов MCP-инструментов будут в следующем релизе.' },
+  'library.mcpHint': { en: 'Servers you register here can be attached to a run with "/" — benchy connects for the run, calls their tools, and disconnects.', ru: 'Серверы отсюда можно подключить к прогону через «/» — benchy соединяется на время прогона, зовёт их инструменты и отключается.' },
   'library.enabled': { en: 'Enabled', ru: 'Включён' },
   'library.delete': { en: 'Delete', ru: 'Удалить' },
   'library.builtinReadonly': { en: 'built-in', ru: 'встроенный' },

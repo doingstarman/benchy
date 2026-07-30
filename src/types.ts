@@ -79,7 +79,8 @@ export interface Skill {
   enabled: boolean
 }
 
-// Registry-only in this iteration: stored and shown, not yet connected/called.
+// A registered MCP server. Selected on a run, benchy connects for the run's
+// duration, lists its tools, and disconnects when the run finishes.
 export interface McpServer {
   id: string
   name: string

@@ -26,6 +26,16 @@ let capturedMessages: { role: string; content: string }[][] = []
 let capturedSettings: Record<string, unknown>[] = []
 let capturedTools: unknown[][] = []
 
+// MCP client mocked: a selected server yields one namespaced tool + a close spy,
+// so the run wiring can be tested without a subprocess or a socket.
+const { mcpConnect, mcpClose } = vi.hoisted(() => ({
+  mcpConnect: vi.fn(),
+  mcpClose: vi.fn(async () => {}),
+}))
+vi.mock('../tools/mcp.js', () => ({
+  connectMcpServer: mcpConnect,
+}))
+
 vi.mock('../adapters/openai.js', () => ({
   openaiAdapter: {
     async *stream(messages: { role: string; content: string }[], config: { model: string; settings?: Record<string, unknown>; tools?: unknown[] }) {
@@ -1592,5 +1602,62 @@ describe('library artifacts', () => {
     await waitForRun(body.data.runId)
     expect(capturedTools[0]).toEqual([])
     expect(capturedMessages[0].some(m => m.role === 'system')).toBe(false)
+  })
+})
+
+describe('MCP execution', () => {
+  it('connects a selected server, its namespaced tool reaches the adapter, and it closes after the run', async () => {
+    const { upsertMcpServer } = await import('../config.js')
+    await upsertMcpServer({ id: 'mcp1', name: 'srv', transport: 'http', url: 'http://x', enabled: true })
+    mcpConnect.mockResolvedValue({
+      tools: [{ spec: { name: 'srv_ping', description: 'ping', parameters: { type: 'object', properties: {} } }, run: async () => 'pong' }],
+      close: mcpClose,
+    })
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+    capturedTools = []
+    mcpConnect.mockClear(); mcpClose.mockClear()
+
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`], mcp: ['mcp1'] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+
+    expect(mcpConnect).toHaveBeenCalledTimes(1)
+    expect(capturedTools[0].map(t => (t as { name?: string }).name)).toContain('srv_ping')
+    // Connection torn down once the run's cells settle.
+    await vi.waitFor(() => expect(mcpClose).toHaveBeenCalled())
+
+    const run = await fetch(`${base}/api/runs/${body.data.runId}`).then(r => r.json()) as { data: { mcp?: string[] } }
+    expect(run.data.mcp).toEqual(['mcp1'])
+  })
+
+  it('does not connect any MCP server when none is selected', async () => {
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+    mcpConnect.mockClear()
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    await waitForRun(body.data.runId)
+    expect(mcpConnect).not.toHaveBeenCalled()
+  })
+
+  it('a server that fails to connect does not fail the run', async () => {
+    const { upsertMcpServer } = await import('../config.js')
+    await upsertMcpServer({ id: 'mcp-bad', name: 'bad', transport: 'http', url: 'http://x', enabled: true })
+    mcpConnect.mockRejectedValue(new Error('connect refused'))
+    const pid = (await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }).data[0].id
+
+    const res = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['hi'], models: [`${pid}:gpt-4o-mini`], mcp: ['mcp-bad'] }),
+    })
+    const body = await res.json() as { data: { runId: string } }
+    const run = await waitForRun(body.data.runId)
+    // The run still completes (the unreachable server's tools are just absent).
+    expect(run.status).toBe('done')
   })
 })

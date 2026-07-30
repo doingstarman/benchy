@@ -215,9 +215,7 @@ export function Library() {
 
       {tab === 'mcp' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ fontSize: 11, color: 'var(--warning)', background: 'var(--warning-bg)', border: '0.5px solid var(--border)', borderRadius: 6, padding: '8px 12px' }}>
-            {t('library.mcpSoon')}
-          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('library.mcpHint')}</div>
           <Grid>
             {mcp.map(m => <Card key={m.id} title={m.name} subtitle={m.url ?? m.command} badge={m.transport} onClick={() => openMcp(m)} />)}
             <AddButton label={t('library.addMcp')} onClick={() => openMcp()} />

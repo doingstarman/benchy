@@ -13,7 +13,8 @@ import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads
 import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec } from '../adapters/base.js'
 import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../types.js'
 import { resolveTools, type Tool } from '../tools/index.js'
-import { getCustomTools, getSkills } from '../config.js'
+import { connectMcpServer } from '../tools/mcp.js'
+import { getCustomTools, getSkills, getMcpServers } from '../config.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -40,14 +41,41 @@ function broadcast(runId: string, event: string, data: unknown) {
 // after this many rounds, keep whatever text it produced, and mark the trace.
 const MAX_TOOL_ITERATIONS = 8
 
-// Resolve a run's tool ids (built-in + custom) into a dispatch map + the specs
-// sent to providers. web_search silently drops out when no key is set, so specs
-// and map always agree — a model is never offered a tool the loop can't run.
-async function prepareTools(ids: string[] | undefined): Promise<{ tools: Map<string, Tool>; specs: ToolSpec[] }> {
-  if (!ids?.length) return { tools: new Map(), specs: [] }
-  const tools = await resolveTools(ids, await getCustomTools())
+// Resolve a run's selections into a dispatch map + the specs sent to providers,
+// plus a closeMcp() that tears down any MCP connections opened for the run.
+// Built-in + custom tools come from resolveTools; each selected MCP server is
+// connected here, its tools listed and folded in. web_search silently drops out
+// when no key is set, so specs and map always agree — a model is never offered a
+// tool the loop can't run. A model can call by name; MCP names are namespaced so
+// they can't shadow a built-in.
+async function prepareRunTools(
+  ids: string[] | undefined,
+  mcpIds: string[] = [],
+): Promise<{ tools: Map<string, Tool>; specs: ToolSpec[]; closeMcp: () => Promise<void> }> {
+  const noop = async () => {}
+  if (!ids?.length && mcpIds.length === 0) return { tools: new Map(), specs: [], closeMcp: noop }
+
+  const tools = ids?.length ? await resolveTools(ids, await getCustomTools()) : new Map<string, Tool>()
+
+  const closers: Array<() => Promise<void>> = []
+  if (mcpIds.length > 0) {
+    const servers = await getMcpServers()
+    for (const id of mcpIds) {
+      const server = servers.find(s => s.id === id && s.enabled)
+      if (!server) continue
+      try {
+        // One server's failure to connect must not fail the whole run — its
+        // tools just won't be offered.
+        const { tools: mcpTools, close } = await connectMcpServer(server)
+        closers.push(close)
+        for (const tool of mcpTools) tools.set(tool.spec.name, tool)
+      } catch { /* skip an unreachable server */ }
+    }
+  }
+
   const specs = [...tools.values()].map(t => t.spec)
-  return { tools, specs }
+  const closeMcp = async () => { await Promise.allSettled(closers.map(c => c())) }
+  return { tools, specs, closeMcp }
 }
 
 // A run's raw selections (tool ids, skill ids) plus its own system prompt become
@@ -506,11 +534,14 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     // Fire and forget — SSE stream delivers results
     const providers = await getProviders()
     const { finalToolIds, finalSystemPrompt } = await expandSelections(validTools, validSkills, sysPrompt ?? undefined)
-    const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
+    const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, validMcp)
     const tasks = isPairs
       ? pairs!.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt))
       : prompts!.flatMap((prompt, pi) => models!.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt)))
 
+    // Close MCP connections (kill stdio subprocesses / release sockets) once
+    // every cell of this dispatch has settled — the map is shared by all of them.
+    void Promise.allSettled(tasks).finally(closeMcp)
     finalizeRun(runId, tasks)
 
     return reply.code(202).send({ data: { runId } })
@@ -550,7 +581,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
 
       const providers = await getProviders()
       const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined)
-      const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
+      const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, parseIdList(run.mcp))
       const tasks = targetModels.map(async model => {
         // In a batch run this returns [] — the new prompt is another independent
         // question, not a follow-up to the previous ones.
@@ -558,6 +589,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
         return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt)
       })
 
+      void Promise.allSettled(tasks).finally(closeMcp)
       finalizeRun(req.params.id, tasks)
 
       return reply.code(202).send({ data: { runId: req.params.id, promptIndex: newPromptIndex } })
@@ -638,12 +670,13 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) as RunSettings : undefined
       const providers = await getProviders()
       const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined)
-      const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds)
+      const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, parseIdList(run.mcp))
       const tasks = targetModels.map(async model => {
         const history = await buildHistory(req.params.id, model, prompts, run.kind)
         return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt)
       })
 
+      void Promise.allSettled(tasks).finally(closeMcp)
       finalizeRun(req.params.id, tasks)
 
       return reply.code(202).send({ data: { runId: req.params.id, promptIndex } })
