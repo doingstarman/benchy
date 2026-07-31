@@ -5,6 +5,8 @@ import { Results } from './pages/Results'
 import { History } from './pages/History'
 import { Providers } from './pages/Providers'
 import { Library } from './pages/Library'
+import { Datasets } from './pages/Datasets'
+import { DatasetDetail } from './pages/DatasetDetail'
 import { Settings } from './pages/Settings'
 
 export function AppRouter() {
@@ -18,6 +20,8 @@ export function AppRouter() {
           <Route path="history" element={<History />} />
           <Route path="providers" element={<Providers />} />
           <Route path="library" element={<Library />} />
+          <Route path="datasets" element={<Datasets />} />
+          <Route path="datasets/:id" element={<DatasetDetail />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

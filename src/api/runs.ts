@@ -41,6 +41,8 @@ interface ResultRow {
   feedback: string | null
   error: string | null
   created_at: number
+  score: number | null
+  score_detail: string | null
 }
 
 // Backslash-escape LIKE's own metacharacters so the query means what it says.
@@ -115,6 +117,22 @@ function rowToResult(row: ResultRow): Result {
     feedback: row.feedback as Result['feedback'],
     error: row.error,
     createdAt: row.created_at,
+    ...(row.score != null ? { score: row.score } : {}),
+    ...(row.score_detail ? { scoreDetail: parseScoreDetail(row.score_detail) } : {}),
+  }
+}
+
+function parseScoreDetail(raw: string): Record<string, 'match' | 'miss'> {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, 'match' | 'miss'> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === 'match' || v === 'miss') out[k] = v
+    }
+    return out
+  } catch {
+    return {}
   }
 }
 

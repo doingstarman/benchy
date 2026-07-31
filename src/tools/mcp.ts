@@ -48,9 +48,12 @@ function buildTransport(server: McpServer): Transport {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  // Clear the timer once p settles so the loser doesn't linger holding an
+  // event-loop ref (delaying clean process exit under many runs).
   return Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(msg)), ms)),
+    p.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error(msg)), ms) }),
   ])
 }
 

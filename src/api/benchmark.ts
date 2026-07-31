@@ -68,7 +68,11 @@ async function prepareRunTools(
         // tools just won't be offered.
         const { tools: mcpTools, close } = await connectMcpServer(server)
         closers.push(close)
-        for (const tool of mcpTools) tools.set(tool.spec.name, tool)
+        // Never overwrite an existing name: a built-in / custom / earlier-server
+        // tool wins, so a namespaced MCP name that still collides (e.g. server
+        // "web" tool "search" → "web_search") can't shadow the built-in. It's
+        // dropped instead — the model just isn't offered the colliding remote tool.
+        for (const tool of mcpTools) if (!tools.has(tool.spec.name)) tools.set(tool.spec.name, tool)
       } catch { /* skip an unreachable server */ }
     }
   }
@@ -109,7 +113,7 @@ interface ToolActivity {
   ms: number
 }
 
-async function runCell(
+export async function runCell(
   runId: string,
   promptIndex: number,
   promptText: string,
@@ -299,7 +303,7 @@ async function runCell(
 // the whole run is over.
 const inFlightTurns = new Map<string, number>()
 
-function finalizeRun(runId: string, tasks: Promise<void>[]): void {
+export function finalizeRun(runId: string, tasks: Promise<void>[]): void {
   const db = getDb()
   inFlightTurns.set(runId, (inFlightTurns.get(runId) ?? 0) + 1)
 

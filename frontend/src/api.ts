@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer } from '../../src/types'
+import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -95,6 +95,36 @@ export const uploadsApi = {
   // Removing a chip before send — only unbound uploads; fire-and-forget so the
   // UI never blocks on cleanup. A bound attachment is refused by the server.
   remove: (id: string) => fetch(`/api/uploads/${id}`, { method: 'DELETE' }),
+}
+
+// ─── datasets ─────────────────────────────────────────────────────────────────
+
+export interface DatasetRunSummary {
+  id: string
+  status: string
+  models: string[]
+  totalCalls: number
+  completedCalls: number
+  createdAt: number
+  avgScore: number | null
+}
+
+export const datasetsApi = {
+  list: () => apiFetch<Dataset[]>('/api/datasets'),
+  get: (id: string) => apiFetch<Dataset>(`/api/datasets/${id}`),
+  create: (body: { name: string; note?: string; schema?: DatasetVar[] }) =>
+    apiFetch<Dataset>('/api/datasets', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: { name?: string; note?: string | null; schema?: DatasetVar[]; trustedModel?: string | null }) =>
+    apiFetch<Dataset>(`/api/datasets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  remove: (id: string) => fetch(`/api/datasets/${id}`, { method: 'DELETE' }),
+  addItem: (id: string, body: { attachmentId?: string; groundTruth?: Record<string, string> }) =>
+    apiFetch<DatasetItem>(`/api/datasets/${id}/items`, { method: 'POST', body: JSON.stringify(body) }),
+  updateItem: (id: string, itemId: string, body: { attachmentId?: string; groundTruth?: Record<string, string> }) =>
+    apiFetch<DatasetItem>(`/api/datasets/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  removeItem: (id: string, itemId: string) => fetch(`/api/datasets/${id}/items/${itemId}`, { method: 'DELETE' }),
+  runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
+  run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string }) =>
+    apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
 // ─── version / updates ───────────────────────────────────────────────────────

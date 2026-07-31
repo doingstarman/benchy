@@ -268,7 +268,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
 
       <Divider />
 
-      <DisabledItem label={t('nav.datasets')} icon="datasets" collapsed={collapsed} soon />
+      <Item to="/datasets" label={t('nav.datasets')} icon="datasets" collapsed={collapsed} />
 
       {/* Push settings to bottom */}
       <div style={{ flex: 1 }} />

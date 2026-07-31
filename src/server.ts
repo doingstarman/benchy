@@ -9,6 +9,7 @@ import { registerProvidersRoutes } from './api/providers.js'
 import { registerLibraryRoutes } from './api/library.js'
 import { registerRunsRoutes } from './api/runs.js'
 import { registerBenchmarkRoutes } from './api/benchmark.js'
+import { registerDatasetsRoutes } from './api/datasets.js'
 import { registerMockRoutes } from './api/mock.js'
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js'
 import { registerVersionRoutes } from './api/version.js'
@@ -45,6 +46,7 @@ export async function createServer(port: number, dbPath?: string) {
   await registerLibraryRoutes(app)
   await registerRunsRoutes(app)
   await registerBenchmarkRoutes(app)
+  await registerDatasetsRoutes(app)
   await registerMockRoutes(app)
 
   // Serve built frontend in production

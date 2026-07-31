@@ -79,6 +79,47 @@ export interface Skill {
   enabled: boolean
 }
 
+// ─── Datasets ────────────────────────────────────────────────────────────────
+
+// One variable of a dataset's schema. `type` drives how the model's answer is
+// normalized before it's compared to ground truth (dates/numbers are format-
+// tolerant so a correct answer in another format isn't penalized).
+export type DatasetVarType = 'text' | 'date' | 'number'
+
+export interface DatasetVar {
+  key: string           // ^[a-z0-9_]+$ — also the JSON key the model must return
+  type: DatasetVarType
+  desc?: string         // shown to the human; steers the model in the prompt
+}
+
+// One dataset item: a file plus its per-variable ground-truth values. In stage 1
+// the item is always a file (image/PDF); ground truth is entered by hand.
+export interface DatasetItem {
+  id: string
+  idx: number
+  attachmentId: string | null
+  attachment?: AttachmentMeta | null
+  groundTruth: Record<string, string>
+  createdAt: number
+}
+
+// A dataset: files + a variable schema + ground truth, scored per field against
+// model output. `trustedModel` (providerId:model) is excluded from comparison
+// runs so it never competes against itself.
+export interface Dataset {
+  id: string
+  name: string
+  note: string | null
+  type: 'files'
+  schema: DatasetVar[]
+  trustedModel: string | null
+  createdAt: number
+  updatedAt: number
+  itemCount?: number
+  labeledCount?: number
+  items?: DatasetItem[]
+}
+
 // A registered MCP server. Selected on a run, benchy connects for the run's
 // duration, lists its tools, and disconnects when the run finishes.
 export interface McpServer {
@@ -139,6 +180,10 @@ export interface Result {
   feedback: 'up' | 'down' | null
   error: string | null
   createdAt: number
+  // Set only for results of a dataset run: per-field accuracy (matched/scored)
+  // and the per-key match map. NULL/absent for ordinary runs.
+  score?: number | null
+  scoreDetail?: Record<string, 'match' | 'miss'> | null
 }
 
 export interface Run {

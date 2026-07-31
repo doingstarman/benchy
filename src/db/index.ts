@@ -60,10 +60,43 @@ CREATE TABLE IF NOT EXISTS attachments (
   mime_type TEXT NOT NULL,
   name TEXT NOT NULL,
   size INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- Set when the upload belongs to a dataset item. Such rows are permanent
+  -- (they back the dataset's files), so the unbound-upload GC must skip them.
+  dataset_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachments_run ON attachments(run_id, prompt_index);
+
+-- A dataset: a collection of items (files) plus a variable schema and, per item,
+-- ground-truth values. Runs score model output per field against that truth.
+CREATE TABLE IF NOT EXISTS datasets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  note TEXT,
+  type TEXT NOT NULL DEFAULT 'files',
+  -- JSON: [{ key, type: 'text'|'date'|'number', desc }]
+  schema TEXT NOT NULL DEFAULT '[]',
+  -- 'providerId:model' of a trusted model, excluded from comparison runs so it
+  -- never competes against itself. NULL means none.
+  trusted_model TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dataset_items (
+  id TEXT PRIMARY KEY,
+  dataset_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  -- The item's file, an attachment row (unbound: run_id NULL, dataset_id set).
+  attachment_id TEXT,
+  -- JSON { key: value } — the human/AI ground truth for this item.
+  ground_truth TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dataset_items_dataset ON dataset_items(dataset_id, idx);
 `
 
 let db: Database.Database | null = null
@@ -107,6 +140,14 @@ export async function initDb(path?: string): Promise<void> {
     // Selected skill ids and MCP-server ids for the run (JSON arrays; NULL none).
     'ALTER TABLE runs ADD COLUMN skills TEXT',
     'ALTER TABLE runs ADD COLUMN mcp TEXT',
+    // Datasets: dataset files are permanent attachments, so they carry a
+    // dataset_id that exempts them from the unbound-upload GC.
+    'ALTER TABLE attachments ADD COLUMN dataset_id TEXT',
+    // A run produced by scoring a dataset links back to it; each result gets a
+    // per-field accuracy (score) and a per-key match map (score_detail).
+    'ALTER TABLE runs ADD COLUMN dataset_id TEXT',
+    'ALTER TABLE results ADD COLUMN score REAL',
+    'ALTER TABLE results ADD COLUMN score_detail TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
