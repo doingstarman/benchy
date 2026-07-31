@@ -10,7 +10,8 @@ import { webhookAdapter } from '../adapters/webhook.js';
 import { readFile, unlink } from 'node:fs/promises';
 import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js';
 import { resolveTools } from '../tools/index.js';
-import { getCustomTools, getSkills } from '../config.js';
+import { connectMcpServer } from '../tools/mcp.js';
+import { getCustomTools, getSkills, getMcpServers } from '../config.js';
 export function getAdapter(type) {
     if (type === 'anthropic')
         return anthropicAdapter;
@@ -41,15 +42,44 @@ function broadcast(runId, event, data) {
 // A runaway model that keeps calling tools would burn real money forever. Stop
 // after this many rounds, keep whatever text it produced, and mark the trace.
 const MAX_TOOL_ITERATIONS = 8;
-// Resolve a run's tool ids (built-in + custom) into a dispatch map + the specs
-// sent to providers. web_search silently drops out when no key is set, so specs
-// and map always agree — a model is never offered a tool the loop can't run.
-async function prepareTools(ids) {
-    if (!ids?.length)
-        return { tools: new Map(), specs: [] };
-    const tools = await resolveTools(ids, await getCustomTools());
+// Resolve a run's selections into a dispatch map + the specs sent to providers,
+// plus a closeMcp() that tears down any MCP connections opened for the run.
+// Built-in + custom tools come from resolveTools; each selected MCP server is
+// connected here, its tools listed and folded in. web_search silently drops out
+// when no key is set, so specs and map always agree — a model is never offered a
+// tool the loop can't run. A model can call by name; MCP names are namespaced so
+// they can't shadow a built-in.
+async function prepareRunTools(ids, mcpIds = []) {
+    const noop = async () => { };
+    if (!ids?.length && mcpIds.length === 0)
+        return { tools: new Map(), specs: [], closeMcp: noop };
+    const tools = ids?.length ? await resolveTools(ids, await getCustomTools()) : new Map();
+    const closers = [];
+    if (mcpIds.length > 0) {
+        const servers = await getMcpServers();
+        for (const id of mcpIds) {
+            const server = servers.find(s => s.id === id && s.enabled);
+            if (!server)
+                continue;
+            try {
+                // One server's failure to connect must not fail the whole run — its
+                // tools just won't be offered.
+                const { tools: mcpTools, close } = await connectMcpServer(server);
+                closers.push(close);
+                // Never overwrite an existing name: a built-in / custom / earlier-server
+                // tool wins, so a namespaced MCP name that still collides (e.g. server
+                // "web" tool "search" → "web_search") can't shadow the built-in. It's
+                // dropped instead — the model just isn't offered the colliding remote tool.
+                for (const tool of mcpTools)
+                    if (!tools.has(tool.spec.name))
+                        tools.set(tool.spec.name, tool);
+            }
+            catch { /* skip an unreachable server */ }
+        }
+    }
     const specs = [...tools.values()].map(t => t.spec);
-    return { tools, specs };
+    const closeMcp = async () => { await Promise.allSettled(closers.map(c => c())); };
+    return { tools, specs, closeMcp };
 }
 // A run's raw selections (tool ids, skill ids) plus its own system prompt become
 // the FINAL tool set and system prompt. Each selected, enabled skill folds its
@@ -73,7 +103,7 @@ async function expandSelections(toolIds, skillIds, systemPrompt) {
     const parts = [...(systemPrompt?.trim() ? [systemPrompt.trim()] : []), ...instructions];
     return { finalToolIds: [...tools], finalSystemPrompt: parts.length ? parts.join('\n\n') : undefined };
 }
-async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = [], tools = new Map(), toolSpecs = [], systemPrompt) {
+export async function runCell(runId, promptIndex, promptText, modelKey, providers, runSettings, history = [], tools = new Map(), toolSpecs = [], systemPrompt) {
     const [providerId, ...modelParts] = modelKey.split(':');
     const model = modelParts.join(':');
     const db = getDb();
@@ -247,7 +277,7 @@ async function runCell(runId, promptIndex, promptText, modelKey, providers, runS
 // edit is still streaming. Count them so the first to finish doesn't announce
 // the whole run is over.
 const inFlightTurns = new Map();
-function finalizeRun(runId, tasks) {
+export function finalizeRun(runId, tasks) {
     const db = getDb();
     inFlightTurns.set(runId, (inFlightTurns.get(runId) ?? 0) + 1);
     void Promise.all(tasks)
@@ -440,10 +470,13 @@ export async function registerBenchmarkRoutes(app) {
         // Fire and forget — SSE stream delivers results
         const providers = await getProviders();
         const { finalToolIds, finalSystemPrompt } = await expandSelections(validTools, validSkills, sysPrompt ?? undefined);
-        const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds);
+        const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, validMcp);
         const tasks = isPairs
             ? pairs.map(({ prompt, model }, pi) => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt))
             : prompts.flatMap((prompt, pi) => models.map(model => runCell(runId, pi, prompt, model, providers, runSettings, [], toolMap, toolSpecs, finalSystemPrompt)));
+        // Close MCP connections (kill stdio subprocesses / release sockets) once
+        // every cell of this dispatch has settled — the map is shared by all of them.
+        void Promise.allSettled(tasks).finally(closeMcp);
         finalizeRun(runId, tasks);
         return reply.code(202).send({ data: { runId } });
     });
@@ -473,13 +506,14 @@ export async function registerBenchmarkRoutes(app) {
         db.prepare("UPDATE runs SET prompts = ?, status = 'running', total_calls = total_calls + ?, run_settings = ? WHERE id = ?").run(JSON.stringify(updatedPrompts), targetModels.length, runSettingsJson, req.params.id);
         const providers = await getProviders();
         const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined);
-        const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds);
+        const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, parseIdList(run.mcp));
         const tasks = targetModels.map(async (model) => {
             // In a batch run this returns [] — the new prompt is another independent
             // question, not a follow-up to the previous ones.
             const history = await buildHistory(req.params.id, model, prompts, run.kind);
             return runCell(req.params.id, newPromptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt);
         });
+        void Promise.allSettled(tasks).finally(closeMcp);
         finalizeRun(req.params.id, tasks);
         return reply.code(202).send({ data: { runId: req.params.id, promptIndex: newPromptIndex } });
     });
@@ -549,11 +583,12 @@ export async function registerBenchmarkRoutes(app) {
         const effectiveRunSettings = run.run_settings ? JSON.parse(run.run_settings) : undefined;
         const providers = await getProviders();
         const { finalToolIds, finalSystemPrompt } = await expandSelections(parseIdList(run.tools), parseIdList(run.skills), run.system_prompt ?? undefined);
-        const { tools: toolMap, specs: toolSpecs } = await prepareTools(finalToolIds);
+        const { tools: toolMap, specs: toolSpecs, closeMcp } = await prepareRunTools(finalToolIds, parseIdList(run.mcp));
         const tasks = targetModels.map(async (model) => {
             const history = await buildHistory(req.params.id, model, prompts, run.kind);
             return runCell(req.params.id, promptIndex, prompt, model, providers, effectiveRunSettings, history, toolMap, toolSpecs, finalSystemPrompt);
         });
+        void Promise.allSettled(tasks).finally(closeMcp);
         finalizeRun(req.params.id, tasks);
         return reply.code(202).send({ data: { runId: req.params.id, promptIndex } });
     });

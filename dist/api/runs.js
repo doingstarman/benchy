@@ -73,7 +73,25 @@ function rowToResult(row) {
         feedback: row.feedback,
         error: row.error,
         createdAt: row.created_at,
+        ...(row.score != null ? { score: row.score } : {}),
+        ...(row.score_detail ? { scoreDetail: parseScoreDetail(row.score_detail) } : {}),
     };
+}
+function parseScoreDetail(raw) {
+    try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return {};
+        const out = {};
+        for (const [k, v] of Object.entries(parsed)) {
+            if (v === 'match' || v === 'miss')
+                out[k] = v;
+        }
+        return out;
+    }
+    catch {
+        return {};
+    }
 }
 export async function registerRunsRoutes(app) {
     app.get('/api/runs', async (req) => {

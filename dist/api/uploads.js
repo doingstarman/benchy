@@ -80,18 +80,56 @@ export async function cloneAttachmentsForTurn(sourceRunId, sourcePromptIndex, ta
         insert.run(newId, targetRunId, targetPromptIndex, row.mime_type, row.name, row.size, Date.now());
     }
 }
+// Binds an upload to a dataset item: it stops being an abandoned upload (the GC
+// skips dataset_id rows) and becomes permanent until the item/dataset is gone.
+export function bindAttachmentToDataset(id, datasetId) {
+    getDb().prepare('UPDATE attachments SET dataset_id = ? WHERE id = ?').run(datasetId, id);
+}
+// Copies one attachment (file + row) onto a run turn, independent of the source.
+// A dataset item's file is unbound (run_id NULL, dataset_id set), so it can't be
+// found by run+prompt_index — a dataset run clones it by id onto (run, item idx).
+export async function cloneAttachmentOnto(attachmentId, targetRunId, targetPromptIndex) {
+    const row = getAttachmentRow(attachmentId);
+    if (!row)
+        return;
+    const newId = randomUUID();
+    await copyFile(uploadPath(row.id, row.mime_type), uploadPath(newId, row.mime_type)).catch(() => { });
+    getDb().prepare('INSERT INTO attachments (id, run_id, prompt_index, mime_type, name, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(newId, targetRunId, targetPromptIndex, row.mime_type, row.name, row.size, Date.now());
+}
+// Deletes one attachment (file + row) regardless of how it's bound. Used when a
+// dataset item or a whole dataset is removed.
+export async function deleteAttachment(id) {
+    const row = getAttachmentRow(id);
+    if (!row)
+        return;
+    await unlink(uploadPath(row.id, row.mime_type)).catch(() => { });
+    getDb().prepare('DELETE FROM attachments WHERE id = ?').run(id);
+}
+// Removes every attachment owned by a dataset (files + rows) — the dataset_items
+// FK cascade drops the item rows, but attachments have no FK (see the table).
+export async function deleteAttachmentsForDataset(datasetId) {
+    const db = getDb();
+    const rows = db.prepare('SELECT id, mime_type FROM attachments WHERE dataset_id = ?')
+        .all(datasetId);
+    for (const row of rows) {
+        await unlink(uploadPath(row.id, row.mime_type)).catch(() => { });
+    }
+    db.prepare('DELETE FROM attachments WHERE dataset_id = ?').run(datasetId);
+}
 // Sweeps abandoned uploads: rows never bound to a run (user attached then
 // removed the chip or closed the tab without sending) older than the cutoff.
-// Runs on startup — bounds the disk leak without touching an in-flight upload.
+// Dataset files are unbound to a run but permanent, so dataset_id rows are
+// exempt. Runs on startup — bounds the disk leak without touching an in-flight
+// upload.
 export async function gcUnboundUploads(olderThanMs) {
     const db = getDb();
     const cutoff = Date.now() - olderThanMs;
-    const rows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id IS NULL AND created_at < ?')
+    const rows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id IS NULL AND dataset_id IS NULL AND created_at < ?')
         .all(cutoff);
     for (const row of rows) {
         await unlink(uploadPath(row.id, row.mime_type)).catch(() => { });
     }
-    db.prepare('DELETE FROM attachments WHERE run_id IS NULL AND created_at < ?').run(cutoff);
+    db.prepare('DELETE FROM attachments WHERE run_id IS NULL AND dataset_id IS NULL AND created_at < ?').run(cutoff);
     return rows.length;
 }
 export async function registerUploadsRoutes(app) {
@@ -159,6 +197,8 @@ export async function registerUploadsRoutes(app) {
             return reply.code(404).send({ error: 'Attachment not found' });
         if (row.run_id)
             return reply.code(409).send({ error: 'Attachment is bound to a run — delete the run instead' });
+        if (row.dataset_id)
+            return reply.code(409).send({ error: 'Attachment belongs to a dataset — delete the dataset item instead' });
         await unlink(uploadPath(row.id, row.mime_type)).catch(() => { });
         getDb().prepare('DELETE FROM attachments WHERE id = ?').run(row.id);
         return reply.code(204).send();
