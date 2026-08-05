@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { getDb } from '../db/index.js';
-import { getProviders } from '../config.js';
-import { runCell, finalizeRun } from './benchmark.js';
-import { getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto, deleteAttachment, deleteAttachmentsForDataset, } from './uploads.js';
-import { scoreResult } from '../scoring.js';
+import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js';
+import { runCell, finalizeRun, getAdapter } from './benchmark.js';
+import { getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto, deleteAttachment, deleteAttachmentsForDataset, uploadPath, } from './uploads.js';
+import { scoreResult, parseModelOutput } from '../scoring.js';
 import { computeStandings } from '../arena.js';
 const VAR_TYPES = ['text', 'date', 'number'];
 const KEY_RE = /^[a-z0-9_]+$/;
@@ -79,6 +80,12 @@ function rowToItem(row) {
         attachment: row.attachment_id ? attachmentMeta(row.attachment_id) : null,
         groundTruth: (() => { try {
             return toGroundTruth(JSON.parse(row.ground_truth));
+        }
+        catch {
+            return {};
+        } })(),
+        aiSuggested: (() => { try {
+            return toGroundTruth(JSON.parse(row.ai_suggested));
         }
         catch {
             return {};
@@ -257,6 +264,12 @@ export async function registerDatasetsRoutes(app) {
             db.prepare('UPDATE dataset_items SET ground_truth = ? WHERE id = ?')
                 .run(JSON.stringify(toGroundTruth(req.body.groundTruth)), req.params.itemId);
         }
+        // Accept/reject an AI suggestion is just a rewrite of ai_suggested (the
+        // frontend moves a confirmed value into groundTruth in the same PATCH).
+        if (req.body.aiSuggested !== undefined) {
+            db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?')
+                .run(JSON.stringify(toGroundTruth(req.body.aiSuggested)), req.params.itemId);
+        }
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         const updated = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(req.params.itemId);
         return { data: rowToItem(updated) };
@@ -272,6 +285,122 @@ export async function registerDatasetsRoutes(app) {
         db.prepare('DELETE FROM dataset_items WHERE id = ?').run(req.params.itemId);
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         return reply.code(204).send();
+    });
+    // Fill ground-truth suggestions with the dataset's trusted model. Each in-scope
+    // item's file is sent to the model; its JSON answer becomes ai_suggested,
+    // awaiting per-field human confirmation. Never writes ground_truth directly.
+    app.post('/api/datasets/:id/ai-fill', async (req, reply) => {
+        const db = getDb();
+        const row = getDatasetRow(req.params.id);
+        if (!row)
+            return reply.code(404).send({ error: 'Dataset not found' });
+        const dataset = rowToDataset(row, { withItems: true });
+        if (!dataset.trustedModel)
+            return reply.code(400).send({ error: 'set a trusted model on the dataset first' });
+        if (!dataset.schema.length)
+            return reply.code(400).send({ error: 'define the schema first' });
+        const [providerId, ...mp] = dataset.trustedModel.split(':');
+        const model = mp.join(':');
+        const provider = (await getProviders()).find(p => p.id === providerId);
+        if (!provider)
+            return reply.code(400).send({ error: 'the trusted model\'s provider is not configured' });
+        const adapter = getAdapter(provider.type);
+        const scope = req.body.scope === 'all' ? 'all' : 'empty';
+        const onlyIds = Array.isArray(req.body.itemIds) ? new Set(req.body.itemIds) : null;
+        const keys = dataset.schema.map(v => v.key);
+        const instruction = typeof req.body.instruction === 'string' && req.body.instruction.trim()
+            ? req.body.instruction.trim()
+            : 'Extract the schema fields from the file.';
+        const promptText = `${instruction}\n\nReturn a JSON object with exactly these keys: ${keys.join(', ')}. Use null when a value is absent.`;
+        // 'empty' scope skips items whose fields are already all human-confirmed or
+        // already suggested — don't re-spend on what's done.
+        const targets = (dataset.items ?? []).filter(it => {
+            if (onlyIds && !onlyIds.has(it.id))
+                return false;
+            if (!it.attachmentId)
+                return false;
+            if (scope === 'all')
+                return true;
+            return keys.some(k => !(it.groundTruth[k] ?? '').trim() && !(it.aiSuggested[k] ?? '').trim());
+        });
+        const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults };
+        const parseObj = (raw) => { try {
+            return toGroundTruth(JSON.parse(raw));
+        }
+        catch {
+            return {};
+        } };
+        const fillOne = async (it) => {
+            const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null;
+            if (!att)
+                return 'skipped';
+            let attachments;
+            try {
+                const buf = await readFile(uploadPath(att.id, att.mime_type));
+                attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }];
+            }
+            catch {
+                return 'errored';
+            }
+            const convo = [{ role: 'user', content: promptText, attachments }];
+            let text = '';
+            try {
+                for await (const chunk of adapter.stream(convo, { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings })) {
+                    if (chunk.type === 'token')
+                        text += chunk.text;
+                    else if (chunk.type === 'error')
+                        throw new Error(chunk.message);
+                }
+            }
+            catch {
+                return 'errored';
+            }
+            const parsed = parseModelOutput(text);
+            if (!parsed)
+                return 'errored';
+            // Re-read fresh, right before writing: the human may have confirmed a
+            // field during a long fill (TOCTOU) — don't clobber that.
+            const cur = db.prepare('SELECT ground_truth, ai_suggested FROM dataset_items WHERE id = ?').get(it.id);
+            if (!cur)
+                return 'skipped';
+            const gt = parseObj(cur.ground_truth);
+            const merged = parseObj(cur.ai_suggested);
+            let any = false;
+            for (const k of keys) {
+                if ((gt[k] ?? '').trim())
+                    continue; // never touch a confirmed value
+                if (scope === 'empty' && (merged[k] ?? '').trim())
+                    continue; // don't overwrite an unreviewed suggestion
+                const v = parsed[k];
+                if (v == null || typeof v === 'object')
+                    continue; // skip null / object / array garbage
+                const sv = String(v);
+                if (sv.trim() !== '') {
+                    merged[k] = sv;
+                    any = true;
+                }
+            }
+            if (!any)
+                return 'skipped';
+            db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?').run(JSON.stringify(merged), it.id);
+            return 'filled';
+        };
+        // Bounded concurrency: a large dataset must not open one provider stream +
+        // one base64 image per item all at once (memory spike + rate-limit storm).
+        const CONCURRENCY = 5;
+        let filled = 0, skipped = 0, errored = 0;
+        for (let i = 0; i < targets.length; i += CONCURRENCY) {
+            for (const outcome of await Promise.all(targets.slice(i, i + CONCURRENCY).map(fillOne))) {
+                if (outcome === 'filled')
+                    filled++;
+                else if (outcome === 'errored')
+                    errored++;
+                else
+                    skipped++;
+            }
+        }
+        db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
+        return { data: { filled, skipped, errored } };
     });
     // Recent runs for this dataset, newest first — makes the results view survive a
     // reload (the run id isn't only held in the client).
