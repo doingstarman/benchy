@@ -321,6 +321,18 @@ describe('text datasets', () => {
     expect((await req('POST', `/api/datasets/${files.id}/items`, { input: 'hi' })).status).toBe(400)
   })
 
+  it('tools datasets are input-based: create, no-files guard, CSV import, run scores', async () => {
+    const ds = data<{ id: string; type: string }>(await req('POST', '/api/datasets', { name: 'TL', type: 'tools', schema: [{ key: 'tool_name', type: 'text' }, { key: 'arg', type: 'text' }] }))
+    expect(ds.type).toBe('tools')
+    // input-based → rejects a file, allows CSV import
+    expect((await req('POST', `/api/datasets/${ds.id}/items`, { attachmentId: 'x' })).status).toBe(400)
+    expect(data<{ imported: number }>(await req('POST', `/api/datasets/${ds.id}/import-csv`, { csv: 'input,tool_name,arg\nrefund it,refund_order,last' })).imported).toBe(1)
+
+    mockOutput = '{"tool_name":"refund_order","arg":"last"}'
+    const done = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'pick a tool' })).runId)
+    expect(done.results[0].score).toBe(1)
+  })
+
   it('ai-fill labels a text item with no file (text branch)', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
     await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })

@@ -115,7 +115,9 @@ export interface Dataset {
   id: string
   name: string
   note: string | null
-  type: 'files' | 'text'
+  // 'files' = each item is an uploaded file; 'text'/'tools' = each item carries a
+  // text `input` (a task / a tool-calling request) instead of a file.
+  type: 'files' | 'text' | 'tools'
   schema: DatasetVar[]
   trustedModel: string | null
   createdAt: number

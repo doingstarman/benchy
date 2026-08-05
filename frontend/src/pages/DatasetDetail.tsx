@@ -353,7 +353,10 @@ export function DatasetDetail() {
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
-  const isText = dataset?.type === 'text'
+  // Input-based datasets (text + tools) share the whole markup/run path; only
+  // 'files' uses attachments. `isText` = "input-based" (kept the name to avoid churn).
+  const isText = dataset?.type !== 'files'
+  const inputPlaceholderKey = dataset?.type === 'tools' ? 'dataset.toolsInputPlaceholder' : 'dataset.inputPlaceholder'
   // Schema fields the AI proposed that a human hasn't confirmed yet (keys no longer
   // in the schema don't count — they have no row to confirm).
   const aiPending = items.reduce((n, it) => n + dataset.schema.filter(v => !(it.groundTruth[v.key] ?? '').trim() && (it.aiSuggested[v.key] ?? '').trim()).length, 0)
@@ -543,7 +546,7 @@ export function DatasetDetail() {
                           <td style={{ textAlign: 'center', color: done ? 'var(--ok)' : 'var(--text-muted)' }}>{done ? '✓' : '—'}</td>
                           {isText ? (
                             <td>
-                              <input className="dsx-in" disabled={aiFilling} style={{ width: '100%' }} placeholder={tt('dataset.inputPlaceholder')}
+                              <input className="dsx-in" disabled={aiFilling} style={{ width: '100%' }} placeholder={tt(inputPlaceholderKey)}
                                 value={it.input ?? ''}
                                 onChange={e => editInput(it.id, e.target.value)}
                                 onBlur={() => commitInput(items.find(x => x.id === it.id) ?? it)} />
@@ -618,7 +621,7 @@ export function DatasetDetail() {
                 {/* preview / input */}
                 <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', minHeight: 480, display: 'flex', alignItems: isText ? 'stretch' : 'center', justifyContent: 'center', overflow: 'auto' }}>
                   {isText ? (
-                    <textarea className="dsx-in" disabled={aiFilling} placeholder={tt('dataset.inputPlaceholder')}
+                    <textarea className="dsx-in" disabled={aiFilling} placeholder={tt(inputPlaceholderKey)}
                       style={{ width: '100%', minHeight: 480, resize: 'vertical', border: 'none', background: 'transparent', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.6 }}
                       value={focusItem.input ?? ''}
                       onChange={e => editInput(focusItem.id, e.target.value)}

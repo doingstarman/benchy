@@ -35,7 +35,7 @@ export function Datasets() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
-  const [newType, setNewType] = useState<'files' | 'text'>('files')
+  const [newType, setNewType] = useState<'files' | 'text' | 'tools'>('files')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { void reload() }, [])
@@ -79,10 +79,10 @@ export function Datasets() {
               onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} />
             <div style={{ display: 'flex', gap: 3, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2, flex: 'none' }}>
-              {(['files', 'text'] as const).map(ty => (
+              {(['files', 'text', 'tools'] as const).map(ty => (
                 <button key={ty} onClick={() => setNewType(ty)}
                   style={{ border: 'none', borderRadius: 4, padding: '5px 11px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', background: newType === ty ? 'var(--p-bg)' : 'transparent', color: newType === ty ? 'var(--p)' : 'var(--text-muted)' }}>
-                  {ty === 'files' ? t('dataset.typeFiles') : t('dataset.typeText')}
+                  {ty === 'files' ? t('dataset.typeFiles') : ty === 'text' ? t('dataset.typeText') : t('dataset.typeTools')}
                 </button>
               ))}
             </div>

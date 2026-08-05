@@ -137,7 +137,7 @@ function rowToDataset(row: DatasetRow, opts: { items?: DatasetItem[]; withItems?
     id: row.id,
     name: row.name,
     note: row.note,
-    type: row.type === 'text' ? 'text' : 'files',
+    type: row.type === 'text' ? 'text' : row.type === 'tools' ? 'tools' : 'files',
     schema,
     trustedModel: row.trusted_model,
     createdAt: row.created_at,
@@ -193,7 +193,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     const name = req.body.name?.trim()
     if (!name) return reply.code(400).send({ error: 'name is required' })
     const schema = req.body.schema === undefined ? [] : validateSchema(req.body.schema)
-    const type = req.body.type === 'text' ? 'text' : 'files'
+    const type = req.body.type === 'text' ? 'text' : req.body.type === 'tools' ? 'tools' : 'files'
 
     const id = randomUUID()
     const now = Date.now()
@@ -252,8 +252,8 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const { attachmentId } = req.body
       // Keep item shape consistent with the dataset type: text items take input,
       // file items take a file — never both (the run would feed the model both).
-      if (dataset.type === 'text' && attachmentId != null) return reply.code(400).send({ error: 'a text dataset item takes input, not a file' })
-      if (dataset.type !== 'text' && input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
+      if (dataset.type !== 'files' && attachmentId != null) return reply.code(400).send({ error: 'an input-based dataset item takes input, not a file' })
+      if (dataset.type === 'files' && input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
       if (attachmentId !== undefined) {
         const att = getAttachmentRow(attachmentId)
         if (!att) return reply.code(400).send({ error: 'attachmentId does not exist' })
@@ -289,8 +289,8 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       if (!item) return reply.code(404).send({ error: 'Dataset item not found' })
 
       const dsRow = getDatasetRow(req.params.id)
-      if (dsRow?.type === 'text' && req.body.attachmentId != null) return reply.code(400).send({ error: 'a text dataset item takes input, not a file' })
-      if (dsRow && dsRow.type !== 'text' && typeof req.body.input === 'string' && req.body.input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
+      if (dsRow && dsRow.type !== 'files' && req.body.attachmentId != null) return reply.code(400).send({ error: 'an input-based dataset item takes input, not a file' })
+      if (dsRow?.type === 'files' && typeof req.body.input === 'string' && req.body.input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
 
       if (req.body.attachmentId !== undefined) {
         const next = req.body.attachmentId
@@ -338,7 +338,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     const row = getDatasetRow(req.params.id)
     if (!row) return reply.code(404).send({ error: 'Dataset not found' })
     const dataset = rowToDataset(row)
-    if (dataset.type !== 'text') return reply.code(400).send({ error: 'CSV import is only for text datasets' })
+    if (dataset.type === 'files') return reply.code(400).send({ error: 'CSV import is only for text/tools datasets' })
 
     const rows = parseCsv(typeof req.body.csv === 'string' ? req.body.csv : '')
     if (rows.length < 2) return reply.code(400).send({ error: 'CSV needs a header row and at least one data row' })

@@ -121,7 +121,7 @@ export interface ArenaState {
 export const datasetsApi = {
   list: () => apiFetch<Dataset[]>('/api/datasets'),
   get: (id: string) => apiFetch<Dataset>(`/api/datasets/${id}`),
-  create: (body: { name: string; note?: string; schema?: DatasetVar[]; type?: 'files' | 'text' }) =>
+  create: (body: { name: string; note?: string; schema?: DatasetVar[]; type?: 'files' | 'text' | 'tools' }) =>
     apiFetch<Dataset>('/api/datasets', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: { name?: string; note?: string | null; schema?: DatasetVar[]; trustedModel?: string | null }) =>
     apiFetch<Dataset>(`/api/datasets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
