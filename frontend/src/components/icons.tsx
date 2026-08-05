@@ -36,6 +36,11 @@ export function IconCheck(p: IconProps) {
   return <Svg {...p}><path d="M3 8.5l3.5 3.5L13 4.5" /></Svg>
 }
 
+// Up arrow — "a newer build is available to move up to".
+export function IconArrowUp(p: IconProps) {
+  return <Svg {...p}><path d="M8 13V3.5" /><path d="M4 7l4-4 4 4" /></Svg>
+}
+
 export function IconExpand(p: IconProps) {
   return <Svg {...p}><path d="M9.5 2h4.5v4.5" /><path d="M14 2L9 7" /><path d="M6.5 14H2V9.5" /><path d="M2 14l5-5" /></Svg>
 }

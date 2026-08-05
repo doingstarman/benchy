@@ -289,11 +289,16 @@ export const DICT: Record<string, Entry> = {
   // ── update banner ──
   'update.available': { en: 'A new version of benchy is available', ru: 'Доступна новая версия benchy' },
   'update.runCommand': { en: 'Run this in your terminal, then restart benchy:', ru: 'Выполни в терминале и перезапусти benchy:' },
-  'update.showChanges': { en: 'What’s new', ru: 'Что нового' },
-  'update.hideChanges': { en: 'Hide', ru: 'Скрыть' },
   'update.dismiss': { en: 'Dismiss', ru: 'Скрыть' },
   'update.copyCommand': { en: 'Copy command', ru: 'Скопировать команду' },
+  'update.copyShort': { en: 'Copy', ru: 'Скопировать' },
   'update.copied': { en: 'Copied', ru: 'Скопировано' },
+  'update.changesN': { en: '{n} changes', ru: '{n} изменений' },
+  'update.collapse': { en: 'Collapse', ru: 'Свернуть' },
+  'update.releaseNotes': { en: 'release on GitHub →', ru: 'релиз на GitHub →' },
+  'update.updated': { en: 'benchy updated', ru: 'benchy обновлён' },
+  'update.whatsAdded': { en: 'What’s new', ru: 'Что добавлено' },
+  'update.fullChangelog': { en: 'full changelog →', ru: 'весь список изменений →' },
   'settings.aboutText': {
     en: 'benchy — a self-hosted tool for benchmarking LLM models.',
     ru: 'benchy — self-hosted инструмент для бенчмаркинга LLM-моделей.',
