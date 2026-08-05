@@ -304,6 +304,23 @@ describe('text datasets', () => {
     expect((await req('POST', `/api/datasets/${ds.id}/import-csv`, { csv: 'input\nq' })).status).toBe(400)
   })
 
+  it('CSV import never reuses the input column as ground truth', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'CSV2', type: 'text', schema: [{ key: 'sentiment', type: 'text' }, { key: 'answer', type: 'text' }] }))
+    // No explicit "input" column → column 0 (sentiment) is the input; its value must
+    // NOT also become the sentiment ground truth (that would leak the label).
+    expect(data<{ imported: number }>(await req('POST', `/api/datasets/${ds.id}/import-csv`, { csv: 'sentiment,answer\nhappy,yes' })).imported).toBe(1)
+    const item = data<{ items: { input: string | null; groundTruth: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`)).items[0]
+    expect(item.input).toBe('happy')
+    expect(item.groundTruth).toEqual({ answer: 'yes' })
+  })
+
+  it('rejects a cross-type item (file on a text dataset, input on a files dataset)', async () => {
+    const text = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'TX', type: 'text', schema: [] }))
+    expect((await req('POST', `/api/datasets/${text.id}/items`, { attachmentId: 'anything' })).status).toBe(400)
+    const files = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'FL', type: 'files', schema: [] }))
+    expect((await req('POST', `/api/datasets/${files.id}/items`, { input: 'hi' })).status).toBe(400)
+  })
+
   it('ai-fill labels a text item with no file (text branch)', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
     await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })

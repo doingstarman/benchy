@@ -217,8 +217,10 @@ export function DatasetDetail() {
   }
   // Text-type datasets: items carry an `input` string instead of a file.
   async function addTextItem() {
-    const it = await datasetsApi.addItem(id, { input: '' })
-    setItems(prev => [...prev, it])
+    try {
+      const it = await datasetsApi.addItem(id, { input: '' })
+      setItems(prev => [...prev, it])
+    } catch (e) { setAiNote(e instanceof Error ? e.message : String(e)) }
   }
   async function importCsvNow() {
     if (!csvText.trim()) return
@@ -229,6 +231,9 @@ export function DatasetDetail() {
       setItems(ds.items ?? []); setDataset(ds)
       setCsvOpen(false); setCsvText('')
       setAiNote(tt('dataset.csvImported', { n: r.imported }))
+    } catch (e) {
+      // A malformed paste is a normal outcome — surface the server's message.
+      setAiNote(e instanceof Error ? e.message : String(e))
     } finally { setCsvBusy(false) }
   }
   function editInput(itemId: string, value: string) {
@@ -500,7 +505,7 @@ export function DatasetDetail() {
                 <button className="dsx-ghost" style={{ padding: '3px 10px', borderColor: 'var(--p-bd)', color: 'var(--p)' }} onClick={acceptAllAi}>{tt('dataset.confirmAll')}</button>
               </div>
             )}
-            {aiNote && aiPending === 0 && (
+            {aiNote && (
               <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>{aiNote}</div>
             )}
 

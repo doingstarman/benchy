@@ -250,6 +250,10 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
 
       const input = typeof req.body.input === 'string' ? req.body.input : null
       const { attachmentId } = req.body
+      // Keep item shape consistent with the dataset type: text items take input,
+      // file items take a file — never both (the run would feed the model both).
+      if (dataset.type === 'text' && attachmentId != null) return reply.code(400).send({ error: 'a text dataset item takes input, not a file' })
+      if (dataset.type !== 'text' && input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
       if (attachmentId !== undefined) {
         const att = getAttachmentRow(attachmentId)
         if (!att) return reply.code(400).send({ error: 'attachmentId does not exist' })
@@ -283,6 +287,10 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const item = db.prepare('SELECT * FROM dataset_items WHERE id = ? AND dataset_id = ?')
         .get(req.params.itemId, req.params.id) as ItemRow | undefined
       if (!item) return reply.code(404).send({ error: 'Dataset item not found' })
+
+      const dsRow = getDatasetRow(req.params.id)
+      if (dsRow?.type === 'text' && req.body.attachmentId != null) return reply.code(400).send({ error: 'a text dataset item takes input, not a file' })
+      if (dsRow && dsRow.type !== 'text' && typeof req.body.input === 'string' && req.body.input) return reply.code(400).send({ error: 'a files dataset item takes a file, not input' })
 
       if (req.body.attachmentId !== undefined) {
         const next = req.body.attachmentId
@@ -337,18 +345,26 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
 
     const header = rows[0].map(h => h.trim())
     const inputCol = header.findIndex(h => h.toLowerCase() === 'input')
+    const effInputCol = inputCol >= 0 ? inputCol : 0
+    // The input column is NEVER also mapped to ground truth — otherwise a label
+    // column reused as the fallback input would leak its answer into the prompt.
     const keyCols = dataset.schema.map(v => ({ key: v.key, idx: header.indexOf(v.key) }))
+      .filter(kc => kc.idx >= 0 && kc.idx !== effInputCol)
     const insert = db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     let nextIdx = (db.prepare('SELECT COALESCE(MAX(idx), -1) + 1 AS n FROM dataset_items WHERE dataset_id = ?').get(req.params.id) as { n: number }).n
 
-    let imported = 0
-    for (const r of rows.slice(1)) {
-      const input = (inputCol >= 0 ? r[inputCol] : r[0]) ?? ''
-      const gt: Record<string, string> = {}
-      for (const { key, idx } of keyCols) if (idx >= 0 && (r[idx] ?? '').trim() !== '') gt[key] = r[idx]
-      insert.run(randomUUID(), req.params.id, nextIdx++, null, input, JSON.stringify(gt), Date.now())
-      imported++
-    }
+    // One transaction: a mid-import failure rolls back rather than leaving a partial set.
+    const importAll = db.transaction(() => {
+      let n = 0
+      for (const r of rows.slice(1)) {
+        const gt: Record<string, string> = {}
+        for (const { key, idx } of keyCols) if ((r[idx] ?? '').trim() !== '') gt[key] = r[idx]
+        insert.run(randomUUID(), req.params.id, nextIdx++, null, r[effInputCol] ?? '', JSON.stringify(gt), Date.now())
+        n++
+      }
+      return n
+    })
+    const imported = importAll()
     db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
     return { data: { imported } }
   })
