@@ -29,6 +29,7 @@ interface ItemRow {
   dataset_id: string
   idx: number
   attachment_id: string | null
+  input: string | null
   ground_truth: string
   ai_suggested: string
   created_at: number
@@ -106,6 +107,7 @@ function rowToItem(row: ItemRow): DatasetItem {
     idx: row.idx,
     attachmentId: row.attachment_id,
     attachment: row.attachment_id ? attachmentMeta(row.attachment_id) : null,
+    input: row.input,
     groundTruth: (() => { try { return toGroundTruth(JSON.parse(row.ground_truth)) } catch { return {} } })(),
     aiSuggested: (() => { try { return toGroundTruth(JSON.parse(row.ai_suggested)) } catch { return {} } })(),
     createdAt: row.created_at,
@@ -134,7 +136,7 @@ function rowToDataset(row: DatasetRow, opts: { items?: DatasetItem[]; withItems?
     id: row.id,
     name: row.name,
     note: row.note,
-    type: 'files',
+    type: row.type === 'text' ? 'text' : 'files',
     schema,
     trustedModel: row.trusted_model,
     createdAt: row.created_at,
@@ -186,16 +188,17 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     return { data: rowToDataset(row, { withItems: true }) }
   })
 
-  app.post<{ Body: { name?: string; note?: string; schema?: unknown } }>('/api/datasets', async (req, reply) => {
+  app.post<{ Body: { name?: string; note?: string; schema?: unknown; type?: string } }>('/api/datasets', async (req, reply) => {
     const name = req.body.name?.trim()
     if (!name) return reply.code(400).send({ error: 'name is required' })
     const schema = req.body.schema === undefined ? [] : validateSchema(req.body.schema)
+    const type = req.body.type === 'text' ? 'text' : 'files'
 
     const id = randomUUID()
     const now = Date.now()
     getDb().prepare(
       'INSERT INTO datasets (id, name, note, type, schema, trusted_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, name, req.body.note?.trim() || null, 'files', JSON.stringify(schema), null, now, now)
+    ).run(id, name, req.body.note?.trim() || null, type, JSON.stringify(schema), null, now, now)
 
     return reply.code(201).send({ data: rowToDataset(getDatasetRow(id)!, { withItems: true }) })
   })
@@ -237,13 +240,14 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     return reply.code(204).send()
   })
 
-  app.post<{ Params: { id: string }; Body: { attachmentId?: string; groundTruth?: unknown } }>(
+  app.post<{ Params: { id: string }; Body: { attachmentId?: string; groundTruth?: unknown; input?: string } }>(
     '/api/datasets/:id/items',
     async (req, reply) => {
       const db = getDb()
       const dataset = getDatasetRow(req.params.id)
       if (!dataset) return reply.code(404).send({ error: 'Dataset not found' })
 
+      const input = typeof req.body.input === 'string' ? req.body.input : null
       const { attachmentId } = req.body
       if (attachmentId !== undefined) {
         const att = getAttachmentRow(attachmentId)
@@ -262,8 +266,8 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
         .get(req.params.id) as { n: number }).n
       const id = randomUUID()
       db.prepare(
-        'INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(id, req.params.id, nextIdx, attachmentId ?? null, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now())
+        'INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(id, req.params.id, nextIdx, attachmentId ?? null, input, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now())
       db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
 
       const itemRow = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(id) as ItemRow
@@ -271,7 +275,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     },
   )
 
-  app.patch<{ Params: { id: string; itemId: string }; Body: { attachmentId?: string; groundTruth?: unknown; aiSuggested?: unknown } }>(
+  app.patch<{ Params: { id: string; itemId: string }; Body: { attachmentId?: string; groundTruth?: unknown; aiSuggested?: unknown; input?: string } }>(
     '/api/datasets/:id/items/:itemId',
     async (req, reply) => {
       const db = getDb()
@@ -306,6 +310,10 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       if (req.body.aiSuggested !== undefined) {
         db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?')
           .run(JSON.stringify(toGroundTruth(req.body.aiSuggested)), req.params.itemId)
+      }
+      if (req.body.input !== undefined) {
+        db.prepare('UPDATE dataset_items SET input = ? WHERE id = ?')
+          .run(typeof req.body.input === 'string' ? req.body.input : null, req.params.itemId)
       }
       db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
 
@@ -356,7 +364,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       // already suggested — don't re-spend on what's done.
       const targets = (dataset.items ?? []).filter(it => {
         if (onlyIds && !onlyIds.has(it.id)) return false
-        if (!it.attachmentId) return false
+        if (!it.attachmentId && !it.input) return false
         if (scope === 'all') return true
         return keys.some(k => !(it.groundTruth[k] ?? '').trim() && !(it.aiSuggested[k] ?? '').trim())
       })
@@ -365,14 +373,20 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const parseObj = (raw: string): Record<string, string> => { try { return toGroundTruth(JSON.parse(raw)) } catch { return {} } }
 
       const fillOne = async (it: DatasetItem): Promise<'filled' | 'skipped' | 'errored'> => {
-        const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null
-        if (!att) return 'skipped'
-        let attachments
-        try {
-          const buf = await readFile(uploadPath(att.id, att.mime_type))
-          attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }]
-        } catch { return 'errored' }
-        const convo: Message[] = [{ role: 'user', content: promptText, attachments }]
+        // Text item → input in the message; file item → image attachment.
+        let convo: Message[]
+        if (it.input) {
+          convo = [{ role: 'user', content: `${promptText}\n\n${it.input}` }]
+        } else {
+          const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null
+          if (!att) return 'skipped'
+          let attachments
+          try {
+            const buf = await readFile(uploadPath(att.id, att.mime_type))
+            attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }]
+          } catch { return 'errored' }
+          convo = [{ role: 'user', content: promptText, attachments }]
+        }
         let text = ''
         try {
           for await (const chunk of adapter.stream(convo, { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings })) {
@@ -479,21 +493,28 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       // Arena mode is judged by a human, not against ground truth — so no JSON
       // keys hint on the prompt and no auto-scoring pass.
       const mode = req.body.mode === 'arena' ? 'arena' : 'score'
-      const effectivePrompt = mode === 'arena' ? prompt : buildRunPrompt(prompt, dataset.schema)
       const systemPrompt = typeof req.body.systemPrompt === 'string' && req.body.systemPrompt.trim()
         ? req.body.systemPrompt.trim() : undefined
+
+      // Per-item prompt: a text item folds its input into the prompt; a file item
+      // shares the same prompt and rides its image at its own prompt_index. Arena
+      // is human-judged, so no JSON-keys hint.
+      const itemPrompts = items.map(it => {
+        const base = it.input ? `${prompt}\n\n${it.input}` : prompt
+        return mode === 'arena' ? base.trim() : buildRunPrompt(base, dataset.schema)
+      })
 
       const runId = randomUUID()
       const now = Date.now()
       db.prepare(
         'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(
-        runId, JSON.stringify(items.map(() => effectivePrompt)), JSON.stringify(models),
+        runId, JSON.stringify(itemPrompts), JSON.stringify(models),
         'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode,
       )
 
-      // Each item's file rides along at its own prompt_index, so runCell's vision
-      // path loads it exactly as a normal single-prompt attachment would.
+      // File items ride their image at their own prompt_index (runCell's vision
+      // path loads it); text items carry no attachment.
       for (let pi = 0; pi < items.length; pi++) {
         const att = items[pi].attachmentId
         if (att) await cloneAttachmentOnto(att, runId, pi)
@@ -501,7 +522,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
 
       const providers = await getProviders()
       const tasks = items.flatMap((_, pi) =>
-        models.map(m => runCell(runId, pi, effectivePrompt, m, providers, undefined, [], new Map(), [], systemPrompt)))
+        models.map(m => runCell(runId, pi, itemPrompts[pi], m, providers, undefined, [], new Map(), [], systemPrompt)))
 
       if (mode === 'arena') {
         // No scoring — the human judges post-hoc; just finalize when cells settle.

@@ -35,6 +35,7 @@ export function Datasets() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  const [newType, setNewType] = useState<'files' | 'text'>('files')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { void reload() }, [])
@@ -48,7 +49,7 @@ export function Datasets() {
     if (!trimmed) return
     setSaving(true)
     try {
-      const ds = await datasetsApi.create({ name: trimmed })
+      const ds = await datasetsApi.create({ name: trimmed, type: newType })
       nav(`/datasets/${ds.id}`)
     } finally { setSaving(false) }
   }
@@ -73,10 +74,18 @@ export function Datasets() {
         </div>
 
         {creating && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, maxWidth: 520 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, maxWidth: 620, alignItems: 'center' }}>
             <input className="dsx-in" autoFocus value={name} placeholder={t('dataset.cName')}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} />
+            <div style={{ display: 'flex', gap: 3, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2, flex: 'none' }}>
+              {(['files', 'text'] as const).map(ty => (
+                <button key={ty} onClick={() => setNewType(ty)}
+                  style={{ border: 'none', borderRadius: 4, padding: '5px 11px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', background: newType === ty ? 'var(--p-bg)' : 'transparent', color: newType === ty ? 'var(--p)' : 'var(--text-muted)' }}>
+                  {ty === 'files' ? t('dataset.typeFiles') : t('dataset.typeText')}
+                </button>
+              ))}
+            </div>
             <button className="dsx-primary" onClick={() => void create()} disabled={saving || !name.trim()}>{t('dataset.create')}</button>
             <button onClick={() => setCreating(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12 }}>{t('common.cancel')}</button>
           </div>

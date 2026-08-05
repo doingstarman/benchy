@@ -272,6 +272,34 @@ describe('AI-assisted markup', () => {
   })
 })
 
+describe('text datasets', () => {
+  it('creates a text dataset and a text item carrying an input', async () => {
+    const ds = data<{ id: string; type: string }>(await req('POST', '/api/datasets', { name: 'T', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
+    expect(ds.type).toBe('text')
+    const item = data<{ input: string | null }>(await req('POST', `/api/datasets/${ds.id}/items`, { input: '2+2?', groundTruth: { x: '4' } }))
+    expect(item.input).toBe('2+2?')
+  })
+
+  it('runs and scores a text dataset (input folded into the prompt, no attachment)', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T2', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
+    await req('POST', `/api/datasets/${ds.id}/items`, { input: 'q', groundTruth: { x: 'v' } })
+    mockOutput = '{"x":"v"}'
+    const done = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'answer' })).runId)
+    expect(done.results).toHaveLength(1)
+    expect(done.results[0].score).toBe(1)
+  })
+
+  it('ai-fill labels a text item with no file (text branch)', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
+    await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })
+    await req('POST', `/api/datasets/${ds.id}/items`, { input: 'q' })
+    mockOutput = '{"x":"proposed"}'
+    expect(data<{ filled: number }>(await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})).filled).toBe(1)
+    const item = data<{ items: { aiSuggested: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`)).items[0]
+    expect(item.aiSuggested).toEqual({ x: 'proposed' })
+  })
+})
+
 describe('gcUnboundUploads', () => {
   it('sweeps abandoned uploads but keeps dataset-bound files', async () => {
     const db = getDb()

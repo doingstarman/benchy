@@ -212,6 +212,17 @@ export function DatasetDetail() {
     await datasetsApi.removeItem(id, itemId)
     setItems(prev => prev.filter(i => i.id !== itemId))
   }
+  // Text-type datasets: items carry an `input` string instead of a file.
+  async function addTextItem() {
+    const it = await datasetsApi.addItem(id, { input: '' })
+    setItems(prev => [...prev, it])
+  }
+  function editInput(itemId: string, value: string) {
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, input: value } : i))
+  }
+  function commitInput(item: DatasetItem) {
+    void mutateItem(item.id, { input: item.input ?? '' })
+  }
   function editCell(itemId: string, key: string, value: string) {
     // Typing over a field also clears any pending AI suggestion for it — the human
     // value supersedes the machine's.
@@ -224,7 +235,7 @@ export function DatasetDetail() {
   // Serialized, reconciled item write: awaits the item's previous write, PATCHes,
   // then adopts the server's authoritative row; on failure resyncs from the server
   // so the UI can never show a phantom "saved" state.
-  function mutateItem(itemId: string, body: { groundTruth?: Record<string, string>; aiSuggested?: Record<string, string> }): Promise<unknown> {
+  function mutateItem(itemId: string, body: { groundTruth?: Record<string, string>; aiSuggested?: Record<string, string>; input?: string }): Promise<unknown> {
     const prev = writeChain.current.get(itemId) ?? Promise.resolve()
     const next = prev.catch(() => {}).then(async () => {
       try {
@@ -323,6 +334,7 @@ export function DatasetDetail() {
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
+  const isText = dataset?.type === 'text'
   // Schema fields the AI proposed that a human hasn't confirmed yet (keys no longer
   // in the schema don't count — they have no row to confirm).
   const aiPending = items.reduce((n, it) => n + dataset.schema.filter(v => !(it.groundTruth[v.key] ?? '').trim() && (it.aiSuggested[v.key] ?? '').trim()).length, 0)
@@ -440,10 +452,16 @@ export function DatasetDetail() {
                   ✦ {aiFilling ? tt('dataset.aiFilling') : tt('dataset.labelWithAi')}
                 </button>
               )}
-              <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
-              <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
-              </button>
+              {isText ? (
+                <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
+              ) : (
+                <>
+                  <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
+                  <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                    {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
+                  </button>
+                </>
+              )}
             </div>
 
             {aiPending > 0 && (
@@ -463,18 +481,21 @@ export function DatasetDetail() {
               </div>
             ) : items.length === 0 || !focusItem ? (
               <div style={{ padding: '22px 0', textAlign: 'center' }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{tt('dataset.uploadFirst')}</div>
-                <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                  {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
-                </button>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{isText ? tt('dataset.textFirst') : tt('dataset.uploadFirst')}</div>
+                {isText ? (
+                  <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
+                ) : (
+                  <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                    {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
+                  </button>
+                )}
               </div>
             ) : markupView === 'table' ? (
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table className="dsx-table">
                   <thead><tr>
                     <th style={{ width: 34 }} />
-                    <th style={{ width: 40 }} />
-                    <th>{tt('dataset.file')}</th>
+                    {isText ? <th style={{ width: '34%' }}>{tt('dataset.input')}</th> : (<><th style={{ width: 40 }} /><th>{tt('dataset.file')}</th></>)}
                     {dataset.schema.map(v => <th key={v.key}>{v.key}</th>)}
                     <th style={{ width: 28 }} />
                   </tr></thead>
@@ -485,18 +506,29 @@ export function DatasetDetail() {
                       return (
                         <tr key={it.id}>
                           <td style={{ textAlign: 'center', color: done ? 'var(--ok)' : 'var(--text-muted)' }}>{done ? '✓' : '—'}</td>
-                          <td>
-                            {it.attachment ? (
-                              isImg
-                                ? <img className="dsx-thumb" src={uploadsApi.url(it.attachment.id)} alt="" />
-                                : <div className="dsx-pdf">PDF</div>
-                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                          </td>
-                          <td>
-                            {it.attachment
-                              ? <a href={uploadsApi.url(it.attachment.id)} target="_blank" rel="noreferrer" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none' }}>{it.attachment.name}</a>
-                              : <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{String(idx + 1).padStart(3, '0')}</span>}
-                          </td>
+                          {isText ? (
+                            <td>
+                              <input className="dsx-in" disabled={aiFilling} style={{ width: '100%' }} placeholder={tt('dataset.inputPlaceholder')}
+                                value={it.input ?? ''}
+                                onChange={e => editInput(it.id, e.target.value)}
+                                onBlur={() => commitInput(items.find(x => x.id === it.id) ?? it)} />
+                            </td>
+                          ) : (
+                            <>
+                              <td>
+                                {it.attachment ? (
+                                  isImg
+                                    ? <img className="dsx-thumb" src={uploadsApi.url(it.attachment.id)} alt="" />
+                                    : <div className="dsx-pdf">PDF</div>
+                                ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                              </td>
+                              <td>
+                                {it.attachment
+                                  ? <a href={uploadsApi.url(it.attachment.id)} target="_blank" rel="noreferrer" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none' }}>{it.attachment.name}</a>
+                                  : <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{String(idx + 1).padStart(3, '0')}</span>}
+                              </td>
+                            </>
+                          )}
                           {dataset.schema.map(v => {
                             const gt = it.groundTruth[v.key] ?? ''
                             const ai = it.aiSuggested[v.key] ?? ''
@@ -540,7 +572,7 @@ export function DatasetDetail() {
                           {it.attachment
                             ? (isImg ? <img className="dsx-thumb" style={{ width: 24, height: 24 }} src={uploadsApi.url(it.attachment.id)} alt="" /> : <div className="dsx-pdf" style={{ width: 24, height: 24 }}>PDF</div>)
                             : <div style={{ width: 24, height: 24 }} />}
-                          <span style={{ flex: 1, fontSize: 10.5, fontFamily: 'var(--font-mono)', color: active ? 'var(--p)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.attachment?.name ?? String(i + 1).padStart(3, '0')}</span>
+                          <span style={{ flex: 1, fontSize: 10.5, fontFamily: 'var(--font-mono)', color: active ? 'var(--p)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isText ? ((it.input ?? '').trim() || `#${i + 1}`) : (it.attachment?.name ?? String(i + 1).padStart(3, '0'))}</span>
                           <span style={{ fontSize: 11, color: done ? 'var(--ok)' : active ? 'var(--p)' : 'var(--text-muted)' }}>{done ? '✓' : active ? '●' : ''}</span>
                         </button>
                       )
@@ -548,9 +580,15 @@ export function DatasetDetail() {
                   </div>
                 </div>
 
-                {/* preview */}
-                <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-                  {focusItem.attachment
+                {/* preview / input */}
+                <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', minHeight: 480, display: 'flex', alignItems: isText ? 'stretch' : 'center', justifyContent: 'center', overflow: 'auto' }}>
+                  {isText ? (
+                    <textarea className="dsx-in" disabled={aiFilling} placeholder={tt('dataset.inputPlaceholder')}
+                      style={{ width: '100%', minHeight: 480, resize: 'vertical', border: 'none', background: 'transparent', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.6 }}
+                      value={focusItem.input ?? ''}
+                      onChange={e => editInput(focusItem.id, e.target.value)}
+                      onBlur={() => commitInput(items.find(x => x.id === focusItem.id) ?? focusItem)} />
+                  ) : focusItem.attachment
                     ? (focusItem.attachment.mimeType.startsWith('image/')
                       ? <img src={uploadsApi.url(focusItem.attachment.id)} alt="" style={{ maxWidth: '100%', maxHeight: 620, objectFit: 'contain', display: 'block' }} />
                       : <iframe title="preview" src={uploadsApi.url(focusItem.attachment.id)} style={{ width: '100%', height: 620, border: 'none', background: '#fff' }} />)
