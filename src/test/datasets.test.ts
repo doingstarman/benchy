@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createServer } from '../server.js'
 import { closeDb, getDb } from '../db/index.js'
-import { gcUnboundUploads } from '../api/uploads.js'
+import { gcUnboundUploads, getUploadsDir, uploadPath } from '../api/uploads.js'
 import type { FastifyInstance } from 'fastify'
 
 // The model's answer is deterministic and set per test, so scoring is exact.
@@ -200,6 +200,49 @@ describe('attachment ownership', () => {
 
     const dup = await req('PATCH', `/api/datasets/${d.id}/items/${item2.id}`, { attachmentId: att })
     expect(dup.status).toBe(400)
+  })
+})
+
+describe('AI-assisted markup', () => {
+  // An on-disk attachment bound to an item, so ai-fill's vision read succeeds.
+  function seedItemWithFile(datasetId: string): Promise<string> {
+    const attId = randomUUID()
+    getDb().prepare('INSERT INTO attachments (id, mime_type, name, size, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(attId, 'image/png', 'scan.png', 8, Date.now())
+    mkdirSync(getUploadsDir(), { recursive: true })
+    writeFileSync(uploadPath(attId, 'image/png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    return req('POST', `/api/datasets/${datasetId}/items`, { attachmentId: attId }).then(r => data<{ id: string }>(r).id)
+  }
+
+  it('trusted model proposes values into aiSuggested, not groundTruth', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'AI', schema: [{ key: 'x', type: 'text' }] }))
+    await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })
+    const itemId = await seedItemWithFile(ds.id)
+
+    mockOutput = '{"x": "proposed"}'
+    const r = await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})
+    expect(data<{ filled: number }>(r).filled).toBe(1)
+
+    const detail = data<{ items: { id: string; groundTruth: Record<string, string>; aiSuggested: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`))
+    const item = detail.items.find(i => i.id === itemId)!
+    expect(item.aiSuggested).toEqual({ x: 'proposed' }) // awaiting confirmation
+    expect(item.groundTruth.x ?? '').toBe('')            // NOT auto-confirmed
+  })
+
+  it('rejects ai-fill when no trusted model is set', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'AI2', schema: [{ key: 'x', type: 'text' }] }))
+    await seedItemWithFile(ds.id)
+    expect((await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})).status).toBe(400)
+  })
+
+  it('confirming a suggestion moves it into groundTruth (PATCH)', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'AI3', schema: [{ key: 'x', type: 'text' }] }))
+    const itemId = data<{ id: string }>(await req('POST', `/api/datasets/${ds.id}/items`, { groundTruth: {} })).id
+    // Human accepts: value moves to groundTruth, cleared from aiSuggested.
+    const upd = data<{ groundTruth: Record<string, string>; aiSuggested: Record<string, string> }>(
+      await req('PATCH', `/api/datasets/${ds.id}/items/${itemId}`, { groundTruth: { x: 'confirmed' }, aiSuggested: {} }))
+    expect(upd.groundTruth).toEqual({ x: 'confirmed' })
+    expect(upd.aiSuggested).toEqual({})
   })
 })
 

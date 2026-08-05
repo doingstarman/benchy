@@ -100,6 +100,9 @@ export interface DatasetItem {
   attachmentId: string | null
   attachment?: AttachmentMeta | null
   groundTruth: Record<string, string>
+  // Values the trusted model proposed, awaiting human confirmation. A key here
+  // that isn't yet in groundTruth renders as an AI suggestion (✦).
+  aiSuggested: Record<string, string>
   createdAt: number
 }
 

@@ -1,14 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { getDb } from '../db/index.js'
-import { getProviders } from '../config.js'
-import { runCell, finalizeRun } from './benchmark.js'
+import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js'
+import { runCell, finalizeRun, getAdapter } from './benchmark.js'
 import {
   getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto,
-  deleteAttachment, deleteAttachmentsForDataset,
+  deleteAttachment, deleteAttachmentsForDataset, uploadPath,
 } from './uploads.js'
-import { scoreResult } from '../scoring.js'
+import { scoreResult, parseModelOutput } from '../scoring.js'
 import { computeStandings } from '../arena.js'
+import type { Message } from '../adapters/base.js'
 import type { AttachmentMeta, ArenaVerdict, Dataset, DatasetItem, DatasetVar, DatasetVarType } from '../types.js'
 
 interface DatasetRow {
@@ -28,6 +30,7 @@ interface ItemRow {
   idx: number
   attachment_id: string | null
   ground_truth: string
+  ai_suggested: string
   created_at: number
 }
 
@@ -104,6 +107,7 @@ function rowToItem(row: ItemRow): DatasetItem {
     attachmentId: row.attachment_id,
     attachment: row.attachment_id ? attachmentMeta(row.attachment_id) : null,
     groundTruth: (() => { try { return toGroundTruth(JSON.parse(row.ground_truth)) } catch { return {} } })(),
+    aiSuggested: (() => { try { return toGroundTruth(JSON.parse(row.ai_suggested)) } catch { return {} } })(),
     createdAt: row.created_at,
   }
 }
@@ -267,7 +271,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     },
   )
 
-  app.patch<{ Params: { id: string; itemId: string }; Body: { attachmentId?: string; groundTruth?: unknown } }>(
+  app.patch<{ Params: { id: string; itemId: string }; Body: { attachmentId?: string; groundTruth?: unknown; aiSuggested?: unknown } }>(
     '/api/datasets/:id/items/:itemId',
     async (req, reply) => {
       const db = getDb()
@@ -297,6 +301,12 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
         db.prepare('UPDATE dataset_items SET ground_truth = ? WHERE id = ?')
           .run(JSON.stringify(toGroundTruth(req.body.groundTruth)), req.params.itemId)
       }
+      // Accept/reject an AI suggestion is just a rewrite of ai_suggested (the
+      // frontend moves a confirmed value into groundTruth in the same PATCH).
+      if (req.body.aiSuggested !== undefined) {
+        db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?')
+          .run(JSON.stringify(toGroundTruth(req.body.aiSuggested)), req.params.itemId)
+      }
       db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
 
       const updated = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(req.params.itemId) as ItemRow
@@ -314,6 +324,80 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
     return reply.code(204).send()
   })
+
+  // Fill ground-truth suggestions with the dataset's trusted model. Each in-scope
+  // item's file is sent to the model; its JSON answer becomes ai_suggested,
+  // awaiting per-field human confirmation. Never writes ground_truth directly.
+  app.post<{ Params: { id: string }; Body: { scope?: string; instruction?: string; itemIds?: string[] } }>(
+    '/api/datasets/:id/ai-fill',
+    async (req, reply) => {
+      const db = getDb()
+      const row = getDatasetRow(req.params.id)
+      if (!row) return reply.code(404).send({ error: 'Dataset not found' })
+      const dataset = rowToDataset(row, { withItems: true })
+      if (!dataset.trustedModel) return reply.code(400).send({ error: 'set a trusted model on the dataset first' })
+      if (!dataset.schema.length) return reply.code(400).send({ error: 'define the schema first' })
+
+      const [providerId, ...mp] = dataset.trustedModel.split(':')
+      const model = mp.join(':')
+      const provider = (await getProviders()).find(p => p.id === providerId)
+      if (!provider) return reply.code(400).send({ error: 'the trusted model\'s provider is not configured' })
+      const adapter = getAdapter(provider.type)
+
+      const scope = req.body.scope === 'all' ? 'all' : 'empty'
+      const onlyIds = Array.isArray(req.body.itemIds) ? new Set(req.body.itemIds) : null
+      const keys = dataset.schema.map(v => v.key)
+      const instruction = typeof req.body.instruction === 'string' && req.body.instruction.trim()
+        ? req.body.instruction.trim()
+        : 'Extract the schema fields from the file.'
+      const promptText = `${instruction}\n\nReturn a JSON object with exactly these keys: ${keys.join(', ')}. Use null when a value is absent.`
+
+      // 'empty' scope skips items whose fields are already all human-confirmed or
+      // already suggested — don't re-spend on what's done.
+      const targets = (dataset.items ?? []).filter(it => {
+        if (onlyIds && !onlyIds.has(it.id)) return false
+        if (!it.attachmentId) return false
+        if (scope === 'all') return true
+        return keys.some(k => !(it.groundTruth[k] ?? '').trim() && !(it.aiSuggested[k] ?? '').trim())
+      })
+
+      const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults }
+      let filled = 0
+      await Promise.all(targets.map(async it => {
+        const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null
+        if (!att) return
+        let attachments
+        try {
+          const buf = await readFile(uploadPath(att.id, att.mime_type))
+          attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }]
+        } catch { return }
+        const convo: Message[] = [{ role: 'user', content: promptText, attachments }]
+        let text = ''
+        try {
+          for await (const chunk of adapter.stream(convo, { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings })) {
+            if (chunk.type === 'token') text += chunk.text
+            else if (chunk.type === 'error') throw new Error(chunk.message)
+          }
+        } catch { return }
+        const parsed = parseModelOutput(text)
+        if (!parsed) return
+        const merged = { ...it.aiSuggested }
+        let any = false
+        for (const k of keys) {
+          // Never overwrite a human-confirmed value.
+          if ((it.groundTruth[k] ?? '').trim()) continue
+          const v = parsed[k]
+          if (v != null && String(v).trim() !== '') { merged[k] = String(v); any = true }
+        }
+        if (any) {
+          db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?').run(JSON.stringify(merged), it.id)
+          filled++
+        }
+      }))
+      db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
+      return { data: { filled } }
+    },
+  )
 
   // Recent runs for this dataset, newest first — makes the results view survive a
   // reload (the run id isn't only held in the client).

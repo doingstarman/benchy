@@ -90,8 +90,11 @@ CREATE TABLE IF NOT EXISTS dataset_items (
   idx INTEGER NOT NULL,
   -- The item's file, an attachment row (unbound: run_id NULL, dataset_id set).
   attachment_id TEXT,
-  -- JSON { key: value } — the human/AI ground truth for this item.
+  -- JSON { key: value } — the human-confirmed ground truth for this item.
   ground_truth TEXT NOT NULL DEFAULT '{}',
+  -- JSON { key: value } — values proposed by the trusted model, awaiting human
+  -- confirmation. Confirming a key moves it into ground_truth; rejecting clears it.
+  ai_suggested TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL,
   FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
@@ -165,6 +168,8 @@ export async function initDb(path?: string): Promise<void> {
     // A dataset run's judging mode: NULL/'score' = auto per-field scoring,
     // 'arena' = human pairwise judging with Elo standings.
     'ALTER TABLE runs ADD COLUMN mode TEXT',
+    // Trusted-model suggestions awaiting human confirmation, per item.
+    "ALTER TABLE dataset_items ADD COLUMN ai_suggested TEXT NOT NULL DEFAULT '{}'",
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

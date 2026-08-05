@@ -121,6 +121,7 @@ export function DatasetDetail() {
   const [tab, setTab] = useState<Tab>('schema')
   const [markupView, setMarkupView] = useState<'focus' | 'table'>('focus')
   const [focusIdx, setFocusIdx] = useState(0)
+  const [aiFilling, setAiFilling] = useState(false)
 
   // run state
   const [prompt, setPrompt] = useState('')
@@ -208,10 +209,48 @@ export function DatasetDetail() {
     setItems(prev => prev.filter(i => i.id !== itemId))
   }
   function editCell(itemId: string, key: string, value: string) {
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, groundTruth: { ...i.groundTruth, [key]: value } } : i))
+    // Typing over a field also clears any pending AI suggestion for it — the human
+    // value supersedes the machine's.
+    setItems(prev => prev.map(i => {
+      if (i.id !== itemId) return i
+      const ai = { ...i.aiSuggested }; delete ai[key]
+      return { ...i, groundTruth: { ...i.groundTruth, [key]: value }, aiSuggested: ai }
+    }))
   }
   async function commitCell(item: DatasetItem) {
-    await datasetsApi.updateItem(id, item.id, { groundTruth: item.groundTruth })
+    await datasetsApi.updateItem(id, item.id, { groundTruth: item.groundTruth, aiSuggested: item.aiSuggested })
+  }
+
+  // ── AI-assisted markup (trusted model → ai_suggested → human confirms) ──
+  async function runAiFill() {
+    if (!trusted) return
+    setAiFilling(true)
+    try {
+      await datasetsApi.aiFill(id, { scope: 'empty' })
+      const ds = await datasetsApi.get(id)
+      setItems(ds.items ?? []); setDataset(ds)
+    } finally { setAiFilling(false) }
+  }
+  function applyItem(itemId: string, gt: Record<string, string>, ai: Record<string, string>) {
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, groundTruth: gt, aiSuggested: ai } : i))
+    void datasetsApi.updateItem(id, itemId, { groundTruth: gt, aiSuggested: ai })
+  }
+  function acceptAi(item: DatasetItem, key: string) {
+    const ai = { ...item.aiSuggested }; const v = ai[key]; delete ai[key]
+    applyItem(item.id, { ...item.groundTruth, [key]: v }, ai)
+  }
+  function rejectAi(item: DatasetItem, key: string) {
+    const ai = { ...item.aiSuggested }; delete ai[key]
+    applyItem(item.id, item.groundTruth, ai)
+  }
+  function acceptAllAi() {
+    for (const it of items) {
+      const keys = Object.keys(it.aiSuggested).filter(k => !(it.groundTruth[k] ?? '').trim())
+      if (!keys.length) continue
+      const gt = { ...it.groundTruth }; const ai = { ...it.aiSuggested }
+      for (const k of keys) { gt[k] = ai[k]; delete ai[k] }
+      applyItem(it.id, gt, ai)
+    }
   }
   // Persist the given item's ground truth, then move focus to index `i`.
   async function goToFocus(i: number) {
@@ -261,6 +300,8 @@ export function DatasetDetail() {
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
+  // Fields the AI proposed that a human hasn't confirmed yet.
+  const aiPending = items.reduce((n, it) => n + Object.keys(it.aiSuggested).filter(k => !(it.groundTruth[k] ?? '').trim()).length, 0)
 
   return (
     <div className="dsx" style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: '22px 32px' }}>
@@ -368,11 +409,25 @@ export function DatasetDetail() {
                   ))}
                 </div>
               )}
+              {dataset.schema.length > 0 && items.length > 0 && (
+                <button onClick={() => void runAiFill()} disabled={aiFilling || !trusted}
+                  title={!trusted ? tt('dataset.aiNoTrusted') : undefined}
+                  style={{ border: '0.5px solid var(--p-bd)', background: 'var(--p-bg)', color: 'var(--p)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 12, fontFamily: 'var(--font-mono)', cursor: trusted && !aiFilling ? 'pointer' : 'default', opacity: !trusted ? 0.55 : 1, whiteSpace: 'nowrap' }}>
+                  ✦ {aiFilling ? tt('dataset.aiFilling') : tt('dataset.labelWithAi')}
+                </button>
+              )}
               <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
               <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
               </button>
             </div>
+
+            {aiPending > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 12px', fontSize: 11, color: 'var(--p)' }}>
+                <span>✦ {tt('dataset.aiFilled', { n: aiPending })} · {tt('dataset.awaitConfirm')}</span>
+                <button className="dsx-ghost" style={{ padding: '3px 10px', borderColor: 'var(--p-bd)', color: 'var(--p)' }} onClick={acceptAllAi}>{tt('dataset.confirmAll')}</button>
+              </div>
+            )}
 
             {dataset.schema.length === 0 ? (
               <div style={{ padding: '22px 0', textAlign: 'center' }}>
@@ -415,15 +470,20 @@ export function DatasetDetail() {
                               ? <a href={uploadsApi.url(it.attachment.id)} target="_blank" rel="noreferrer" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none' }}>{it.attachment.name}</a>
                               : <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{String(idx + 1).padStart(3, '0')}</span>}
                           </td>
-                          {dataset.schema.map(v => (
+                          {dataset.schema.map(v => {
+                            const gt = it.groundTruth[v.key] ?? ''
+                            const ai = it.aiSuggested[v.key] ?? ''
+                            const isAi = !gt.trim() && !!ai.trim()
+                            return (
                             <td key={v.key}>
-                              <input className="dsx-in" style={{ width: '100%', minWidth: 92 }} placeholder={tt('dataset.typeHere')}
-                                value={it.groundTruth[v.key] ?? ''}
+                              <input className="dsx-in" style={{ width: '100%', minWidth: 92, ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
+                                value={gt || ai}
                                 onChange={e => editCell(it.id, v.key, e.target.value)}
                                 onBlur={() => void commitCell(items.find(x => x.id === it.id) ?? it)}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+                                onKeyDown={e => { if (e.key === 'Enter') { if (isAi) acceptAi(it, v.key); else (e.target as HTMLInputElement).blur() } }} />
                             </td>
-                          ))}
+                            )
+                          })}
                           <td><button className="dsx-x" onClick={() => void removeItem(it.id)}>×</button></td>
                         </tr>
                       )
@@ -433,6 +493,7 @@ export function DatasetDetail() {
                 <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: 'var(--text-muted)', alignItems: 'center' }}>
                   <span className="dsx-label">{tt('dataset.legend')}</span>
                   <span style={{ color: 'var(--ok)' }}>✓ {tt('dataset.legendHuman')}</span>
+                  <span style={{ color: 'var(--p)' }}>✦ {tt('dataset.legendAi')}</span>
                   <span>— {tt('dataset.legendEmpty')}</span>
                 </div>
               </div>
@@ -476,20 +537,31 @@ export function DatasetDetail() {
                     <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{Math.min(focusIdx, items.length - 1) + 1} / {items.length}</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {dataset.schema.map(v => (
+                    {dataset.schema.map(v => {
+                      const gt = focusItem.groundTruth[v.key] ?? ''
+                      const ai = focusItem.aiSuggested[v.key] ?? ''
+                      const isAi = !gt.trim() && !!ai.trim()
+                      return (
                       <div key={v.key}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
                           <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{v.key}</span>
                           <span style={{ fontSize: 9, color: 'var(--text-muted)', border: '0.5px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{v.type}</span>
                         </div>
-                        <input className="dsx-in" style={{ width: '100%' }} placeholder={tt('dataset.typeHere')}
-                          value={focusItem.groundTruth[v.key] ?? ''}
+                        <input className="dsx-in" style={{ width: '100%', ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
+                          value={gt || ai}
                           onChange={e => editCell(focusItem.id, v.key, e.target.value)}
                           onBlur={() => void commitCell(items.find(x => x.id === focusItem.id) ?? focusItem)}
-                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
-                        {v.desc && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{v.desc}</div>}
+                          onKeyDown={e => { if (e.key === 'Enter') { if (isAi) acceptAi(focusItem, v.key); else (e.target as HTMLInputElement).blur() } }} />
+                        {isAi ? (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 3 }}>
+                            <span style={{ fontSize: 10, color: 'var(--p)', flex: 1 }}>✦ {tt('dataset.legendAi')}</span>
+                            <button onClick={() => acceptAi(focusItem, v.key)} title={tt('dataset.legendHuman')} style={{ border: '0.5px solid var(--ok)', background: 'transparent', color: 'var(--ok)', borderRadius: 4, padding: '1px 8px', fontSize: 11, cursor: 'pointer' }}>✓</button>
+                            <button onClick={() => rejectAi(focusItem, v.key)} style={{ border: '0.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 4, padding: '1px 8px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                          </div>
+                        ) : v.desc ? <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{v.desc}</div> : null}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
                     <button className="dsx-primary" style={{ flex: 1 }} onClick={() => void goToFocus(focusIdx + 1)}>
