@@ -120,6 +120,23 @@ export interface Dataset {
   items?: DatasetItem[]
 }
 
+// One human verdict for an item of an arena run: which model answered best and,
+// optionally, worst — or the item was skipped. Elo/W-L standings are derived
+// from these, never stored.
+export interface ArenaVerdict {
+  promptIndex: number
+  bestModel: string | null
+  worstModel: string | null
+  skipped: boolean
+}
+
+export interface ArenaStanding {
+  model: string
+  elo: number
+  wins: number   // times picked best
+  losses: number // times picked worst
+}
+
 // A registered MCP server. Selected on a run, benchy connects for the run's
 // duration, lists its tools, and disconnects when the run finishes.
 export interface McpServer {

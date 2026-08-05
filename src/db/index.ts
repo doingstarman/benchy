@@ -97,6 +97,20 @@ CREATE TABLE IF NOT EXISTS dataset_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dataset_items_dataset ON dataset_items(dataset_id, idx);
+
+-- One human verdict per item of an arena run: which model answered best (and,
+-- optionally, worst) for that item, or the item was skipped. Elo/win-loss
+-- standings are DERIVED from these rows on read, so nothing else is persisted.
+CREATE TABLE IF NOT EXISTS dataset_run_verdicts (
+  run_id TEXT NOT NULL,
+  prompt_index INTEGER NOT NULL,
+  best_model TEXT,
+  worst_model TEXT,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, prompt_index),
+  FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
 `
 
 let db: Database.Database | null = null
@@ -148,6 +162,9 @@ export async function initDb(path?: string): Promise<void> {
     'ALTER TABLE runs ADD COLUMN dataset_id TEXT',
     'ALTER TABLE results ADD COLUMN score REAL',
     'ALTER TABLE results ADD COLUMN score_detail TEXT',
+    // A dataset run's judging mode: NULL/'score' = auto per-field scoring,
+    // 'arena' = human pairwise judging with Elo standings.
+    'ALTER TABLE runs ADD COLUMN mode TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

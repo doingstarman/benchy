@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useT, t } from '../i18n'
-import { datasetsApi, providersApi, runsApi, uploadsApi, useSSE } from '../api'
+import { datasetsApi, providersApi, runsApi, uploadsApi, useSSE, type ArenaState } from '../api'
 import type { Dataset, DatasetItem, DatasetVar, DatasetVarType, Provider, Result } from '../../../src/types'
 
 const VAR_TYPES: DatasetVarType[] = ['text', 'date', 'number']
@@ -85,6 +85,19 @@ function buildMatrix(results: Result[], schema: DatasetVar[]): MatrixRow[] {
 
 const pct = (v: number | null): string => v == null ? '—' : `${Math.round(v * 100)}%`
 
+function hashStr(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return h
+}
+
+// Blind mode shuffles the answer cards deterministically per item so card
+// position can't leak the model — same item always shuffles the same way.
+function orderAnswers(results: Result[], promptIndex: number, blind: boolean): Result[] {
+  if (!blind) return [...results].sort((a, b) => a.model.localeCompare(b.model))
+  return [...results].sort((a, b) => hashStr(`${promptIndex}:${a.model}`) - hashStr(`${promptIndex}:${b.model}`))
+}
+
 // Heat tint for a matrix cell — green high, amber mid, red low, muted when unscored.
 function heat(v: number | null): { color: string; background: string } {
   if (v == null) return { color: 'var(--text-muted)', background: 'transparent' }
@@ -106,6 +119,8 @@ export function DatasetDetail() {
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('schema')
+  const [markupView, setMarkupView] = useState<'focus' | 'table'>('focus')
+  const [focusIdx, setFocusIdx] = useState(0)
 
   // run state
   const [prompt, setPrompt] = useState('')
@@ -113,6 +128,12 @@ export function DatasetDetail() {
   const [runId, setRunId] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Result[] | null>(null)
   const [starting, setStarting] = useState(false)
+  // arena (benchmark) state
+  const [runMode, setRunMode] = useState<'score' | 'arena'>('score')
+  const [viewRunId, setViewRunId] = useState<string | null>(null)
+  const [arena, setArena] = useState<ArenaState | null>(null)
+  const [blind, setBlind] = useState(false)
+  const [curWorst, setCurWorst] = useState<string | null>(null)
 
   useEffect(() => { void load() }, [id])
   async function load() {
@@ -128,6 +149,11 @@ export function DatasetDetail() {
     if (last && last.status !== 'running') {
       const full = await runsApi.get(last.id)
       setRunResults(full.results)
+      setViewRunId(last.id)
+      if (last.mode === 'arena') {
+        setRunMode('arena')
+        setArena(await datasetsApi.arena(id, last.id))
+      }
     }
   }
 
@@ -137,7 +163,11 @@ export function DatasetDetail() {
   const labeledCount = useMemo(() => items.filter(i => isItemLabeled(i, dataset?.schema ?? [])).length, [items, dataset])
 
   useSSE(runId, e => {
-    if (e.event === 'run_done') void runsApi.get(e.runId).then(r => setRunResults(r.results))
+    if (e.event !== 'run_done') return
+    void runsApi.get(e.runId).then(r => {
+      setRunResults(r.results)
+      if (runMode === 'arena') void datasetsApi.arena(id, e.runId).then(setArena)
+    })
   })
 
   // ── schema ──
@@ -183,6 +213,12 @@ export function DatasetDetail() {
   async function commitCell(item: DatasetItem) {
     await datasetsApi.updateItem(id, item.id, { groundTruth: item.groundTruth })
   }
+  // Persist the given item's ground truth, then move focus to index `i`.
+  async function goToFocus(i: number) {
+    const cur = items[Math.min(focusIdx, items.length - 1)]
+    if (cur) await commitCell(cur)
+    setFocusIdx(Math.max(0, Math.min(i, items.length - 1)))
+  }
 
   // ── run ──
   async function startRun() {
@@ -190,16 +226,41 @@ export function DatasetDetail() {
     if (!chosen.length || !prompt.trim()) return
     setStarting(true)
     setRunResults(null)
+    setArena(null)
+    setCurWorst(null)
     try {
-      const { runId: newRun } = await datasetsApi.run(id, { models: chosen, prompt: prompt.trim() })
+      const { runId: newRun } = await datasetsApi.run(id, { models: chosen, prompt: prompt.trim(), mode: runMode })
       setRunId(newRun)
+      setViewRunId(newRun)
     } finally { setStarting(false) }
+  }
+
+  // ── arena judging ──
+  const answersFor = (i: number): Result[] => (runResults ?? []).filter(r => r.promptIndex === i)
+
+  async function judge(bestModel: string) {
+    if (!viewRunId || !arena || arena.nextIndex < 0) return
+    const worstModel = curWorst && curWorst !== bestModel ? curWorst : undefined
+    await datasetsApi.putVerdict(id, viewRunId, arena.nextIndex, { bestModel, worstModel })
+    setArena(await datasetsApi.arena(id, viewRunId))
+    setCurWorst(null)
+  }
+  async function skipItem() {
+    if (!viewRunId || !arena || arena.nextIndex < 0) return
+    await datasetsApi.putVerdict(id, viewRunId, arena.nextIndex, { skipped: true })
+    setArena(await datasetsApi.arena(id, viewRunId))
+    setCurWorst(null)
+  }
+  async function exitArena() {
+    if (viewRunId) await runsApi.save(viewRunId, true).catch(() => {})
+    nav('/datasets')
   }
 
   if (!dataset) return <div className="dsx" style={{ padding: '28px 32px', fontSize: 12, color: 'var(--text-muted)' }}><style>{CSS}</style>{t('common.loading')}</div>
 
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
+  const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
 
   return (
     <div className="dsx" style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: '22px 32px' }}>
@@ -289,14 +350,24 @@ export function DatasetDetail() {
           </div>
         )}
 
-        {/* ── Markup tab ── */}
+        {/* ── Markup tab (focus-first) ── */}
         {tab === 'markup' && (
           <div className="dsx-sec">
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
               <div style={{ flex: 1 }}>
                 <div className="dsx-h">{tt('dataset.markup')}</div>
                 <div className="dsx-sub">{tt('dataset.markupSub')}</div>
               </div>
+              {dataset.schema.length > 0 && items.length > 0 && (
+                <div style={{ display: 'flex', gap: 4, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
+                  {(['focus', 'table'] as const).map(v => (
+                    <button key={v} onClick={() => setMarkupView(v)}
+                      style={{ border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', background: markupView === v ? 'var(--p-bg)' : 'transparent', color: markupView === v ? 'var(--p)' : 'var(--text-muted)' }}>
+                      {v === 'focus' ? tt('dataset.viewFocus') : tt('dataset.viewTable')}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
               <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
@@ -304,10 +375,18 @@ export function DatasetDetail() {
             </div>
 
             {dataset.schema.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 0' }}>{tt('dataset.noSchema')}</div>
-            ) : items.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 0' }}>{tt('dataset.noItems')}</div>
-            ) : (
+              <div style={{ padding: '22px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{tt('dataset.noSchema')}</div>
+                <button className="dsx-primary" onClick={() => setTab('schema')}>{tt('dataset.goToSchema')}</button>
+              </div>
+            ) : items.length === 0 || !focusItem ? (
+              <div style={{ padding: '22px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{tt('dataset.uploadFirst')}</div>
+                <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                  {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
+                </button>
+              </div>
+            ) : markupView === 'table' ? (
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table className="dsx-table">
                   <thead><tr>
@@ -357,6 +436,72 @@ export function DatasetDetail() {
                   <span>— {tt('dataset.legendEmpty')}</span>
                 </div>
               </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr 300px', gap: 16, marginTop: 10, alignItems: 'start' }}>
+                {/* queue */}
+                <div>
+                  <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.queue')}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 520, overflowY: 'auto' }}>
+                    {items.map((it, i) => {
+                      const done = isItemLabeled(it, dataset.schema)
+                      const active = i === Math.min(focusIdx, items.length - 1)
+                      const isImg = it.attachment?.mimeType.startsWith('image/')
+                      return (
+                        <button key={it.id} onClick={() => void goToFocus(i)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left', border: `0.5px solid ${active ? 'var(--p-bd)' : 'var(--border)'}`, background: active ? 'var(--p-bg)' : 'var(--bg-base)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', cursor: 'pointer' }}>
+                          {it.attachment
+                            ? (isImg ? <img className="dsx-thumb" style={{ width: 24, height: 24 }} src={uploadsApi.url(it.attachment.id)} alt="" /> : <div className="dsx-pdf" style={{ width: 24, height: 24 }}>PDF</div>)
+                            : <div style={{ width: 24, height: 24 }} />}
+                          <span style={{ flex: 1, fontSize: 10.5, fontFamily: 'var(--font-mono)', color: active ? 'var(--p)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.attachment?.name ?? String(i + 1).padStart(3, '0')}</span>
+                          <span style={{ fontSize: 11, color: done ? 'var(--ok)' : active ? 'var(--p)' : 'var(--text-muted)' }}>{done ? '✓' : active ? '●' : ''}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* preview */}
+                <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+                  {focusItem.attachment
+                    ? (focusItem.attachment.mimeType.startsWith('image/')
+                      ? <img src={uploadsApi.url(focusItem.attachment.id)} alt="" style={{ maxWidth: '100%', maxHeight: 620, objectFit: 'contain', display: 'block' }} />
+                      : <iframe title="preview" src={uploadsApi.url(focusItem.attachment.id)} style={{ width: '100%', height: 620, border: 'none', background: '#fff' }} />)
+                    : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{tt('dataset.noPreview')}</span>}
+                </div>
+
+                {/* variables */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                    <span className="dsx-label">{tt('dataset.varsOfSchema')}</span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{Math.min(focusIdx, items.length - 1) + 1} / {items.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {dataset.schema.map(v => (
+                      <div key={v.key}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{v.key}</span>
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)', border: '0.5px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{v.type}</span>
+                        </div>
+                        <input className="dsx-in" style={{ width: '100%' }} placeholder={tt('dataset.typeHere')}
+                          value={focusItem.groundTruth[v.key] ?? ''}
+                          onChange={e => editCell(focusItem.id, v.key, e.target.value)}
+                          onBlur={() => void commitCell(items.find(x => x.id === focusItem.id) ?? focusItem)}
+                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+                        {v.desc && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{v.desc}</div>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                    <button className="dsx-primary" style={{ flex: 1 }} disabled={focusIdx >= items.length - 1} onClick={() => void goToFocus(focusIdx + 1)}>
+                      ✓ {tt('dataset.saveNext')}
+                    </button>
+                    <button className="dsx-ghost" disabled={focusIdx >= items.length - 1} onClick={() => setFocusIdx(Math.min(focusIdx + 1, items.length - 1))}>
+                      {tt('dataset.skipItem')}
+                    </button>
+                  </div>
+                  <button className="dsx-x" style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }} onClick={() => void removeItem(focusItem.id)}>× {tt('dataset.delete')}</button>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -367,6 +512,18 @@ export function DatasetDetail() {
             <div className="dsx-sec">
               <div className="dsx-h">{tt('dataset.runTitle')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+                <div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['score', 'arena'] as const).map(mo => (
+                      <button key={mo} className="dsx-chip"
+                        onClick={() => setRunMode(mo)}
+                        style={{ borderColor: runMode === mo ? 'var(--p-bd)' : 'var(--border)', background: runMode === mo ? 'var(--p-bg)' : 'var(--bg-base)', color: runMode === mo ? 'var(--p)' : 'var(--text-muted)' }}>
+                        {mo === 'score' ? tt('dataset.modeScore') : tt('dataset.modeArena')}
+                      </button>
+                    ))}
+                  </div>
+                  {runMode === 'arena' && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, maxWidth: 560 }}>{tt('dataset.benchExplain')}</div>}
+                </div>
                 <div>
                   <div className="dsx-label" style={{ marginBottom: 6 }}>{tt('dataset.prompt')}</div>
                   <textarea className="dsx-in" style={{ width: '100%', minHeight: 60, resize: 'vertical' }} value={prompt} onChange={e => setPrompt(e.target.value)} />
@@ -398,7 +555,7 @@ export function DatasetDetail() {
               </div>
             </div>
 
-            {matrix.length > 0 && (
+            {runMode === 'score' && matrix.length > 0 && (
               <div className="dsx-sec">
                 <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
                 <div className="dsx-sub">{tt('dataset.resultsHint')}</div>
@@ -427,6 +584,86 @@ export function DatasetDetail() {
                       })}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {runMode === 'arena' && arena && runResults && (
+              <div className="dsx-sec">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <div className="dsx-h" style={{ margin: 0 }}>{tt('dataset.modeArena')}</div>
+                  <div style={{ flex: 1 }} />
+                  <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={blind} onChange={e => setBlind(e.target.checked)} />{tt('dataset.blindMode')}
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  <span>{tt('dataset.arenaProgress')}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{arena.verdicts.length}/{arena.itemCount}</span>
+                </div>
+                <div className="dsx-bar" style={{ marginBottom: 16 }}>
+                  <i style={{ width: `${arena.itemCount ? Math.round((arena.verdicts.length / arena.itemCount) * 100) : 0}%`, background: 'var(--p)' }} />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 210px', gap: 18, alignItems: 'start' }}>
+                  <div>
+                    {arena.nextIndex < 0 ? (
+                      <div style={{ fontSize: 13, color: 'var(--ok)', padding: '18px 0' }}>✓ {tt('dataset.arenaDone')}</div>
+                    ) : (
+                      <>
+                        <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.arenaItem')} {arena.nextIndex + 1} / {arena.itemCount}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {orderAnswers(answersFor(arena.nextIndex), arena.nextIndex, blind).map((r, idx) => {
+                            const isWorst = curWorst === r.model
+                            return (
+                              <div key={r.model} style={{ border: `0.5px solid ${isWorst ? 'var(--bad)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', padding: '11px 13px', background: isWorst ? 'rgba(224,92,92,0.06)' : 'var(--bg-base)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                                    {blind ? `${tt('dataset.blindLabel')} ${idx + 1}` : modelLabel(r.model)}
+                                  </span>
+                                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                    {r.metrics.totalTime != null ? `${(r.metrics.totalTime / 1000).toFixed(1)}s` : ''}
+                                    {r.metrics.outputTokens != null ? ` · ${r.metrics.outputTokens} tok` : ''}
+                                  </span>
+                                  <div style={{ flex: 1 }} />
+                                  <button className="dsx-primary" style={{ padding: '4px 12px' }} onClick={() => void judge(r.model)}>✓ {tt('dataset.pickBest')}</button>
+                                  <button onClick={() => setCurWorst(isWorst ? null : r.model)}
+                                    style={{ border: `0.5px solid ${isWorst ? 'var(--bad)' : 'var(--border)'}`, background: 'transparent', color: isWorst ? 'var(--bad)' : 'var(--text-muted)', borderRadius: 'var(--radius-sm)', padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
+                                    ✕ {tt('dataset.pickWorst')}
+                                  </button>
+                                </div>
+                                <div style={{ fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--text-primary)', maxHeight: 200, overflow: 'auto', fontFamily: 'var(--font-mono)' }}>
+                                  {r.text || (r.error ? `⚠ ${r.error}` : '—')}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <button className="dsx-ghost" onClick={() => void skipItem()}>{tt('dataset.skipItem')}</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.standings')}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {arena.standings.map((s, i) => (
+                        <div key={s.model} style={{ padding: '6px 8px', borderRadius: 'var(--radius-sm)', background: i === 0 ? 'var(--p-bg)' : 'transparent' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', color: i === 0 ? 'var(--p)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                              {i === 0 ? '★ ' : ''}{modelLabel(s.model)}
+                            </span>
+                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-bright)', fontWeight: 600 }}>{s.elo}</span>
+                          </div>
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>{s.wins} {tt('dataset.wins')} · {s.losses} {tt('dataset.losses')}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button className="dsx-ghost" style={{ marginTop: 14, width: '100%' }} onClick={() => void exitArena()}>{tt('dataset.exitBench')}</button>
+                  </div>
                 </div>
               </div>
             )}

@@ -8,7 +8,8 @@ import {
   deleteAttachment, deleteAttachmentsForDataset,
 } from './uploads.js'
 import { scoreResult } from '../scoring.js'
-import type { AttachmentMeta, Dataset, DatasetItem, DatasetVar, DatasetVarType } from '../types.js'
+import { computeStandings } from '../arena.js'
+import type { AttachmentMeta, ArenaVerdict, Dataset, DatasetItem, DatasetVar, DatasetVarType } from '../types.js'
 
 interface DatasetRow {
   id: string
@@ -320,21 +321,24 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     const db = getDb()
     if (!getDatasetRow(req.params.id)) return reply.code(404).send({ error: 'Dataset not found' })
     const rows = db.prepare(
-      `SELECT r.id, r.status, r.models, r.total_calls, r.completed_calls, r.created_at,
-              (SELECT AVG(score) FROM results WHERE run_id = r.id AND score IS NOT NULL) AS avg_score
+      `SELECT r.id, r.status, r.models, r.total_calls, r.completed_calls, r.created_at, r.mode,
+              (SELECT AVG(score) FROM results WHERE run_id = r.id AND score IS NOT NULL) AS avg_score,
+              (SELECT COUNT(*) FROM dataset_run_verdicts WHERE run_id = r.id) AS judged_count
        FROM runs r WHERE r.dataset_id = ? ORDER BY r.created_at DESC LIMIT 20`,
     ).all(req.params.id) as {
-      id: string; status: string; models: string; total_calls: number; completed_calls: number; created_at: number; avg_score: number | null
+      id: string; status: string; models: string; total_calls: number; completed_calls: number; created_at: number
+      mode: string | null; avg_score: number | null; judged_count: number
     }[]
     return {
       data: rows.map(r => ({
         id: r.id, status: r.status, models: JSON.parse(r.models) as string[],
-        totalCalls: r.total_calls, completedCalls: r.completed_calls, createdAt: r.created_at, avgScore: r.avg_score,
+        totalCalls: r.total_calls, completedCalls: r.completed_calls, createdAt: r.created_at,
+        avgScore: r.avg_score, mode: r.mode ?? 'score', judgedCount: r.judged_count,
       })),
     }
   })
 
-  app.post<{ Params: { id: string }; Body: { models?: string[]; prompt?: string; systemPrompt?: string } }>(
+  app.post<{ Params: { id: string }; Body: { models?: string[]; prompt?: string; systemPrompt?: string; mode?: string } }>(
     '/api/datasets/:id/run',
     async (req, reply) => {
       const db = getDb()
@@ -368,17 +372,20 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
         })
       }
 
-      const effectivePrompt = buildRunPrompt(prompt, dataset.schema)
+      // Arena mode is judged by a human, not against ground truth — so no JSON
+      // keys hint on the prompt and no auto-scoring pass.
+      const mode = req.body.mode === 'arena' ? 'arena' : 'score'
+      const effectivePrompt = mode === 'arena' ? prompt : buildRunPrompt(prompt, dataset.schema)
       const systemPrompt = typeof req.body.systemPrompt === 'string' && req.body.systemPrompt.trim()
         ? req.body.systemPrompt.trim() : undefined
 
       const runId = randomUUID()
       const now = Date.now()
       db.prepare(
-        'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(
         runId, JSON.stringify(items.map(() => effectivePrompt)), JSON.stringify(models),
-        'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id,
+        'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode,
       )
 
       // Each item's file rides along at its own prompt_index, so runCell's vision
@@ -392,14 +399,99 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const tasks = items.flatMap((_, pi) =>
         models.map(m => runCell(runId, pi, effectivePrompt, m, providers, undefined, [], new Map(), [], systemPrompt)))
 
-      // run_done must not fire until scores are written, or the client refetches
-      // results before they carry a score. Fold scoring into the finalize barrier.
-      const scored = Promise.allSettled(tasks).then(() => {
-        try { scoreDatasetRun(runId, dataset.schema, items) } catch { /* leave rows unscored */ }
-      })
-      finalizeRun(runId, [scored])
+      if (mode === 'arena') {
+        // No scoring — the human judges post-hoc; just finalize when cells settle.
+        finalizeRun(runId, [Promise.allSettled(tasks).then(() => {})])
+      } else {
+        // run_done must not fire until scores are written, or the client refetches
+        // results before they carry a score. Fold scoring into the finalize barrier.
+        const scored = Promise.allSettled(tasks).then(() => {
+          try { scoreDatasetRun(runId, dataset.schema, items) } catch { /* leave rows unscored */ }
+        })
+        finalizeRun(runId, [scored])
+      }
 
       return reply.code(202).send({ data: { runId } })
+    },
+  )
+
+  // ── Arena judging (mode='arena' runs) ──────────────────────────────────────
+
+  interface VerdictRow { prompt_index: number; best_model: string | null; worst_model: string | null; skipped: number }
+
+  function loadVerdicts(runId: string): ArenaVerdict[] {
+    const rows = getDb().prepare(
+      'SELECT prompt_index, best_model, worst_model, skipped FROM dataset_run_verdicts WHERE run_id = ? ORDER BY prompt_index'
+    ).all(runId) as VerdictRow[]
+    return rows.map(r => ({ promptIndex: r.prompt_index, bestModel: r.best_model, worstModel: r.worst_model, skipped: r.skipped === 1 }))
+  }
+
+  // The lowest item index (0..itemCount-1) with no verdict yet, or -1 if every
+  // item has been judged/skipped — the arena's "where do I resume".
+  function nextUnjudged(verdicts: ArenaVerdict[], itemCount: number): number {
+    const seen = new Set(verdicts.map(v => v.promptIndex))
+    for (let i = 0; i < itemCount; i++) if (!seen.has(i)) return i
+    return -1
+  }
+
+  // Load an arena run + its dataset's item count, or reply 404. Shared by the
+  // GET and the verdict PUT so both agree on what a valid arena run is.
+  function loadArenaRun(datasetId: string, runId: string): { models: string[]; itemCount: number } | null {
+    const run = getDb().prepare('SELECT models, dataset_id, mode FROM runs WHERE id = ?').get(runId) as
+      { models: string; dataset_id: string | null; mode: string | null } | undefined
+    if (!run || run.dataset_id !== datasetId || run.mode !== 'arena') return null
+    const itemCount = (getDb().prepare('SELECT COUNT(*) n FROM dataset_items WHERE dataset_id = ?').get(datasetId) as { n: number }).n
+    return { models: JSON.parse(run.models) as string[], itemCount }
+  }
+
+  app.get<{ Params: { id: string; runId: string } }>('/api/datasets/:id/runs/:runId/arena', async (req, reply) => {
+    const arena = loadArenaRun(req.params.id, req.params.runId)
+    if (!arena) return reply.code(404).send({ error: 'Arena run not found' })
+    const verdicts = loadVerdicts(req.params.runId)
+    return {
+      data: {
+        itemCount: arena.itemCount,
+        verdicts,
+        standings: computeStandings(arena.models, verdicts),
+        nextIndex: nextUnjudged(verdicts, arena.itemCount),
+      },
+    }
+  })
+
+  app.put<{ Params: { id: string; runId: string; promptIndex: string }; Body: { bestModel?: string; worstModel?: string; skipped?: boolean } }>(
+    '/api/datasets/:id/runs/:runId/verdicts/:promptIndex',
+    async (req, reply) => {
+      const arena = loadArenaRun(req.params.id, req.params.runId)
+      if (!arena) return reply.code(404).send({ error: 'Arena run not found' })
+
+      const promptIndex = Number(req.params.promptIndex)
+      if (!Number.isInteger(promptIndex) || promptIndex < 0 || promptIndex >= arena.itemCount) {
+        return reply.code(400).send({ error: 'promptIndex out of range' })
+      }
+
+      const skipped = req.body.skipped === true
+      const best = skipped ? null : (req.body.bestModel ?? null)
+      const worst = skipped ? null : (req.body.worstModel ?? null)
+      if (!skipped) {
+        if (!best) return reply.code(400).send({ error: 'bestModel is required unless the item is skipped' })
+        if (!arena.models.includes(best)) return reply.code(400).send({ error: 'bestModel is not one of the run\'s models' })
+        if (worst && !arena.models.includes(worst)) return reply.code(400).send({ error: 'worstModel is not one of the run\'s models' })
+        if (worst && worst === best) return reply.code(400).send({ error: 'bestModel and worstModel cannot be the same' })
+      }
+
+      getDb().prepare(
+        `INSERT INTO dataset_run_verdicts (run_id, prompt_index, best_model, worst_model, skipped, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, prompt_index) DO UPDATE SET best_model = excluded.best_model, worst_model = excluded.worst_model, skipped = excluded.skipped`
+      ).run(req.params.runId, promptIndex, best, worst, skipped ? 1 : 0, Date.now())
+
+      const verdicts = loadVerdicts(req.params.runId)
+      return {
+        data: {
+          standings: computeStandings(arena.models, verdicts),
+          nextIndex: nextUnjudged(verdicts, arena.itemCount),
+        },
+      }
     },
   )
 }

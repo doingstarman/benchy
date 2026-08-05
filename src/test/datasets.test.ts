@@ -221,3 +221,68 @@ describe('gcUnboundUploads', () => {
     expect(ids).not.toContain(abandoned)
   })
 })
+
+describe('arena mode', () => {
+  interface Standing { model: string; elo: number; wins: number; losses: number }
+  interface ArenaState { itemCount: number; verdicts: unknown[]; standings: Standing[]; nextIndex: number }
+
+  async function arenaDataset(items = 2): Promise<string> {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'Arena', schema: [] }))
+    for (let i = 0; i < items; i++) await req('POST', `/api/datasets/${ds.id}/items`, {})
+    return ds.id
+  }
+
+  it('runs without auto-scoring and judges via verdicts, advancing the resume point', async () => {
+    const id = await arenaDataset(2)
+    mockOutput = 'some answer'
+    const run = await req('POST', `/api/datasets/${id}/run`, { models: ['p:A', 'p:B'], prompt: 'go', mode: 'arena' })
+    expect(run.status).toBe(202)
+    const runId = data<{ runId: string }>(run).runId
+    const done = await waitForRun(runId)
+
+    // Arena is human-judged — no auto per-field score is written.
+    expect(done.results.every(r => r.score == null)).toBe(true)
+
+    // Fresh arena: nobody judged yet, everyone at 1000, resume at item 0.
+    const a0 = data<ArenaState>(await req('GET', `/api/datasets/${id}/runs/${runId}/arena`))
+    expect(a0).toMatchObject({ itemCount: 2, nextIndex: 0 })
+    expect(a0.standings.every(s => s.elo === 1000)).toBe(true)
+
+    // Judge item 0: A best → A leads, resume advances to item 1.
+    const j0 = data<{ standings: Standing[]; nextIndex: number }>(
+      await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/0`, { bestModel: 'p:A' }))
+    expect(j0.nextIndex).toBe(1)
+    expect(j0.standings[0]).toMatchObject({ model: 'p:A', wins: 1 })
+    expect(j0.standings.find(s => s.model === 'p:A')!.elo).toBeGreaterThan(j0.standings.find(s => s.model === 'p:B')!.elo)
+
+    // Judge the last item → nothing left to judge (resume = -1).
+    const j1 = data<{ nextIndex: number }>(
+      await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/1`, { bestModel: 'p:A', worstModel: 'p:B' }))
+    expect(j1.nextIndex).toBe(-1)
+
+    // The dataset's run list now reflects the arena mode + judged count.
+    const runs = data<{ id: string; mode: string; judgedCount: number }[]>(await req('GET', `/api/datasets/${id}/runs`))
+    expect(runs[0]).toMatchObject({ id: runId, mode: 'arena', judgedCount: 2 })
+  })
+
+  it('rejects a verdict whose bestModel is not one of the run models', async () => {
+    const id = await arenaDataset(1)
+    mockOutput = 'x'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${id}/run`, { models: ['p:A', 'p:B'], prompt: 'go', mode: 'arena' })).runId
+    await waitForRun(runId)
+    const bad = await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/0`, { bestModel: 'p:Z' })
+    expect(bad.status).toBe(400)
+  })
+
+  it('re-judging an item overwrites the earlier verdict (no duplicate row)', async () => {
+    const id = await arenaDataset(1)
+    mockOutput = 'x'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${id}/run`, { models: ['p:A', 'p:B'], prompt: 'go', mode: 'arena' })).runId
+    await waitForRun(runId)
+    await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/0`, { bestModel: 'p:A' })
+    const redo = data<{ standings: Standing[] }>(await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/0`, { bestModel: 'p:B' }))
+    // The flip counts once for B, not once each for A and B.
+    expect(redo.standings.find(s => s.model === 'p:B')!.wins).toBe(1)
+    expect(redo.standings.find(s => s.model === 'p:A')!.wins).toBe(0)
+  })
+})

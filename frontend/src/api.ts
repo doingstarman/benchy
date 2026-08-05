@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar } from '../../src/types'
+import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -107,6 +107,15 @@ export interface DatasetRunSummary {
   completedCalls: number
   createdAt: number
   avgScore: number | null
+  mode: 'score' | 'arena'
+  judgedCount: number
+}
+
+export interface ArenaState {
+  itemCount: number
+  verdicts: ArenaVerdict[]
+  standings: ArenaStanding[]
+  nextIndex: number
 }
 
 export const datasetsApi = {
@@ -123,8 +132,11 @@ export const datasetsApi = {
     apiFetch<DatasetItem>(`/api/datasets/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   removeItem: (id: string, itemId: string) => fetch(`/api/datasets/${id}/items/${itemId}`, { method: 'DELETE' }),
   runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
-  run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string }) =>
+  run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena' }) =>
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
+  arena: (id: string, runId: string) => apiFetch<ArenaState>(`/api/datasets/${id}/runs/${runId}/arena`),
+  putVerdict: (id: string, runId: string, promptIndex: number, body: { bestModel?: string; worstModel?: string; skipped?: boolean }) =>
+    apiFetch<{ standings: ArenaStanding[]; nextIndex: number }>(`/api/datasets/${id}/runs/${runId}/verdicts/${promptIndex}`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 
 // ─── version / updates ───────────────────────────────────────────────────────
