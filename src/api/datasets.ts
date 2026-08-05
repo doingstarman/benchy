@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js'
 import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled } from '../config.js'
 import { runCell, finalizeRun, getAdapter } from './benchmark.js'
 import { runTests, interpreterCommand, type CodeLanguage } from '../codeRun.js'
+import { isLocalRequest } from './csrf.js'
 import {
   getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto,
   deleteAttachment, deleteAttachmentsForDataset, uploadPath,
@@ -560,6 +561,9 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const isCode = dataset.type === 'code'
       const codeLanguage: CodeLanguage = dataset.language === 'javascript' ? 'javascript' : 'python'
       if (isCode) {
+        // Running a code dataset executes code locally — never at a cross-site
+        // page's request, even if the toggle is somehow on.
+        if (!isLocalRequest(req)) return reply.code(403).send({ error: 'cross-site request refused' })
         if (!(await getCodeExecutionEnabled())) {
           return reply.code(400).send({ error: 'code execution is disabled — enable it in Settings before running a code dataset' })
         }

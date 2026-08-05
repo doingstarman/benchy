@@ -367,6 +367,21 @@ describe('text datasets', () => {
     expect((await req('POST', `/api/datasets/${ds.id}/items`, { input: 'q', tests: 'x' })).status).toBe(400)
   })
 
+  it('a cross-site Origin cannot enable code execution or start a code run', async () => {
+    // A browser can never forge Origin to localhost, so a cross-site Origin is a
+    // CSRF attempt — both the enable-toggle and the code run must refuse it.
+    const evil = { 'Content-Type': 'application/json', Origin: 'http://evil.example' }
+    const putEvil = await fetch(`${base}/api/settings`, { method: 'PUT', headers: evil, body: JSON.stringify({ codeExecution: true }) })
+    expect(putEvil.status).toBe(403)
+
+    // Same-origin (no Origin header) is allowed to enable it and create the run.
+    await req('PUT', '/api/settings', { codeExecution: true })
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'C3', type: 'code', language: 'javascript' }))
+    await req('POST', `/api/datasets/${ds.id}/items`, { input: 't', tests: "test('a', () => assert(true))" })
+    const runEvil = await fetch(`${base}/api/datasets/${ds.id}/run`, { method: 'POST', headers: evil, body: JSON.stringify({ models: ['p:A'], prompt: 'x' }) })
+    expect(runEvil.status).toBe(403)
+  })
+
   it('ai-fill labels a text item with no file (text branch)', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
     await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })

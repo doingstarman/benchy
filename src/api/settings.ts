@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getCodeExecutionEnabled, setCodeExecutionEnabled } from '../config.js'
+import { isLocalRequest } from './csrf.js'
 
 // Server-side settings the UI can read and flip. Kept separate from provider
 // config because these are app-wide toggles, not per-provider credentials.
@@ -9,6 +10,9 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
   })
 
   app.put<{ Body: { codeExecution?: unknown } }>('/api/settings', async (req, reply) => {
+    // Enabling code execution from a cross-site page would be a CSRF foothold —
+    // refuse anything that isn't same-origin/localhost.
+    if (!isLocalRequest(req)) return reply.code(403).send({ error: 'cross-site request refused' })
     const { codeExecution } = req.body
     if (codeExecution !== undefined) {
       if (typeof codeExecution !== 'boolean') {

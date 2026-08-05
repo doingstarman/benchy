@@ -151,8 +151,10 @@ export function DatasetDetail() {
     setSchemaDirty(false)
     setItems(ds.items ?? [])
     setProviders(ps)
-    // Code datasets have no schema to define, so open straight into markup.
-    if (ds.type === 'code') setTab('markup')
+    // Code datasets have no schema to define, so open straight into markup; and
+    // code is always score-mode, so reset any arena mode left from a prior dataset
+    // (else its results would render under neither the score nor the arena block).
+    if (ds.type === 'code') { setTab('markup'); setRunMode('score') }
     if (!prompt) setPrompt(tt(ds.type === 'code' ? 'dataset.codePromptBody' : 'dataset.promptBody'))
     const runs = await datasetsApi.runs(id)
     const last = runs[0]
@@ -831,7 +833,7 @@ export function DatasetDetail() {
               </div>
             </div>
 
-            {runMode === 'score' && matrix.length > 0 && (
+            {(isCode || runMode === 'score') && matrix.length > 0 && (
               <div className="dsx-sec">
                 <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
                 <div className="dsx-sub">{isCode ? tt('dataset.codeResultsHint') : tt('dataset.resultsHint')}</div>
