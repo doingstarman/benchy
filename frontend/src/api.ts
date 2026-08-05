@@ -139,6 +139,46 @@ export const datasetsApi = {
     apiFetch<{ standings: ArenaStanding[]; nextIndex: number }>(`/api/datasets/${id}/runs/${runId}/verdicts/${promptIndex}`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 
+// ─── results (dataset test database + analytics) ──────────────────────────────
+
+export interface ResultsRow {
+  runId: string
+  datasetId: string
+  datasetName: string
+  itemCount: number
+  modelCount: number
+  mode: string
+  status: string
+  createdAt: number
+  avgScore: number | null
+  tokens: number
+  durationMs: number | null
+  winner: string | null
+}
+
+export interface AnalyticsSummary {
+  mode: string
+  datasetName: string
+  itemCount: number
+  modelCount: number
+  winner: string | null
+  tokens: number
+  durationMs: number | null
+  coverage: number
+  ties: number
+  standings: { model: string; elo: number; wins: number; losses: number }[] | null
+  matrix: { model: string; overall: number | null; perVar: Record<string, number | null> }[] | null
+  agreement: number | null
+  perModelLatency: { model: string; ms: number | null }[]
+  weak: { file: string; why: string }[]
+}
+
+export const resultsApi = {
+  list: () => apiFetch<ResultsRow[]>('/api/results'),
+  summary: (runId: string) => apiFetch<AnalyticsSummary>(`/api/results/${runId}`),
+  exportUrl: (runId: string, format: 'csv' | 'json') => `/api/results/${runId}/export?format=${format}`,
+}
+
 // ─── version / updates ───────────────────────────────────────────────────────
 
 export const versionApi = {

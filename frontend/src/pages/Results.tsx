@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { runsApi, useSSE } from '../api'
 import type { SSEEvent } from '../api'
 import { ResponseCard } from '../components/ResponseCard'
+import { TestAnalytics } from '../components/TestAnalytics'
 import { useT } from '../i18n'
 import type { Run, Result } from '../../../src/types'
 
@@ -188,6 +189,9 @@ export function Results() {
           </button>
         </div>
       </div>
+
+      {/* Dataset test analytics (renders only for dataset runs; 404 → nothing) */}
+      {!isLive && runId && <TestAnalytics runId={runId} />}
 
       {/* Prompt tabs */}
       {run.prompts.length > 1 && (

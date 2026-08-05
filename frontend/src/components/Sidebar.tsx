@@ -258,7 +258,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
       <Divider />
 
       <DisabledItem label={t('nav.dashboard')} icon="dashboard" collapsed={collapsed} soon />
-      <DisabledItem label={t('nav.results')} icon="results" collapsed={collapsed} soon />
+      <Item to="/results" label={t('nav.results')} icon="results" collapsed={collapsed} />
 
       <Divider />
 
