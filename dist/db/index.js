@@ -88,7 +88,10 @@ CREATE TABLE IF NOT EXISTS dataset_items (
   dataset_id TEXT NOT NULL,
   idx INTEGER NOT NULL,
   -- The item's file, an attachment row (unbound: run_id NULL, dataset_id set).
+  -- Files-type datasets use attachment_id; text-type datasets use input.
   attachment_id TEXT,
+  -- The item's text input, for text-type datasets (NULL for file items).
+  input TEXT,
   -- JSON { key: value } — the human-confirmed ground truth for this item.
   ground_truth TEXT NOT NULL DEFAULT '{}',
   -- JSON { key: value } — values proposed by the trusted model, awaiting human
@@ -165,6 +168,8 @@ export async function initDb(path) {
         'ALTER TABLE runs ADD COLUMN mode TEXT',
         // Trusted-model suggestions awaiting human confirmation, per item.
         "ALTER TABLE dataset_items ADD COLUMN ai_suggested TEXT NOT NULL DEFAULT '{}'",
+        // Text-type dataset items carry their input here instead of an attachment.
+        'ALTER TABLE dataset_items ADD COLUMN input TEXT',
     ]) {
         try {
             db.exec(sql);

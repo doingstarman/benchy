@@ -6,6 +6,7 @@ import { runCell, finalizeRun, getAdapter } from './benchmark.js';
 import { getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto, deleteAttachment, deleteAttachmentsForDataset, uploadPath, } from './uploads.js';
 import { scoreResult, parseModelOutput } from '../scoring.js';
 import { computeStandings } from '../arena.js';
+import { parseCsv } from '../csv.js';
 const VAR_TYPES = ['text', 'date', 'number'];
 const KEY_RE = /^[a-z0-9_]+$/;
 function parseSchema(raw) {
@@ -78,6 +79,7 @@ function rowToItem(row) {
         idx: row.idx,
         attachmentId: row.attachment_id,
         attachment: row.attachment_id ? attachmentMeta(row.attachment_id) : null,
+        input: row.input,
         groundTruth: (() => { try {
             return toGroundTruth(JSON.parse(row.ground_truth));
         }
@@ -113,7 +115,7 @@ function rowToDataset(row, opts = {}) {
         id: row.id,
         name: row.name,
         note: row.note,
-        type: 'files',
+        type: row.type === 'text' ? 'text' : 'files',
         schema,
         trustedModel: row.trusted_model,
         createdAt: row.created_at,
@@ -167,9 +169,10 @@ export async function registerDatasetsRoutes(app) {
         if (!name)
             return reply.code(400).send({ error: 'name is required' });
         const schema = req.body.schema === undefined ? [] : validateSchema(req.body.schema);
+        const type = req.body.type === 'text' ? 'text' : 'files';
         const id = randomUUID();
         const now = Date.now();
-        getDb().prepare('INSERT INTO datasets (id, name, note, type, schema, trusted_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, req.body.note?.trim() || null, 'files', JSON.stringify(schema), null, now, now);
+        getDb().prepare('INSERT INTO datasets (id, name, note, type, schema, trusted_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, req.body.note?.trim() || null, type, JSON.stringify(schema), null, now, now);
         return reply.code(201).send({ data: rowToDataset(getDatasetRow(id), { withItems: true }) });
     });
     app.patch('/api/datasets/:id', async (req, reply) => {
@@ -210,7 +213,14 @@ export async function registerDatasetsRoutes(app) {
         const dataset = getDatasetRow(req.params.id);
         if (!dataset)
             return reply.code(404).send({ error: 'Dataset not found' });
+        const input = typeof req.body.input === 'string' ? req.body.input : null;
         const { attachmentId } = req.body;
+        // Keep item shape consistent with the dataset type: text items take input,
+        // file items take a file — never both (the run would feed the model both).
+        if (dataset.type === 'text' && attachmentId != null)
+            return reply.code(400).send({ error: 'a text dataset item takes input, not a file' });
+        if (dataset.type !== 'text' && input)
+            return reply.code(400).send({ error: 'a files dataset item takes a file, not input' });
         if (attachmentId !== undefined) {
             const att = getAttachmentRow(attachmentId);
             if (!att)
@@ -228,7 +238,7 @@ export async function registerDatasetsRoutes(app) {
         const nextIdx = db.prepare('SELECT COALESCE(MAX(idx), -1) + 1 AS n FROM dataset_items WHERE dataset_id = ?')
             .get(req.params.id).n;
         const id = randomUUID();
-        db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, req.params.id, nextIdx, attachmentId ?? null, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now());
+        db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, req.params.id, nextIdx, attachmentId ?? null, input, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now());
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         const itemRow = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(id);
         return reply.code(201).send({ data: rowToItem(itemRow) });
@@ -239,6 +249,11 @@ export async function registerDatasetsRoutes(app) {
             .get(req.params.itemId, req.params.id);
         if (!item)
             return reply.code(404).send({ error: 'Dataset item not found' });
+        const dsRow = getDatasetRow(req.params.id);
+        if (dsRow?.type === 'text' && req.body.attachmentId != null)
+            return reply.code(400).send({ error: 'a text dataset item takes input, not a file' });
+        if (dsRow && dsRow.type !== 'text' && typeof req.body.input === 'string' && req.body.input)
+            return reply.code(400).send({ error: 'a files dataset item takes a file, not input' });
         if (req.body.attachmentId !== undefined) {
             const next = req.body.attachmentId;
             const att = getAttachmentRow(next);
@@ -270,9 +285,52 @@ export async function registerDatasetsRoutes(app) {
             db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?')
                 .run(JSON.stringify(toGroundTruth(req.body.aiSuggested)), req.params.itemId);
         }
+        if (req.body.input !== undefined) {
+            db.prepare('UPDATE dataset_items SET input = ? WHERE id = ?')
+                .run(typeof req.body.input === 'string' ? req.body.input : null, req.params.itemId);
+        }
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         const updated = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(req.params.itemId);
         return { data: rowToItem(updated) };
+    });
+    // Bulk-import text items from a CSV: header maps an `input` column (or the first
+    // column) to the item's input, and columns matching schema keys to ground truth.
+    app.post('/api/datasets/:id/import-csv', async (req, reply) => {
+        const db = getDb();
+        const row = getDatasetRow(req.params.id);
+        if (!row)
+            return reply.code(404).send({ error: 'Dataset not found' });
+        const dataset = rowToDataset(row);
+        if (dataset.type !== 'text')
+            return reply.code(400).send({ error: 'CSV import is only for text datasets' });
+        const rows = parseCsv(typeof req.body.csv === 'string' ? req.body.csv : '');
+        if (rows.length < 2)
+            return reply.code(400).send({ error: 'CSV needs a header row and at least one data row' });
+        const header = rows[0].map(h => h.trim());
+        const inputCol = header.findIndex(h => h.toLowerCase() === 'input');
+        const effInputCol = inputCol >= 0 ? inputCol : 0;
+        // The input column is NEVER also mapped to ground truth — otherwise a label
+        // column reused as the fallback input would leak its answer into the prompt.
+        const keyCols = dataset.schema.map(v => ({ key: v.key, idx: header.indexOf(v.key) }))
+            .filter(kc => kc.idx >= 0 && kc.idx !== effInputCol);
+        const insert = db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        let nextIdx = db.prepare('SELECT COALESCE(MAX(idx), -1) + 1 AS n FROM dataset_items WHERE dataset_id = ?').get(req.params.id).n;
+        // One transaction: a mid-import failure rolls back rather than leaving a partial set.
+        const importAll = db.transaction(() => {
+            let n = 0;
+            for (const r of rows.slice(1)) {
+                const gt = {};
+                for (const { key, idx } of keyCols)
+                    if ((r[idx] ?? '').trim() !== '')
+                        gt[key] = r[idx];
+                insert.run(randomUUID(), req.params.id, nextIdx++, null, r[effInputCol] ?? '', JSON.stringify(gt), Date.now());
+                n++;
+            }
+            return n;
+        });
+        const imported = importAll();
+        db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
+        return { data: { imported } };
     });
     app.delete('/api/datasets/:id/items/:itemId', async (req, reply) => {
         const db = getDb();
@@ -317,7 +375,7 @@ export async function registerDatasetsRoutes(app) {
         const targets = (dataset.items ?? []).filter(it => {
             if (onlyIds && !onlyIds.has(it.id))
                 return false;
-            if (!it.attachmentId)
+            if (!it.attachmentId && !it.input)
                 return false;
             if (scope === 'all')
                 return true;
@@ -331,18 +389,25 @@ export async function registerDatasetsRoutes(app) {
             return {};
         } };
         const fillOne = async (it) => {
-            const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null;
-            if (!att)
-                return 'skipped';
-            let attachments;
-            try {
-                const buf = await readFile(uploadPath(att.id, att.mime_type));
-                attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }];
+            // Text item → input in the message; file item → image attachment.
+            let convo;
+            if (it.input) {
+                convo = [{ role: 'user', content: `${promptText}\n\n${it.input}` }];
             }
-            catch {
-                return 'errored';
+            else {
+                const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null;
+                if (!att)
+                    return 'skipped';
+                let attachments;
+                try {
+                    const buf = await readFile(uploadPath(att.id, att.mime_type));
+                    attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }];
+                }
+                catch {
+                    return 'errored';
+                }
+                convo = [{ role: 'user', content: promptText, attachments }];
             }
-            const convo = [{ role: 'user', content: promptText, attachments }];
             let text = '';
             try {
                 for await (const chunk of adapter.stream(convo, { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings })) {
@@ -452,21 +517,27 @@ export async function registerDatasetsRoutes(app) {
         // Arena mode is judged by a human, not against ground truth — so no JSON
         // keys hint on the prompt and no auto-scoring pass.
         const mode = req.body.mode === 'arena' ? 'arena' : 'score';
-        const effectivePrompt = mode === 'arena' ? prompt : buildRunPrompt(prompt, dataset.schema);
         const systemPrompt = typeof req.body.systemPrompt === 'string' && req.body.systemPrompt.trim()
             ? req.body.systemPrompt.trim() : undefined;
+        // Per-item prompt: a text item folds its input into the prompt; a file item
+        // shares the same prompt and rides its image at its own prompt_index. Arena
+        // is human-judged, so no JSON-keys hint.
+        const itemPrompts = items.map(it => {
+            const base = it.input ? `${prompt}\n\n${it.input}` : prompt;
+            return mode === 'arena' ? base.trim() : buildRunPrompt(base, dataset.schema);
+        });
         const runId = randomUUID();
         const now = Date.now();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(items.map(() => effectivePrompt)), JSON.stringify(models), 'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode);
-        // Each item's file rides along at its own prompt_index, so runCell's vision
-        // path loads it exactly as a normal single-prompt attachment would.
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(itemPrompts), JSON.stringify(models), 'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode);
+        // File items ride their image at their own prompt_index (runCell's vision
+        // path loads it); text items carry no attachment.
         for (let pi = 0; pi < items.length; pi++) {
             const att = items[pi].attachmentId;
             if (att)
                 await cloneAttachmentOnto(att, runId, pi);
         }
         const providers = await getProviders();
-        const tasks = items.flatMap((_, pi) => models.map(m => runCell(runId, pi, effectivePrompt, m, providers, undefined, [], new Map(), [], systemPrompt)));
+        const tasks = items.flatMap((_, pi) => models.map(m => runCell(runId, pi, itemPrompts[pi], m, providers, undefined, [], new Map(), [], systemPrompt)));
         if (mode === 'arena') {
             // No scoring — the human judges post-hoc; just finalize when cells settle.
             finalizeRun(runId, [Promise.allSettled(tasks).then(() => { })]);
