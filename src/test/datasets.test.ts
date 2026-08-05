@@ -244,6 +244,32 @@ describe('AI-assisted markup', () => {
     expect(upd.groundTruth).toEqual({ x: 'confirmed' })
     expect(upd.aiSuggested).toEqual({})
   })
+
+  it('empty scope fills a missing field without overwriting an already-suggested one', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'AI4', schema: [{ key: 'a', type: 'text' }, { key: 'b', type: 'text' }] }))
+    await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })
+    await seedItemWithFile(ds.id)
+
+    mockOutput = '{"a": "first"}' // suggests a only; b stays empty
+    expect(data<{ filled: number }>(await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})).filled).toBe(1)
+    // Second empty-scope fill: item re-entered for the still-empty b, but a's
+    // unreviewed suggestion must NOT be overwritten.
+    mockOutput = '{"a": "second", "b": "bee"}'
+    expect(data<{ filled: number }>(await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})).filled).toBe(1)
+    const item = data<{ items: { aiSuggested: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`)).items[0]
+    expect(item.aiSuggested).toEqual({ a: 'first', b: 'bee' })
+  })
+
+  it('skips a non-primitive model value instead of storing "[object Object]"', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'AI5', schema: [{ key: 'x', type: 'text' }] }))
+    await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })
+    await seedItemWithFile(ds.id)
+
+    mockOutput = '{"x": {"nested": 1}}'
+    expect(data<{ filled: number }>(await req('POST', `/api/datasets/${ds.id}/ai-fill`, {})).filled).toBe(0)
+    const item = data<{ items: { aiSuggested: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`)).items[0]
+    expect(item.aiSuggested).toEqual({})
+  })
 })
 
 describe('gcUnboundUploads', () => {

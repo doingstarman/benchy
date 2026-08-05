@@ -165,6 +165,7 @@ export const DICT: Record<string, Entry> = {
   'dataset.awaitConfirm': { en: 'awaiting confirmation', ru: 'ждут подтверждения' },
   'dataset.confirmAll': { en: 'Accept all', ru: 'Принять все' },
   'dataset.aiNoTrusted': { en: 'Set a trusted model in the schema tab to label with AI.', ru: 'Задайте доверенную модель во вкладке «Схема», чтобы размечать ИИ.' },
+  'dataset.aiDone': { en: 'AI: {filled} filled · {skipped} skipped · {errored} errored', ru: 'ИИ: заполнено {filled} · пропущено {skipped} · ошибок {errored}' },
   'dataset.viewFocus': { en: 'Focus', ru: 'Фокус' },
   'dataset.viewTable': { en: 'Table', ru: 'Таблица' },
   'dataset.queue': { en: 'Queue', ru: 'Очередь' },

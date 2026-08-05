@@ -362,15 +362,16 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       })
 
       const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults }
-      let filled = 0
-      await Promise.all(targets.map(async it => {
+      const parseObj = (raw: string): Record<string, string> => { try { return toGroundTruth(JSON.parse(raw)) } catch { return {} } }
+
+      const fillOne = async (it: DatasetItem): Promise<'filled' | 'skipped' | 'errored'> => {
         const att = it.attachmentId ? getAttachmentRow(it.attachmentId) : null
-        if (!att) return
+        if (!att) return 'skipped'
         let attachments
         try {
           const buf = await readFile(uploadPath(att.id, att.mime_type))
           attachments = [{ mimeType: att.mime_type, data: buf.toString('base64'), name: att.name }]
-        } catch { return }
+        } catch { return 'errored' }
         const convo: Message[] = [{ role: 'user', content: promptText, attachments }]
         let text = ''
         try {
@@ -378,24 +379,43 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
             if (chunk.type === 'token') text += chunk.text
             else if (chunk.type === 'error') throw new Error(chunk.message)
           }
-        } catch { return }
+        } catch { return 'errored' }
         const parsed = parseModelOutput(text)
-        if (!parsed) return
-        const merged = { ...it.aiSuggested }
+        if (!parsed) return 'errored'
+        // Re-read fresh, right before writing: the human may have confirmed a
+        // field during a long fill (TOCTOU) — don't clobber that.
+        const cur = db.prepare('SELECT ground_truth, ai_suggested FROM dataset_items WHERE id = ?').get(it.id) as
+          { ground_truth: string; ai_suggested: string } | undefined
+        if (!cur) return 'skipped'
+        const gt = parseObj(cur.ground_truth)
+        const merged = parseObj(cur.ai_suggested)
         let any = false
         for (const k of keys) {
-          // Never overwrite a human-confirmed value.
-          if ((it.groundTruth[k] ?? '').trim()) continue
+          if ((gt[k] ?? '').trim()) continue                              // never touch a confirmed value
+          if (scope === 'empty' && (merged[k] ?? '').trim()) continue     // don't overwrite an unreviewed suggestion
           const v = parsed[k]
-          if (v != null && String(v).trim() !== '') { merged[k] = String(v); any = true }
+          if (v == null || typeof v === 'object') continue                // skip null / object / array garbage
+          const sv = String(v)
+          if (sv.trim() !== '') { merged[k] = sv; any = true }
         }
-        if (any) {
-          db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?').run(JSON.stringify(merged), it.id)
-          filled++
+        if (!any) return 'skipped'
+        db.prepare('UPDATE dataset_items SET ai_suggested = ? WHERE id = ?').run(JSON.stringify(merged), it.id)
+        return 'filled'
+      }
+
+      // Bounded concurrency: a large dataset must not open one provider stream +
+      // one base64 image per item all at once (memory spike + rate-limit storm).
+      const CONCURRENCY = 5
+      let filled = 0, skipped = 0, errored = 0
+      for (let i = 0; i < targets.length; i += CONCURRENCY) {
+        for (const outcome of await Promise.all(targets.slice(i, i + CONCURRENCY).map(fillOne))) {
+          if (outcome === 'filled') filled++
+          else if (outcome === 'errored') errored++
+          else skipped++
         }
-      }))
+      }
       db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
-      return { data: { filled } }
+      return { data: { filled, skipped, errored } }
     },
   )
 

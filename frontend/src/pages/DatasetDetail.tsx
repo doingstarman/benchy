@@ -122,6 +122,10 @@ export function DatasetDetail() {
   const [markupView, setMarkupView] = useState<'focus' | 'table'>('focus')
   const [focusIdx, setFocusIdx] = useState(0)
   const [aiFilling, setAiFilling] = useState(false)
+  const [aiNote, setAiNote] = useState<string | null>(null)
+  // Per-item write serialization: a blur-commit and an accept can fire for the
+  // same item in one gesture; chaining keeps the last-called PATCH the last to land.
+  const writeChain = useRef<Map<string, Promise<unknown>>>(new Map())
 
   // run state
   const [prompt, setPrompt] = useState('')
@@ -217,23 +221,41 @@ export function DatasetDetail() {
       return { ...i, groundTruth: { ...i.groundTruth, [key]: value }, aiSuggested: ai }
     }))
   }
+  // Serialized, reconciled item write: awaits the item's previous write, PATCHes,
+  // then adopts the server's authoritative row; on failure resyncs from the server
+  // so the UI can never show a phantom "saved" state.
+  function mutateItem(itemId: string, body: { groundTruth?: Record<string, string>; aiSuggested?: Record<string, string> }): Promise<unknown> {
+    const prev = writeChain.current.get(itemId) ?? Promise.resolve()
+    const next = prev.catch(() => {}).then(async () => {
+      try {
+        const updated = await datasetsApi.updateItem(id, itemId, body)
+        setItems(cur => cur.map(i => i.id === itemId ? updated : i))
+      } catch {
+        const ds = await datasetsApi.get(id).catch(() => null)
+        if (ds) { setItems(ds.items ?? []); setDataset(ds) }
+      }
+    })
+    writeChain.current.set(itemId, next)
+    return next
+  }
   async function commitCell(item: DatasetItem) {
-    await datasetsApi.updateItem(id, item.id, { groundTruth: item.groundTruth, aiSuggested: item.aiSuggested })
+    await mutateItem(item.id, { groundTruth: item.groundTruth, aiSuggested: item.aiSuggested })
   }
 
   // ── AI-assisted markup (trusted model → ai_suggested → human confirms) ──
   async function runAiFill() {
     if (!trusted) return
-    setAiFilling(true)
+    setAiFilling(true); setAiNote(null)
     try {
-      await datasetsApi.aiFill(id, { scope: 'empty' })
+      const r = await datasetsApi.aiFill(id, { scope: 'empty' })
       const ds = await datasetsApi.get(id)
       setItems(ds.items ?? []); setDataset(ds)
+      setAiNote(tt('dataset.aiDone', { filled: r.filled, skipped: r.skipped, errored: r.errored }))
     } finally { setAiFilling(false) }
   }
   function applyItem(itemId: string, gt: Record<string, string>, ai: Record<string, string>) {
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, groundTruth: gt, aiSuggested: ai } : i))
-    void datasetsApi.updateItem(id, itemId, { groundTruth: gt, aiSuggested: ai })
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, groundTruth: gt, aiSuggested: ai } : i)) // optimistic
+    void mutateItem(itemId, { groundTruth: gt, aiSuggested: ai })
   }
   function acceptAi(item: DatasetItem, key: string) {
     const ai = { ...item.aiSuggested }; const v = ai[key]; delete ai[key]
@@ -244,8 +266,9 @@ export function DatasetDetail() {
     applyItem(item.id, item.groundTruth, ai)
   }
   function acceptAllAi() {
+    const schemaKeys = (dataset?.schema ?? []).map(v => v.key)
     for (const it of items) {
-      const keys = Object.keys(it.aiSuggested).filter(k => !(it.groundTruth[k] ?? '').trim())
+      const keys = schemaKeys.filter(k => !(it.groundTruth[k] ?? '').trim() && (it.aiSuggested[k] ?? '').trim())
       if (!keys.length) continue
       const gt = { ...it.groundTruth }; const ai = { ...it.aiSuggested }
       for (const k of keys) { gt[k] = ai[k]; delete ai[k] }
@@ -300,8 +323,9 @@ export function DatasetDetail() {
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
-  // Fields the AI proposed that a human hasn't confirmed yet.
-  const aiPending = items.reduce((n, it) => n + Object.keys(it.aiSuggested).filter(k => !(it.groundTruth[k] ?? '').trim()).length, 0)
+  // Schema fields the AI proposed that a human hasn't confirmed yet (keys no longer
+  // in the schema don't count — they have no row to confirm).
+  const aiPending = items.reduce((n, it) => n + dataset.schema.filter(v => !(it.groundTruth[v.key] ?? '').trim() && (it.aiSuggested[v.key] ?? '').trim()).length, 0)
 
   return (
     <div className="dsx" style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: '22px 32px' }}>
@@ -428,6 +452,9 @@ export function DatasetDetail() {
                 <button className="dsx-ghost" style={{ padding: '3px 10px', borderColor: 'var(--p-bd)', color: 'var(--p)' }} onClick={acceptAllAi}>{tt('dataset.confirmAll')}</button>
               </div>
             )}
+            {aiNote && aiPending === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>{aiNote}</div>
+            )}
 
             {dataset.schema.length === 0 ? (
               <div style={{ padding: '22px 0', textAlign: 'center' }}>
@@ -476,8 +503,8 @@ export function DatasetDetail() {
                             const isAi = !gt.trim() && !!ai.trim()
                             return (
                             <td key={v.key}>
-                              <input className="dsx-in" style={{ width: '100%', minWidth: 92, ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
-                                value={gt || ai}
+                              <input className="dsx-in" disabled={aiFilling} style={{ width: '100%', minWidth: 92, ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
+                                value={isAi ? ai : gt}
                                 onChange={e => editCell(it.id, v.key, e.target.value)}
                                 onBlur={() => void commitCell(items.find(x => x.id === it.id) ?? it)}
                                 onKeyDown={e => { if (e.key === 'Enter') { if (isAi) acceptAi(it, v.key); else (e.target as HTMLInputElement).blur() } }} />
@@ -547,8 +574,8 @@ export function DatasetDetail() {
                           <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{v.key}</span>
                           <span style={{ fontSize: 9, color: 'var(--text-muted)', border: '0.5px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{v.type}</span>
                         </div>
-                        <input className="dsx-in" style={{ width: '100%', ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
-                          value={gt || ai}
+                        <input className="dsx-in" disabled={aiFilling} style={{ width: '100%', ...(isAi ? { borderColor: 'var(--p-bd)', color: 'var(--p)', fontStyle: 'italic' } : {}) }} placeholder={tt('dataset.typeHere')}
+                          value={isAi ? ai : gt}
                           onChange={e => editCell(focusItem.id, v.key, e.target.value)}
                           onBlur={() => void commitCell(items.find(x => x.id === focusItem.id) ?? focusItem)}
                           onKeyDown={e => { if (e.key === 'Enter') { if (isAi) acceptAi(focusItem, v.key); else (e.target as HTMLInputElement).blur() } }} />

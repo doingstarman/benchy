@@ -132,7 +132,7 @@ export const datasetsApi = {
     apiFetch<DatasetItem>(`/api/datasets/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   removeItem: (id: string, itemId: string) => fetch(`/api/datasets/${id}/items/${itemId}`, { method: 'DELETE' }),
   aiFill: (id: string, body: { scope?: 'empty' | 'all'; instruction?: string; itemIds?: string[] } = {}) =>
-    apiFetch<{ filled: number }>(`/api/datasets/${id}/ai-fill`, { method: 'POST', body: JSON.stringify(body) }),
+    apiFetch<{ filled: number; skipped: number; errored: number }>(`/api/datasets/${id}/ai-fill`, { method: 'POST', body: JSON.stringify(body) }),
   runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
   run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena' }) =>
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
