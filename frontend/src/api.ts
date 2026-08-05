@@ -121,14 +121,14 @@ export interface ArenaState {
 export const datasetsApi = {
   list: () => apiFetch<Dataset[]>('/api/datasets'),
   get: (id: string) => apiFetch<Dataset>(`/api/datasets/${id}`),
-  create: (body: { name: string; note?: string; schema?: DatasetVar[]; type?: 'files' | 'text' | 'tools' }) =>
+  create: (body: { name: string; note?: string; schema?: DatasetVar[]; type?: 'files' | 'text' | 'tools' | 'code'; language?: 'python' | 'javascript' }) =>
     apiFetch<Dataset>('/api/datasets', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: { name?: string; note?: string | null; schema?: DatasetVar[]; trustedModel?: string | null }) =>
     apiFetch<Dataset>(`/api/datasets/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: string) => fetch(`/api/datasets/${id}`, { method: 'DELETE' }),
-  addItem: (id: string, body: { attachmentId?: string; groundTruth?: Record<string, string>; input?: string }) =>
+  addItem: (id: string, body: { attachmentId?: string; groundTruth?: Record<string, string>; input?: string; tests?: string }) =>
     apiFetch<DatasetItem>(`/api/datasets/${id}/items`, { method: 'POST', body: JSON.stringify(body) }),
-  updateItem: (id: string, itemId: string, body: { attachmentId?: string; groundTruth?: Record<string, string>; aiSuggested?: Record<string, string>; input?: string }) =>
+  updateItem: (id: string, itemId: string, body: { attachmentId?: string; groundTruth?: Record<string, string>; aiSuggested?: Record<string, string>; input?: string; tests?: string }) =>
     apiFetch<DatasetItem>(`/api/datasets/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   removeItem: (id: string, itemId: string) => fetch(`/api/datasets/${id}/items/${itemId}`, { method: 'DELETE' }),
   aiFill: (id: string, body: { scope?: 'empty' | 'all'; instruction?: string; itemIds?: string[] } = {}) =>
@@ -181,6 +181,18 @@ export const resultsApi = {
   list: () => apiFetch<ResultsRow[]>('/api/results'),
   summary: (runId: string) => apiFetch<AnalyticsSummary>(`/api/results/${runId}`),
   exportUrl: (runId: string, format: 'csv' | 'json') => `/api/results/${runId}/export?format=${format}`,
+}
+
+// ─── settings (server-side app toggles) ──────────────────────────────────────
+
+export interface AppSettings {
+  codeExecution: boolean
+}
+
+export const settingsApi = {
+  get: () => apiFetch<AppSettings>('/api/settings'),
+  update: (patch: Partial<AppSettings>) =>
+    apiFetch<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 }
 
 // ─── version / updates ───────────────────────────────────────────────────────

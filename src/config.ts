@@ -31,6 +31,9 @@ interface Config {
   customTools?: CustomTool[]
   skills?: Skill[]
   mcpServers?: McpServer[]
+  // Opt-in gate for 'code' datasets: running a code dataset executes the model's
+  // solution locally in a subprocess (arbitrary code). Off unless explicitly set.
+  codeExecution?: boolean
 }
 
 export async function getSearchConfig(): Promise<SearchConfig | undefined> {
@@ -48,6 +51,20 @@ export async function getSkills(): Promise<Skill[]> {
 }
 export async function getMcpServers(): Promise<McpServer[]> {
   return (await readConfig()).mcpServers ?? []
+}
+
+// Whether 'code' datasets may execute a model's solution locally. Defaults to
+// false: absent config, an unparseable value, anything but an explicit `true`
+// keeps execution off, so a code run never fires by accident.
+export async function getCodeExecutionEnabled(): Promise<boolean> {
+  return (await readConfig()).codeExecution === true
+}
+export async function setCodeExecutionEnabled(enabled: boolean): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    config.codeExecution = enabled
+    await writeConfig(config)
+  })
 }
 
 function getBenchyDir(): string {

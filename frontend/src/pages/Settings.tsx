@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { getTheme, setTheme, watchSystem, type Theme } from '../theme'
 import { useT, type Lang } from '../i18n'
 import { useShowReasoning, setShowReasoning } from '../prefs'
-import { versionApi, type VersionInfo } from '../api'
+import { versionApi, settingsApi, type VersionInfo } from '../api'
 import { Button } from '../components/ui'
 
 const SEGMENT_CSS = `
@@ -31,10 +31,18 @@ export function Settings() {
   const showReasoning = useShowReasoning()
   const [theme, setThemeState] = useState<Theme>(getTheme)
   const [info, setInfo] = useState<VersionInfo | null>(null)
+  const [codeExec, setCodeExec] = useState<boolean | null>(null)
 
   useEffect(() => {
     versionApi.get().then(setInfo).catch(() => {})
+    settingsApi.get().then(s => setCodeExec(s.codeExecution)).catch(() => {})
   }, [])
+
+  async function applyCodeExec(on: boolean) {
+    setCodeExec(on)
+    try { setCodeExec((await settingsApi.update({ codeExecution: on })).codeExecution) }
+    catch { settingsApi.get().then(s => setCodeExec(s.codeExecution)).catch(() => {}) }
+  }
 
   useEffect(() => {
     if (theme === 'system') {
@@ -88,6 +96,23 @@ export function Settings() {
             </button>
           ))}
         </SegmentRow>
+      </section>
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <SectionLabel>{t('settings.codeExecTitle')}</SectionLabel>
+        <SegmentRow label={t('settings.codeExec')}>
+          {([true, false] as const).map(on => (
+            <button
+              key={String(on)}
+              className={`seg-btn${codeExec === on ? ' active' : ''}`}
+              onClick={() => void applyCodeExec(on)}
+              disabled={codeExec === null}
+            >
+              {on ? t('common.on') : t('common.off')}
+            </button>
+          ))}
+        </SegmentRow>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>{t('settings.codeExecHint')}</div>
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

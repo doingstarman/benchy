@@ -333,6 +333,40 @@ describe('text datasets', () => {
     expect(done.results[0].score).toBe(1)
   })
 
+  it('code datasets run the model solution against tests — score is the fraction passed', async () => {
+    await req('PUT', '/api/settings', { codeExecution: true })
+    const ds = data<{ id: string; type: string; language: string | null }>(await req('POST', '/api/datasets', { name: 'C', type: 'code', language: 'javascript' }))
+    expect(ds.type).toBe('code')
+    expect(ds.language).toBe('javascript')
+    // input-based → rejects a file; tests carry the ground truth
+    expect((await req('POST', `/api/datasets/${ds.id}/items`, { attachmentId: 'x' })).status).toBe(400)
+    const item = data<{ tests: string | null }>(await req('POST', `/api/datasets/${ds.id}/items`, {
+      input: 'Write add(a, b) returning the sum.',
+      tests: "test('a', () => assert(add(1, 2) === 3)); test('b', () => assert(add(5, 5) === 10))",
+    }))
+    expect(item.tests).toContain('add(1, 2)')
+
+    // A half-right solution: add(1,2)===3 passes, add(5,5)===10 fails → 0.5.
+    mockOutput = '```js\nfunction add(a, b) { return a === 1 ? a + b : 0 }\n```'
+    const done = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'solve it' })).runId)
+    expect(done.results[0].score).toBe(0.5)
+    expect(done.results[0].scoreDetail).toMatchObject({ a: 'match', b: 'miss' })
+  }, 20000)
+
+  it('a code run is refused unless code execution is enabled', async () => {
+    // beforeEach rewrote config without the toggle, so execution is off here.
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'C2', type: 'code', language: 'javascript' }))
+    await req('POST', `/api/datasets/${ds.id}/items`, { input: 't', tests: "test('a', () => assert(true))" })
+    const res = await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'solve' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/code execution is disabled/)
+  })
+
+  it('tests are only accepted on a code dataset', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T', type: 'text' }))
+    expect((await req('POST', `/api/datasets/${ds.id}/items`, { input: 'q', tests: 'x' })).status).toBe(400)
+  })
+
   it('ai-fill labels a text item with no file (text branch)', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
     await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })

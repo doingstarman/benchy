@@ -101,6 +101,9 @@ export interface DatasetItem {
   attachment?: AttachmentMeta | null
   // The item's text input, for text-type datasets (null for file items).
   input: string | null
+  // For 'code' items: the hidden test source (ground truth). The model's
+  // solution is run against it; the score is the fraction of tests that pass.
+  tests: string | null
   groundTruth: Record<string, string>
   // Values the trusted model proposed, awaiting human confirmation. A key here
   // that isn't yet in groundTruth renders as an AI suggestion (✦).
@@ -116,8 +119,11 @@ export interface Dataset {
   name: string
   note: string | null
   // 'files' = each item is an uploaded file; 'text'/'tools' = each item carries a
-  // text `input` (a task / a tool-calling request) instead of a file.
-  type: 'files' | 'text' | 'tools'
+  // text `input` (a task / a tool-calling request) instead of a file; 'code' =
+  // each item is a coding task whose model solution is run against hidden tests.
+  type: 'files' | 'text' | 'tools' | 'code'
+  // For 'code' datasets: which interpreter runs the solution. NULL otherwise.
+  language: 'python' | 'javascript' | null
   schema: DatasetVar[]
   trustedModel: string | null
   createdAt: number

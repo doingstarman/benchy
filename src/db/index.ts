@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS datasets (
   name TEXT NOT NULL,
   note TEXT,
   type TEXT NOT NULL DEFAULT 'files',
+  -- For 'code' datasets: 'python' | 'javascript' — which interpreter runs the
+  -- model's solution against the item's tests. NULL for non-code datasets.
+  language TEXT,
   -- JSON: [{ key, type: 'text'|'date'|'number', desc }]
   schema TEXT NOT NULL DEFAULT '[]',
   -- 'providerId:model' of a trusted model, excluded from comparison runs so it
@@ -93,6 +96,9 @@ CREATE TABLE IF NOT EXISTS dataset_items (
   attachment_id TEXT,
   -- The item's text input, for text-type datasets (NULL for file items).
   input TEXT,
+  -- For 'code' datasets: the hidden test source (ground truth). The model's
+  -- solution is run against it; the score is the fraction of tests that pass.
+  tests TEXT,
   -- JSON { key: value } — the human-confirmed ground truth for this item.
   ground_truth TEXT NOT NULL DEFAULT '{}',
   -- JSON { key: value } — values proposed by the trusted model, awaiting human
@@ -175,6 +181,9 @@ export async function initDb(path?: string): Promise<void> {
     "ALTER TABLE dataset_items ADD COLUMN ai_suggested TEXT NOT NULL DEFAULT '{}'",
     // Text-type dataset items carry their input here instead of an attachment.
     'ALTER TABLE dataset_items ADD COLUMN input TEXT',
+    // Code datasets: the interpreter, and per-item hidden test source.
+    'ALTER TABLE datasets ADD COLUMN language TEXT',
+    'ALTER TABLE dataset_items ADD COLUMN tests TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

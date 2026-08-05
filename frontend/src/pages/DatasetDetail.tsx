@@ -151,7 +151,9 @@ export function DatasetDetail() {
     setSchemaDirty(false)
     setItems(ds.items ?? [])
     setProviders(ps)
-    if (!prompt) setPrompt(tt('dataset.promptBody'))
+    // Code datasets have no schema to define, so open straight into markup.
+    if (ds.type === 'code') setTab('markup')
+    if (!prompt) setPrompt(tt(ds.type === 'code' ? 'dataset.codePromptBody' : 'dataset.promptBody'))
     const runs = await datasetsApi.runs(id)
     const last = runs[0]
     if (last && last.status !== 'running') {
@@ -168,7 +170,7 @@ export function DatasetDetail() {
   const models = useMemo(() => availableModels(providers), [providers])
   const trusted = dataset?.trustedModel ?? null
   const comparableModels = models.filter(m => m !== trusted)
-  const labeledCount = useMemo(() => items.filter(i => isItemLabeled(i, dataset?.schema ?? [])).length, [items, dataset])
+  const labeledCount = useMemo(() => items.filter(i => dataset?.type === 'code' ? !!(i.tests ?? '').trim() : isItemLabeled(i, dataset?.schema ?? [])).length, [items, dataset])
 
   useSSE(runId, e => {
     if (e.event !== 'run_done') return
@@ -242,6 +244,13 @@ export function DatasetDetail() {
   function commitInput(item: DatasetItem) {
     void mutateItem(item.id, { input: item.input ?? '' })
   }
+  // Code items: `input` is the task, `tests` is the hidden test suite (ground truth).
+  function editTests(itemId: string, value: string) {
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, tests: value } : i))
+  }
+  function commitTests(item: DatasetItem) {
+    void mutateItem(item.id, { tests: item.tests ?? '' })
+  }
   function editCell(itemId: string, key: string, value: string) {
     // Typing over a field also clears any pending AI suggestion for it — the human
     // value supersedes the machine's.
@@ -254,7 +263,7 @@ export function DatasetDetail() {
   // Serialized, reconciled item write: awaits the item's previous write, PATCHes,
   // then adopts the server's authoritative row; on failure resyncs from the server
   // so the UI can never show a phantom "saved" state.
-  function mutateItem(itemId: string, body: { groundTruth?: Record<string, string>; aiSuggested?: Record<string, string>; input?: string }): Promise<unknown> {
+  function mutateItem(itemId: string, body: { groundTruth?: Record<string, string>; aiSuggested?: Record<string, string>; input?: string; tests?: string }): Promise<unknown> {
     const prev = writeChain.current.get(itemId) ?? Promise.resolve()
     const next = prev.catch(() => {}).then(async () => {
       try {
@@ -311,6 +320,12 @@ export function DatasetDetail() {
     if (cur) await commitCell(cur)
     setFocusIdx(Math.max(0, Math.min(i, items.length - 1)))
   }
+  // Code items commit their task + tests (not per-field ground truth) before advancing.
+  async function saveCodeAndNext() {
+    const cur = items[Math.min(focusIdx, items.length - 1)]
+    if (cur) await mutateItem(cur.id, { input: cur.input ?? '', tests: cur.tests ?? '' })
+    setFocusIdx(Math.min(focusIdx + 1, items.length - 1))
+  }
 
   // ── run ──
   async function startRun() {
@@ -321,7 +336,7 @@ export function DatasetDetail() {
     setArena(null)
     setCurWorst(null)
     try {
-      const { runId: newRun } = await datasetsApi.run(id, { models: chosen, prompt: prompt.trim(), mode: runMode })
+      const { runId: newRun } = await datasetsApi.run(id, { models: chosen, prompt: prompt.trim(), mode: isCode ? 'score' : runMode })
       setRunId(newRun)
       setViewRunId(newRun)
     } finally { setStarting(false) }
@@ -356,7 +371,12 @@ export function DatasetDetail() {
   // Input-based datasets (text + tools) share the whole markup/run path; only
   // 'files' uses attachments. `isText` = "input-based" (kept the name to avoid churn).
   const isText = dataset?.type !== 'files'
-  const inputPlaceholderKey = dataset?.type === 'tools' ? 'dataset.toolsInputPlaceholder' : 'dataset.inputPlaceholder'
+  // Code items store the task in `input` and the hidden tests in `tests`; they
+  // are "done" once tests exist, and have no per-field schema to markup.
+  const isCode = dataset.type === 'code'
+  const itemDone = (it: DatasetItem): boolean => isCode ? !!(it.tests ?? '').trim() : isItemLabeled(it, dataset.schema)
+  const inputPlaceholderKey = dataset?.type === 'tools' ? 'dataset.toolsInputPlaceholder'
+    : dataset?.type === 'code' ? 'dataset.codeTaskPlaceholder' : 'dataset.inputPlaceholder'
   // Schema fields the AI proposed that a human hasn't confirmed yet (keys no longer
   // in the schema don't count — they have no row to confirm).
   const aiPending = items.reduce((n, it) => n + dataset.schema.filter(v => !(it.groundTruth[v.key] ?? '').trim() && (it.aiSuggested[v.key] ?? '').trim()).length, 0)
@@ -382,18 +402,26 @@ export function DatasetDetail() {
         <div style={{ display: 'flex', gap: 28, padding: '14px 20px', background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: 4 }}>
           <div className="dsx-stat"><b>{items.length}</b><span>{tt('dataset.cItems')}</span></div>
           <div className="dsx-stat"><b style={{ color: items.length && labeledCount === items.length ? 'var(--ok)' : undefined }}>{labeledCount}/{items.length}</b><span>{tt('dataset.cLabeled')}</span></div>
-          <div className="dsx-stat"><b>{dataset.schema.length}</b><span>{tt('dataset.cSchema')}</span></div>
-          <div className="dsx-stat" style={{ minWidth: 0 }}>
-            <b style={{ fontSize: 13, color: trusted ? 'var(--p)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{trusted ? modelLabel(trusted) : tt('dataset.trustedNone')}</b>
-            <span>{tt('dataset.trusted')}</span>
-          </div>
+          {isCode ? (
+            <div className="dsx-stat"><b style={{ fontSize: 13, color: 'var(--p)' }}>{dataset.language === 'javascript' ? 'JavaScript' : 'Python'}</b><span>{tt('dataset.cLanguage')}</span></div>
+          ) : (
+            <>
+              <div className="dsx-stat"><b>{dataset.schema.length}</b><span>{tt('dataset.cSchema')}</span></div>
+              <div className="dsx-stat" style={{ minWidth: 0 }}>
+                <b style={{ fontSize: 13, color: trusted ? 'var(--p)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{trusted ? modelLabel(trusted) : tt('dataset.trustedNone')}</b>
+                <span>{tt('dataset.trusted')}</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ── Tabs ── */}
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)', margin: '10px 0 18px' }}>
-          <button className={`dsx-tab${tab === 'schema' ? ' active' : ''}`} onClick={() => setTab('schema')}>
-            {tt('dataset.schemaTitle')}<span className="cnt">{dataset.schema.length}</span>
-          </button>
+          {!isCode && (
+            <button className={`dsx-tab${tab === 'schema' ? ' active' : ''}`} onClick={() => setTab('schema')}>
+              {tt('dataset.schemaTitle')}<span className="cnt">{dataset.schema.length}</span>
+            </button>
+          )}
           <button className={`dsx-tab${tab === 'markup' ? ' active' : ''}`} onClick={() => setTab('markup')}>
             {tt('dataset.markup')}<span className="cnt">{labeledCount}/{items.length}</span>
           </button>
@@ -403,7 +431,7 @@ export function DatasetDetail() {
         </div>
 
         {/* ── Schema tab ── */}
-        {tab === 'schema' && (
+        {tab === 'schema' && !isCode && (
           <div className="dsx-sec">
             <div className="dsx-h">{tt('dataset.schemaTitle')}</div>
             <div className="dsx-sub">{tt('dataset.schemaSub')}</div>
@@ -450,7 +478,7 @@ export function DatasetDetail() {
         )}
 
         {/* ── Markup tab (focus-first) ── */}
-        {tab === 'markup' && (
+        {tab === 'markup' && !isCode && (
           <div className="dsx-sec">
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
               <div style={{ flex: 1 }}>
@@ -539,7 +567,7 @@ export function DatasetDetail() {
                   </tr></thead>
                   <tbody>
                     {items.map((it, idx) => {
-                      const done = isItemLabeled(it, dataset.schema)
+                      const done = itemDone(it)
                       const isImg = it.attachment?.mimeType.startsWith('image/')
                       return (
                         <tr key={it.id}>
@@ -601,7 +629,7 @@ export function DatasetDetail() {
                   <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.queue')}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 520, overflowY: 'auto' }}>
                     {items.map((it, i) => {
-                      const done = isItemLabeled(it, dataset.schema)
+                      const done = itemDone(it)
                       const active = i === Math.min(focusIdx, items.length - 1)
                       const isImg = it.attachment?.mimeType.startsWith('image/')
                       return (
@@ -681,12 +709,84 @@ export function DatasetDetail() {
           </div>
         )}
 
+        {/* ── Markup tab: code (task + hidden tests, one item at a time) ── */}
+        {tab === 'markup' && isCode && (
+          <div className="dsx-sec">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
+              <div style={{ flex: 1 }}>
+                <div className="dsx-h">{tt('dataset.markup')}</div>
+                <div className="dsx-sub">{tt('dataset.codeMarkupSub')}</div>
+              </div>
+              <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addTask')}</button>
+            </div>
+            {aiNote && <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>{aiNote}</div>}
+            {items.length === 0 || !focusItem ? (
+              <div style={{ padding: '22px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{tt('dataset.codeFirst')}</div>
+                <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addTask')}</button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr 1fr', gap: 16, marginTop: 10, alignItems: 'start' }}>
+                {/* queue */}
+                <div>
+                  <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.queue')}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 520, overflowY: 'auto' }}>
+                    {items.map((it, i) => {
+                      const done = itemDone(it)
+                      const active = i === Math.min(focusIdx, items.length - 1)
+                      return (
+                        <button key={it.id} onClick={() => void goToFocus(i)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left', border: `0.5px solid ${active ? 'var(--p-bd)' : 'var(--border)'}`, background: active ? 'var(--p-bg)' : 'var(--bg-base)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', cursor: 'pointer' }}>
+                          <span style={{ flex: 1, fontSize: 10.5, fontFamily: 'var(--font-mono)', color: active ? 'var(--p)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(it.input ?? '').trim() || `#${i + 1}`}</span>
+                          <span style={{ fontSize: 11, color: done ? 'var(--ok)' : active ? 'var(--p)' : 'var(--text-muted)' }}>{done ? '✓' : active ? '●' : ''}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                    <span>{Math.min(focusIdx, items.length - 1) + 1} / {items.length}</span>
+                    <button className="dsx-x" onClick={() => void removeItem(focusItem.id)} style={{ fontSize: 11 }}>× {tt('dataset.delete')}</button>
+                  </div>
+                </div>
+
+                {/* task */}
+                <div>
+                  <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.codeTask')}</div>
+                  <textarea className="dsx-in" placeholder={tt('dataset.codeTaskPlaceholder')}
+                    style={{ width: '100%', minHeight: 460, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.6 }}
+                    value={focusItem.input ?? ''}
+                    onChange={e => editInput(focusItem.id, e.target.value)}
+                    onBlur={() => commitInput(items.find(x => x.id === focusItem.id) ?? focusItem)} />
+                </div>
+
+                {/* hidden tests (ground truth) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                    <span className="dsx-label">{tt('dataset.codeTests')}</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{dataset.language === 'javascript' ? 'JavaScript' : 'Python'}</span>
+                  </div>
+                  <textarea className="dsx-in" placeholder={dataset.language === 'javascript' ? tt('dataset.codeTestsPlaceholderJs') : tt('dataset.codeTestsPlaceholderPy')}
+                    style={{ width: '100%', minHeight: 460, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.6 }}
+                    value={focusItem.tests ?? ''}
+                    onChange={e => editTests(focusItem.id, e.target.value)}
+                    onBlur={() => commitTests(items.find(x => x.id === focusItem.id) ?? focusItem)} />
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>{tt('dataset.codeTestsHint')}</div>
+                  <button className="dsx-primary" style={{ width: '100%', marginTop: 12 }} onClick={() => void saveCodeAndNext()}>✓ {tt('dataset.saveNext')}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Run tab ── */}
         {tab === 'run' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="dsx-sec">
               <div className="dsx-h">{tt('dataset.runTitle')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+                {isCode ? (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', maxWidth: 560, lineHeight: 1.5 }}>{tt('dataset.codeRunHint')}</div>
+                ) : (
                 <div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     {(['score', 'arena'] as const).map(mo => (
@@ -699,6 +799,7 @@ export function DatasetDetail() {
                   </div>
                   {runMode === 'arena' && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, maxWidth: 560 }}>{tt('dataset.benchExplain')}</div>}
                 </div>
+                )}
                 <div>
                   <div className="dsx-label" style={{ marginBottom: 6 }}>{tt('dataset.prompt')}</div>
                   <textarea className="dsx-in" style={{ width: '100%', minHeight: 60, resize: 'vertical' }} value={prompt} onChange={e => setPrompt(e.target.value)} />
@@ -733,7 +834,7 @@ export function DatasetDetail() {
             {runMode === 'score' && matrix.length > 0 && (
               <div className="dsx-sec">
                 <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
-                <div className="dsx-sub">{tt('dataset.resultsHint')}</div>
+                <div className="dsx-sub">{isCode ? tt('dataset.codeResultsHint') : tt('dataset.resultsHint')}</div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="dsx-table">
                     <thead><tr>
