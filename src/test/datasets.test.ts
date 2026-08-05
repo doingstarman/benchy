@@ -289,6 +289,21 @@ describe('text datasets', () => {
     expect(done.results[0].score).toBe(1)
   })
 
+  it('imports text items from CSV, mapping input + schema columns', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'CSV', type: 'text', schema: [{ key: 'a', type: 'text' }, { key: 'b', type: 'text' }] }))
+    const csv = 'input,a,b\nq1,va,vb\nq2,wa,wb'
+    expect(data<{ imported: number }>(await req('POST', `/api/datasets/${ds.id}/import-csv`, { csv })).imported).toBe(2)
+    const items = data<{ items: { input: string | null; groundTruth: Record<string, string> }[] }>(await req('GET', `/api/datasets/${ds.id}`)).items
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ input: 'q1', groundTruth: { a: 'va', b: 'vb' } })
+    expect(items[1]).toMatchObject({ input: 'q2', groundTruth: { a: 'wa', b: 'wb' } })
+  })
+
+  it('rejects CSV import on a files dataset', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'F', type: 'files', schema: [] }))
+    expect((await req('POST', `/api/datasets/${ds.id}/import-csv`, { csv: 'input\nq' })).status).toBe(400)
+  })
+
   it('ai-fill labels a text item with no file (text branch)', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'T3', type: 'text', schema: [{ key: 'x', type: 'text' }] }))
     await req('PATCH', `/api/datasets/${ds.id}`, { trustedModel: 'p:A' })

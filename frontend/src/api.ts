@@ -133,6 +133,8 @@ export const datasetsApi = {
   removeItem: (id: string, itemId: string) => fetch(`/api/datasets/${id}/items/${itemId}`, { method: 'DELETE' }),
   aiFill: (id: string, body: { scope?: 'empty' | 'all'; instruction?: string; itemIds?: string[] } = {}) =>
     apiFetch<{ filled: number; skipped: number; errored: number }>(`/api/datasets/${id}/ai-fill`, { method: 'POST', body: JSON.stringify(body) }),
+  importCsv: (id: string, csv: string) =>
+    apiFetch<{ imported: number }>(`/api/datasets/${id}/import-csv`, { method: 'POST', body: JSON.stringify({ csv }) }),
   runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
   run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena' }) =>
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),

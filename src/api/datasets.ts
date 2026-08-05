@@ -10,6 +10,7 @@ import {
 } from './uploads.js'
 import { scoreResult, parseModelOutput } from '../scoring.js'
 import { computeStandings } from '../arena.js'
+import { parseCsv } from '../csv.js'
 import type { Message } from '../adapters/base.js'
 import type { AttachmentMeta, ArenaVerdict, Dataset, DatasetItem, DatasetVar, DatasetVarType } from '../types.js'
 
@@ -321,6 +322,36 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       return { data: rowToItem(updated) }
     },
   )
+
+  // Bulk-import text items from a CSV: header maps an `input` column (or the first
+  // column) to the item's input, and columns matching schema keys to ground truth.
+  app.post<{ Params: { id: string }; Body: { csv?: string } }>('/api/datasets/:id/import-csv', async (req, reply) => {
+    const db = getDb()
+    const row = getDatasetRow(req.params.id)
+    if (!row) return reply.code(404).send({ error: 'Dataset not found' })
+    const dataset = rowToDataset(row)
+    if (dataset.type !== 'text') return reply.code(400).send({ error: 'CSV import is only for text datasets' })
+
+    const rows = parseCsv(typeof req.body.csv === 'string' ? req.body.csv : '')
+    if (rows.length < 2) return reply.code(400).send({ error: 'CSV needs a header row and at least one data row' })
+
+    const header = rows[0].map(h => h.trim())
+    const inputCol = header.findIndex(h => h.toLowerCase() === 'input')
+    const keyCols = dataset.schema.map(v => ({ key: v.key, idx: header.indexOf(v.key) }))
+    const insert = db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    let nextIdx = (db.prepare('SELECT COALESCE(MAX(idx), -1) + 1 AS n FROM dataset_items WHERE dataset_id = ?').get(req.params.id) as { n: number }).n
+
+    let imported = 0
+    for (const r of rows.slice(1)) {
+      const input = (inputCol >= 0 ? r[inputCol] : r[0]) ?? ''
+      const gt: Record<string, string> = {}
+      for (const { key, idx } of keyCols) if (idx >= 0 && (r[idx] ?? '').trim() !== '') gt[key] = r[idx]
+      insert.run(randomUUID(), req.params.id, nextIdx++, null, input, JSON.stringify(gt), Date.now())
+      imported++
+    }
+    db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id)
+    return { data: { imported } }
+  })
 
   app.delete<{ Params: { id: string; itemId: string } }>('/api/datasets/:id/items/:itemId', async (req, reply) => {
     const db = getDb()

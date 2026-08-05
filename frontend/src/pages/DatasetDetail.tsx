@@ -123,6 +123,9 @@ export function DatasetDetail() {
   const [focusIdx, setFocusIdx] = useState(0)
   const [aiFilling, setAiFilling] = useState(false)
   const [aiNote, setAiNote] = useState<string | null>(null)
+  const [csvOpen, setCsvOpen] = useState(false)
+  const [csvText, setCsvText] = useState('')
+  const [csvBusy, setCsvBusy] = useState(false)
   // Per-item write serialization: a blur-commit and an accept can fire for the
   // same item in one gesture; chaining keeps the last-called PATCH the last to land.
   const writeChain = useRef<Map<string, Promise<unknown>>>(new Map())
@@ -216,6 +219,17 @@ export function DatasetDetail() {
   async function addTextItem() {
     const it = await datasetsApi.addItem(id, { input: '' })
     setItems(prev => [...prev, it])
+  }
+  async function importCsvNow() {
+    if (!csvText.trim()) return
+    setCsvBusy(true)
+    try {
+      const r = await datasetsApi.importCsv(id, csvText)
+      const ds = await datasetsApi.get(id)
+      setItems(ds.items ?? []); setDataset(ds)
+      setCsvOpen(false); setCsvText('')
+      setAiNote(tt('dataset.csvImported', { n: r.imported }))
+    } finally { setCsvBusy(false) }
   }
   function editInput(itemId: string, value: string) {
     setItems(prev => prev.map(i => i.id === itemId ? { ...i, input: value } : i))
@@ -453,7 +467,10 @@ export function DatasetDetail() {
                 </button>
               )}
               {isText ? (
-                <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
+                <>
+                  <button className="dsx-ghost" onClick={() => setCsvOpen(o => !o)}>↓ {tt('dataset.importCsv')}</button>
+                  <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
+                </>
               ) : (
                 <>
                   <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
@@ -463,6 +480,19 @@ export function DatasetDetail() {
                 </>
               )}
             </div>
+
+            {isText && csvOpen && (
+              <div style={{ margin: '0 0 12px', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 12, background: 'var(--bg-elevated)' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>{tt('dataset.csvHint')}</div>
+                <textarea className="dsx-in" style={{ width: '100%', minHeight: 120, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 11 }}
+                  placeholder={['input', ...dataset.schema.map(v => v.key)].join(',')}
+                  value={csvText} onChange={e => setCsvText(e.target.value)} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button className="dsx-primary" disabled={csvBusy || !csvText.trim()} onClick={() => void importCsvNow()}>{tt('dataset.doImport')}</button>
+                  <button className="dsx-ghost" onClick={() => setCsvOpen(false)}>{t('common.cancel')}</button>
+                </div>
+              </div>
+            )}
 
             {aiPending > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 12px', fontSize: 11, color: 'var(--p)' }}>
