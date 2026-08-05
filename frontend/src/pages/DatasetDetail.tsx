@@ -492,7 +492,7 @@ export function DatasetDetail() {
                     ))}
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                    <button className="dsx-primary" style={{ flex: 1 }} disabled={focusIdx >= items.length - 1} onClick={() => void goToFocus(focusIdx + 1)}>
+                    <button className="dsx-primary" style={{ flex: 1 }} onClick={() => void goToFocus(focusIdx + 1)}>
                       ✓ {tt('dataset.saveNext')}
                     </button>
                     <button className="dsx-ghost" disabled={focusIdx >= items.length - 1} onClick={() => setFocusIdx(Math.min(focusIdx + 1, items.length - 1))}>
@@ -622,10 +622,12 @@ export function DatasetDetail() {
                                   <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                                     {blind ? `${tt('dataset.blindLabel')} ${idx + 1}` : modelLabel(r.model)}
                                   </span>
-                                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                                    {r.metrics.totalTime != null ? `${(r.metrics.totalTime / 1000).toFixed(1)}s` : ''}
-                                    {r.metrics.outputTokens != null ? ` · ${r.metrics.outputTokens} tok` : ''}
-                                  </span>
+                                  {!blind && (
+                                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                      {r.metrics.totalTime != null ? `${(r.metrics.totalTime / 1000).toFixed(1)}s` : ''}
+                                      {r.metrics.outputTokens != null ? ` · ${r.metrics.outputTokens} tok` : ''}
+                                    </span>
+                                  )}
                                   <div style={{ flex: 1 }} />
                                   <button className="dsx-primary" style={{ padding: '4px 12px' }} onClick={() => void judge(r.model)}>✓ {tt('dataset.pickBest')}</button>
                                   <button onClick={() => setCurWorst(isWorst ? null : r.model)}
@@ -649,6 +651,10 @@ export function DatasetDetail() {
 
                   <div>
                     <div className="dsx-label" style={{ marginBottom: 8 }}>{tt('dataset.standings')}</div>
+                    {blind ? (
+                      // Names + live Elo would defeat the blind — keep them hidden while judging.
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '6px 8px', border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>{tt('dataset.blindStandings')}</div>
+                    ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {arena.standings.map((s, i) => (
                         <div key={s.model} style={{ padding: '6px 8px', borderRadius: 'var(--radius-sm)', background: i === 0 ? 'var(--p-bg)' : 'transparent' }}>
@@ -662,6 +668,7 @@ export function DatasetDetail() {
                         </div>
                       ))}
                     </div>
+                    )}
                     <button className="dsx-ghost" style={{ marginTop: 14, width: '100%' }} onClick={() => void exitArena()}>{tt('dataset.exitBench')}</button>
                   </div>
                 </div>

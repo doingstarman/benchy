@@ -101,6 +101,22 @@ describe('GET /api/results/:runId', () => {
     expect(s.matrix[0].overall).toBe(1)
   })
 
+  it('arena winner is null when every judged item was only skipped', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'S', schema: [] }))
+    await req('POST', `/api/datasets/${ds.id}/items`, {})
+    const run = await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:good', 'p:bad'], prompt: 'go', mode: 'arena' })
+    const runId = data<{ runId: string }>(run).runId
+    await waitForRun(runId)
+
+    // A skip writes a real verdict row but carries no judgment — no winner.
+    await req('PUT', `/api/datasets/${ds.id}/runs/${runId}/verdicts/0`, { skipped: true })
+
+    expect(data<Row[]>(await req('GET', '/api/results'))[0].winner).toBeNull()
+    const s = data<{ winner: string | null; skipped: number }>(await req('GET', `/api/results/${runId}`))
+    expect(s.winner).toBeNull()
+    expect(s.skipped).toBe(1)
+  })
+
   it('arena run: winner reflects the human verdict', async () => {
     // Reconstruct the dataset id from the run to PUT a verdict.
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'A', schema: [] }))
@@ -145,5 +161,11 @@ describe('toCsv', () => {
   it('escapes commas, quotes, and newlines', () => {
     const out = toCsv([{ a: 'plain', b: 'has,comma', c: 'has"quote', d: 'has\nnewline' }])
     expect(out).toBe('a,b,c,d\nplain,"has,comma","has""quote","has\nnewline"\n')
+  })
+
+  it('neutralizes spreadsheet formula-leading cells', () => {
+    // =/+/-/@ would execute in Excel; prefixing with ' keeps them as text.
+    const out = toCsv([{ a: '=SUM(1)', b: '+1', c: '-2', d: '@cmd' }])
+    expect(out).toBe("a,b,c,d\n'=SUM(1),'+1,'-2,'@cmd\n")
   })
 })

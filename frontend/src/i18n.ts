@@ -199,6 +199,7 @@ export const DICT: Record<string, Entry> = {
   'dataset.exitBench': { en: 'Exit benchmark', ru: 'Выйти из бенчмарка' },
   'dataset.arenaProgress': { en: 'judged', ru: 'оценено' },
   'dataset.blindLabel': { en: 'Model', ru: 'Модель' },
+  'dataset.blindStandings': { en: 'Standings hidden while judging blind', ru: 'Счёт скрыт в слепом режиме' },
 
   // ── results (test database + analytics) ──
   'results.title': { en: 'Results', ru: 'Результаты' },
@@ -223,7 +224,7 @@ export const DICT: Record<string, Entry> = {
   'results.anChartField': { en: 'Per-variable accuracy', ru: 'Точность по переменным' },
   'results.anChartLat': { en: 'Latency, ms', ru: 'Время ответа, мс' },
   'results.anItems': { en: 'Where the winner still fails', ru: 'Слабые места лучшей модели' },
-  'results.ties': { en: 'ties', ru: 'ничьих' },
+  'results.skipped': { en: 'skipped', ru: 'пропущено' },
   'results.items': { en: 'items', ru: 'элементов' },
 
   // ── settings ──

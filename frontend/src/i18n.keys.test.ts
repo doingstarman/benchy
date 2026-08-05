@@ -23,8 +23,9 @@ const definedKeys = new Set(Object.keys(DICT))
 const usedKeys = new Set<string>()
 for (const file of sourceFiles(FRONTEND_SRC)) {
   const src = readFileSync(file, 'utf8')
-  for (const m of src.matchAll(/\bt\('([a-zA-Z0-9._]+)'/g)) usedKeys.add(m[1])
-  for (const m of src.matchAll(/\bt\(`([a-zA-Z0-9._]+)\$\{/g)) {
+  // t('key') and the aliased tt('key') (DatasetDetail renames useT's t to tt).
+  for (const m of src.matchAll(/\bt{1,2}\('([a-zA-Z0-9._]+)'/g)) usedKeys.add(m[1])
+  for (const m of src.matchAll(/\bt{1,2}\(`([a-zA-Z0-9._]+)\$\{/g)) {
     for (let i = 0; i < 3; i++) usedKeys.add(`${m[1]}${i}`)
   }
 }

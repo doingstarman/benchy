@@ -285,4 +285,22 @@ describe('arena mode', () => {
     expect(redo.standings.find(s => s.model === 'p:B')!.wins).toBe(1)
     expect(redo.standings.find(s => s.model === 'p:A')!.wins).toBe(0)
   })
+
+  it('freezes the item range to the run snapshot — a verdict for an item added after the run is rejected', async () => {
+    const id = await arenaDataset(1) // the run will include exactly 1 item
+    mockOutput = 'x'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${id}/run`, { models: ['p:A', 'p:B'], prompt: 'go', mode: 'arena' })).runId
+    await waitForRun(runId)
+
+    // Dataset grows after the run — the arena's frozen item set must not grow.
+    await req('POST', `/api/datasets/${id}/items`, {})
+    // Index 1 exists in the dataset now, but the run never produced it → rejected
+    // (a live-count range check would have poisoned the standings with it).
+    expect((await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/1`, { bestModel: 'p:A' })).status).toBe(400)
+    expect((await req('PUT', `/api/datasets/${id}/runs/${runId}/verdicts/0`, { bestModel: 'p:A' })).status).toBe(200)
+
+    const a = data<ArenaState>(await req('GET', `/api/datasets/${id}/runs/${runId}/arena`))
+    expect(a.itemCount).toBe(1)
+    expect(a.nextIndex).toBe(-1)
+  })
 })

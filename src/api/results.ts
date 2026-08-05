@@ -22,7 +22,6 @@ interface RunRow {
 interface ResRow {
   model: string
   prompt_index: number
-  text: string
   score: number | null
   score_detail: string | null
   total_time: number | null
@@ -97,8 +96,12 @@ export function scoreMatrix(schema: DatasetVar[], results: ResRow[]): MatrixRow[
 }
 
 function csvCell(v: unknown): string {
-  const s = v == null ? '' : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  let s = v == null ? '' : String(v)
+  // Neutralize spreadsheet formula injection: a cell that opens with =,+,-,@ (or a
+  // control char) runs as a formula in Excel/Sheets. Prefix with an apostrophe so
+  // it's read as text. Model output is untrusted even on a single-user tool.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export function toCsv(rows: Record<string, unknown>[]): string {
@@ -118,9 +121,12 @@ function loadVerdicts(runId: string): ArenaVerdict[] {
   return rows.map(r => ({ promptIndex: r.prompt_index, bestModel: r.best_model, worstModel: r.worst_model, skipped: r.skipped === 1 }))
 }
 
+// No `text` — winner and analytics never read the answer body; only the export
+// path needs it, and queries for it separately. Keeps the list endpoint from
+// materializing every run's full output just to pick a winner.
 function loadResults(runId: string): ResRow[] {
   return getDb().prepare(
-    'SELECT model, prompt_index, text, score, score_detail, total_time, input_tokens, output_tokens FROM results WHERE run_id = ? ORDER BY prompt_index, model'
+    'SELECT model, prompt_index, score, score_detail, total_time, input_tokens, output_tokens FROM results WHERE run_id = ? ORDER BY prompt_index, model'
   ).all(runId) as ResRow[]
 }
 
@@ -129,7 +135,10 @@ function loadResults(runId: string): ResRow[] {
 function computeWinner(runId: string, models: string[], mode: string, results: ResRow[]): string | null {
   if (mode === 'arena') {
     const verdicts = loadVerdicts(runId)
-    if (!verdicts.length) return null
+    // Skipped verdicts are real rows but carry no judgment — a skip-only run has
+    // no winner (every model stays at the starting Elo, and standings[0] would
+    // just be the first model in the list).
+    if (!verdicts.some(v => !v.skipped && (v.bestModel || v.worstModel))) return null
     return computeStandings(models, verdicts)[0]?.model ?? null
   }
   const matrix = scoreMatrix([], results) // overall only needs scores, not schema
@@ -150,7 +159,7 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
               (SELECT COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)),0) FROM results WHERE run_id = r.id) AS tokens,
               (SELECT MAX(total_time) FROM results WHERE run_id = r.id) AS duration_ms
        FROM runs r JOIN datasets d ON d.id = r.dataset_id
-       ORDER BY r.created_at DESC`,
+       ORDER BY r.created_at DESC LIMIT 500`,
     ).all() as RunRow[]
 
     return {
@@ -195,8 +204,9 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
     if (mode === 'arena') {
       const verdicts = loadVerdicts(req.params.runId)
       const standings = computeStandings(models, verdicts)
-      const winner = verdicts.length ? standings[0]?.model ?? null : null
-      const ties = verdicts.filter(v => v.skipped).length
+      const judged = verdicts.some(v => !v.skipped && (v.bestModel || v.worstModel))
+      const winner = judged ? standings[0]?.model ?? null : null
+      const skipped = verdicts.filter(v => v.skipped).length
       // Items where the winner wasn't the human's pick — where it still loses.
       const weak = verdicts
         .filter(v => !v.skipped && v.bestModel && v.bestModel !== winner)
@@ -205,7 +215,7 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
       return {
         data: {
           mode, datasetName: run.dataset_name, itemCount, modelCount: models.length,
-          winner, tokens, durationMs, coverage: verdicts.length, ties,
+          winner, tokens, durationMs, coverage: verdicts.length, skipped,
           standings, matrix: null, agreement: null, perModelLatency, weak,
         },
       }
@@ -226,7 +236,7 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
     return {
       data: {
         mode, datasetName: run.dataset_name, itemCount, modelCount: models.length,
-        winner, tokens, durationMs, coverage: scoredItems, ties: 0,
+        winner, tokens, durationMs, coverage: scoredItems, skipped: 0,
         standings: null, matrix, agreement: null, perModelLatency, weak,
       },
     }
@@ -239,7 +249,14 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
     ).get(req.params.runId) as { dataset_id: string; dataset_name: string; mode: string | null } | undefined
     if (!run) return reply.code(404).send({ error: 'Not a dataset test run' })
 
-    const results = loadResults(req.params.runId)
+    // Export is the one path that needs the answer body, so it queries text here
+    // (loadResults deliberately omits it).
+    const results = db().prepare(
+      'SELECT model, prompt_index, text, score, total_time, input_tokens, output_tokens FROM results WHERE run_id = ? ORDER BY prompt_index, model'
+    ).all(req.params.runId) as {
+      model: string; prompt_index: number; text: string; score: number | null
+      total_time: number | null; input_tokens: number | null; output_tokens: number | null
+    }[]
     const verdicts = new Map(loadVerdicts(req.params.runId).map(v => [v.promptIndex, v]))
     const items = db().prepare('SELECT idx, attachment_id, ground_truth FROM dataset_items WHERE dataset_id = ? ORDER BY idx')
       .all(run.dataset_id) as ItemRow[]

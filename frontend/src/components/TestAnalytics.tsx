@@ -85,7 +85,7 @@ export function TestAnalytics({ runId }: { runId: string }) {
         <div className="ta-sec" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <span className="ta-lbl">{t('results.anCoverage')}</span>
           <span className="ta-big">{s.coverage} / {s.itemCount}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{arena && s.ties ? `${s.ties} ${t('results.ties')}` : ''}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{arena && s.skipped ? `${s.skipped} ${t('results.skipped')}` : ''}</span>
         </div>
       </div>
 

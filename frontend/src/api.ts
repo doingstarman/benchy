@@ -165,7 +165,7 @@ export interface AnalyticsSummary {
   tokens: number
   durationMs: number | null
   coverage: number
-  ties: number
+  skipped: number
   standings: { model: string; elo: number; wins: number; losses: number }[] | null
   matrix: { model: string; overall: number | null; perVar: Record<string, number | null> }[] | null
   agreement: number | null

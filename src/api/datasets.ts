@@ -437,10 +437,14 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
   // Load an arena run + its dataset's item count, or reply 404. Shared by the
   // GET and the verdict PUT so both agree on what a valid arena run is.
   function loadArenaRun(datasetId: string, runId: string): { models: string[]; itemCount: number } | null {
-    const run = getDb().prepare('SELECT models, dataset_id, mode FROM runs WHERE id = ?').get(runId) as
-      { models: string; dataset_id: string | null; mode: string | null } | undefined
+    const run = getDb().prepare('SELECT models, prompts, dataset_id, mode FROM runs WHERE id = ?').get(runId) as
+      { models: string; prompts: string; dataset_id: string | null; mode: string | null } | undefined
     if (!run || run.dataset_id !== datasetId || run.mode !== 'arena') return null
-    const itemCount = (getDb().prepare('SELECT COUNT(*) n FROM dataset_items WHERE dataset_id = ?').get(datasetId) as { n: number }).n
+    // The run's item set is FROZEN at creation (one prompt per item that ran).
+    // Deriving itemCount from the live dataset_items lets a later add/remove admit
+    // verdicts for indices the run never produced (poisoning Elo) or truncate the
+    // resume range. Read it from the snapshot instead.
+    const itemCount = (JSON.parse(run.prompts) as string[]).length
     return { models: JSON.parse(run.models) as string[], itemCount }
   }
 

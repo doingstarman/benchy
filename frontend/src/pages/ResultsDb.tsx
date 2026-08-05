@@ -31,7 +31,11 @@ function pct(v: number | null): string {
 
 function downloadListCsv(rows: ResultsRow[]) {
   const cols = ['datasetName', 'itemCount', 'modelCount', 'mode', 'winner', 'avgScore', 'tokens', 'durationMs', 'createdAt']
-  const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+  const esc = (v: unknown) => {
+    let s = v == null ? '' : String(v)
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}` // neutralize spreadsheet formula injection
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
   const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc((r as unknown as Record<string, unknown>)[c])).join(','))].join('\n')
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
   const a = document.createElement('a')
