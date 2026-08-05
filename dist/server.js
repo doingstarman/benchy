@@ -11,6 +11,7 @@ import { registerRunsRoutes } from './api/runs.js';
 import { registerBenchmarkRoutes } from './api/benchmark.js';
 import { registerDatasetsRoutes } from './api/datasets.js';
 import { registerResultsRoutes } from './api/results.js';
+import { registerSettingsRoutes } from './api/settings.js';
 import { registerMockRoutes } from './api/mock.js';
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js';
 import { registerVersionRoutes } from './api/version.js';
@@ -41,6 +42,7 @@ export async function createServer(port, dbPath) {
     await registerBenchmarkRoutes(app);
     await registerDatasetsRoutes(app);
     await registerResultsRoutes(app);
+    await registerSettingsRoutes(app);
     await registerMockRoutes(app);
     // Serve built frontend in production
     const frontendDist = join(__dirname, '..', 'frontend', 'dist');

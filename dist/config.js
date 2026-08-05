@@ -30,6 +30,19 @@ export async function getSkills() {
 export async function getMcpServers() {
     return (await readConfig()).mcpServers ?? [];
 }
+// Whether 'code' datasets may execute a model's solution locally. Defaults to
+// false: absent config, an unparseable value, anything but an explicit `true`
+// keeps execution off, so a code run never fires by accident.
+export async function getCodeExecutionEnabled() {
+    return (await readConfig()).codeExecution === true;
+}
+export async function setCodeExecutionEnabled(enabled) {
+    return serialize(async () => {
+        const config = await readConfig();
+        config.codeExecution = enabled;
+        await writeConfig(config);
+    });
+}
 function getBenchyDir() {
     return process.env.BENCHY_DIR ?? join(homedir(), '.benchy');
 }

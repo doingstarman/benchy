@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { getDb } from '../db/index.js';
-import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js';
+import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled } from '../config.js';
 import { runCell, finalizeRun, getAdapter } from './benchmark.js';
+import { runTests, interpreterCommand } from '../codeRun.js';
+import { isLocalRequest } from './csrf.js';
 import { getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto, deleteAttachment, deleteAttachmentsForDataset, uploadPath, } from './uploads.js';
 import { scoreResult, parseModelOutput } from '../scoring.js';
 import { computeStandings } from '../arena.js';
@@ -80,6 +82,7 @@ function rowToItem(row) {
         attachmentId: row.attachment_id,
         attachment: row.attachment_id ? attachmentMeta(row.attachment_id) : null,
         input: row.input,
+        tests: row.tests,
         groundTruth: (() => { try {
             return toGroundTruth(JSON.parse(row.ground_truth));
         }
@@ -101,8 +104,11 @@ function loadItems(datasetId) {
     return rows.map(rowToItem);
 }
 // A dataset item is "labeled" when every schema variable has a non-empty ground
-// truth — that's the 46/50 the list shows.
-function isLabeled(item, schema) {
+// truth — that's the 46/50 the list shows. A code item has no schema; it is
+// labeled once it carries a test suite (the ground truth for code).
+function isLabeled(item, schema, type) {
+    if (type === 'code')
+        return (item.tests ?? '').trim() !== '';
     return schema.length > 0 && schema.every(v => {
         const t = item.groundTruth[v.key];
         return t != null && String(t).trim() !== '';
@@ -115,13 +121,14 @@ function rowToDataset(row, opts = {}) {
         id: row.id,
         name: row.name,
         note: row.note,
-        type: row.type === 'text' ? 'text' : 'files',
+        type: row.type === 'text' ? 'text' : row.type === 'tools' ? 'tools' : row.type === 'code' ? 'code' : 'files',
+        language: row.language === 'javascript' ? 'javascript' : row.language === 'python' ? 'python' : null,
         schema,
         trustedModel: row.trusted_model,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         itemCount: items.length,
-        labeledCount: items.filter(i => isLabeled(i, schema)).length,
+        labeledCount: items.filter(i => isLabeled(i, schema, row.type)).length,
         ...(opts.withItems ? { items } : {}),
     };
 }
@@ -153,6 +160,27 @@ function scoreDatasetRun(runId, schema, items) {
         upd.run(score, JSON.stringify(detail), r.id);
     }
 }
+// Score a code run by executing each answer against its item's tests. score is
+// the fraction of tests that pass (null when the item declares none); score_detail
+// maps each test name to match/miss so it reads like the per-field detail. Runs
+// one subprocess at a time — code execution is deliberately never fanned out.
+async function scoreCodeRun(runId, language, items) {
+    const db = getDb();
+    const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
+        .all(runId);
+    const upd = db.prepare('UPDATE results SET score = ?, score_detail = ? WHERE id = ?');
+    for (const r of results) {
+        const item = items[r.prompt_index];
+        if (!item || !item.tests || !item.tests.trim())
+            continue;
+        const res = await runTests(language, r.text, item.tests);
+        const score = res.total > 0 ? res.passed / res.total : null;
+        const detail = {};
+        for (const c of res.cases)
+            detail[c.name] = c.ok ? 'match' : 'miss';
+        upd.run(score, JSON.stringify(detail), r.id);
+    }
+}
 export async function registerDatasetsRoutes(app) {
     app.get('/api/datasets', async () => {
         const rows = getDb().prepare('SELECT * FROM datasets ORDER BY updated_at DESC').all();
@@ -169,10 +197,12 @@ export async function registerDatasetsRoutes(app) {
         if (!name)
             return reply.code(400).send({ error: 'name is required' });
         const schema = req.body.schema === undefined ? [] : validateSchema(req.body.schema);
-        const type = req.body.type === 'text' ? 'text' : 'files';
+        const type = req.body.type === 'text' ? 'text' : req.body.type === 'tools' ? 'tools' : req.body.type === 'code' ? 'code' : 'files';
+        // Language only means anything for code datasets; default to Python there.
+        const language = type === 'code' ? (req.body.language === 'javascript' ? 'javascript' : 'python') : null;
         const id = randomUUID();
         const now = Date.now();
-        getDb().prepare('INSERT INTO datasets (id, name, note, type, schema, trusted_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, req.body.note?.trim() || null, type, JSON.stringify(schema), null, now, now);
+        getDb().prepare('INSERT INTO datasets (id, name, note, type, language, schema, trusted_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, req.body.note?.trim() || null, type, language, JSON.stringify(schema), null, now, now);
         return reply.code(201).send({ data: rowToDataset(getDatasetRow(id), { withItems: true }) });
     });
     app.patch('/api/datasets/:id', async (req, reply) => {
@@ -214,13 +244,17 @@ export async function registerDatasetsRoutes(app) {
         if (!dataset)
             return reply.code(404).send({ error: 'Dataset not found' });
         const input = typeof req.body.input === 'string' ? req.body.input : null;
+        const tests = typeof req.body.tests === 'string' ? req.body.tests : null;
         const { attachmentId } = req.body;
         // Keep item shape consistent with the dataset type: text items take input,
         // file items take a file — never both (the run would feed the model both).
-        if (dataset.type === 'text' && attachmentId != null)
-            return reply.code(400).send({ error: 'a text dataset item takes input, not a file' });
-        if (dataset.type !== 'text' && input)
+        if (dataset.type !== 'files' && attachmentId != null)
+            return reply.code(400).send({ error: 'an input-based dataset item takes input, not a file' });
+        if (dataset.type === 'files' && input)
             return reply.code(400).send({ error: 'a files dataset item takes a file, not input' });
+        // Tests are the code dataset's ground truth; no other type has a place for them.
+        if (dataset.type !== 'code' && tests != null)
+            return reply.code(400).send({ error: 'only a code dataset item takes tests' });
         if (attachmentId !== undefined) {
             const att = getAttachmentRow(attachmentId);
             if (!att)
@@ -238,7 +272,7 @@ export async function registerDatasetsRoutes(app) {
         const nextIdx = db.prepare('SELECT COALESCE(MAX(idx), -1) + 1 AS n FROM dataset_items WHERE dataset_id = ?')
             .get(req.params.id).n;
         const id = randomUUID();
-        db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, req.params.id, nextIdx, attachmentId ?? null, input, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now());
+        db.prepare('INSERT INTO dataset_items (id, dataset_id, idx, attachment_id, input, tests, ground_truth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, req.params.id, nextIdx, attachmentId ?? null, input, tests, JSON.stringify(toGroundTruth(req.body.groundTruth)), Date.now());
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         const itemRow = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(id);
         return reply.code(201).send({ data: rowToItem(itemRow) });
@@ -250,10 +284,12 @@ export async function registerDatasetsRoutes(app) {
         if (!item)
             return reply.code(404).send({ error: 'Dataset item not found' });
         const dsRow = getDatasetRow(req.params.id);
-        if (dsRow?.type === 'text' && req.body.attachmentId != null)
-            return reply.code(400).send({ error: 'a text dataset item takes input, not a file' });
-        if (dsRow && dsRow.type !== 'text' && typeof req.body.input === 'string' && req.body.input)
+        if (dsRow && dsRow.type !== 'files' && req.body.attachmentId != null)
+            return reply.code(400).send({ error: 'an input-based dataset item takes input, not a file' });
+        if (dsRow?.type === 'files' && typeof req.body.input === 'string' && req.body.input)
             return reply.code(400).send({ error: 'a files dataset item takes a file, not input' });
+        if (dsRow && dsRow.type !== 'code' && typeof req.body.tests === 'string' && req.body.tests)
+            return reply.code(400).send({ error: 'only a code dataset item takes tests' });
         if (req.body.attachmentId !== undefined) {
             const next = req.body.attachmentId;
             const att = getAttachmentRow(next);
@@ -289,6 +325,10 @@ export async function registerDatasetsRoutes(app) {
             db.prepare('UPDATE dataset_items SET input = ? WHERE id = ?')
                 .run(typeof req.body.input === 'string' ? req.body.input : null, req.params.itemId);
         }
+        if (req.body.tests !== undefined) {
+            db.prepare('UPDATE dataset_items SET tests = ? WHERE id = ?')
+                .run(typeof req.body.tests === 'string' ? req.body.tests : null, req.params.itemId);
+        }
         db.prepare('UPDATE datasets SET updated_at = ? WHERE id = ?').run(Date.now(), req.params.id);
         const updated = db.prepare('SELECT * FROM dataset_items WHERE id = ?').get(req.params.itemId);
         return { data: rowToItem(updated) };
@@ -301,8 +341,8 @@ export async function registerDatasetsRoutes(app) {
         if (!row)
             return reply.code(404).send({ error: 'Dataset not found' });
         const dataset = rowToDataset(row);
-        if (dataset.type !== 'text')
-            return reply.code(400).send({ error: 'CSV import is only for text datasets' });
+        if (dataset.type === 'files' || dataset.type === 'code')
+            return reply.code(400).send({ error: 'CSV import is only for text/tools datasets' });
         const rows = parseCsv(typeof req.body.csv === 'string' ? req.body.csv : '');
         if (rows.length < 2)
             return reply.code(400).send({ error: 'CSV needs a header row and at least one data row' });
@@ -497,6 +537,23 @@ export async function registerDatasetsRoutes(app) {
         const prompt = req.body.prompt?.trim();
         if (!prompt)
             return reply.code(400).send({ error: 'prompt is required' });
+        // A code dataset executes the model's solution locally. That is gated: it
+        // needs the opt-in toggle AND an interpreter on PATH, both checked before
+        // any model call so a misconfigured run fails fast instead of scoring 0.
+        const isCode = dataset.type === 'code';
+        const codeLanguage = dataset.language === 'javascript' ? 'javascript' : 'python';
+        if (isCode) {
+            // Running a code dataset executes code locally — never at a cross-site
+            // page's request, even if the toggle is somehow on.
+            if (!isLocalRequest(req))
+                return reply.code(403).send({ error: 'cross-site request refused' });
+            if (!(await getCodeExecutionEnabled())) {
+                return reply.code(400).send({ error: 'code execution is disabled — enable it in Settings before running a code dataset' });
+            }
+            if (!interpreterCommand(codeLanguage)) {
+                return reply.code(400).send({ error: `no ${codeLanguage === 'python' ? 'Python' : 'Node'} interpreter found on PATH to run this code dataset` });
+            }
+        }
         // Trim + dedupe first: otherwise "p:A " (trailing space) slips past the
         // trusted-model exclusion below and lets the ground-truth author grade its
         // own work. trustedModel is stored trimmed (PATCH trims it).
@@ -515,16 +572,18 @@ export async function registerDatasetsRoutes(app) {
             });
         }
         // Arena mode is judged by a human, not against ground truth — so no JSON
-        // keys hint on the prompt and no auto-scoring pass.
-        const mode = req.body.mode === 'arena' ? 'arena' : 'score';
+        // keys hint on the prompt and no auto-scoring pass. Code is always auto-
+        // scored against its tests, so an arena request on a code dataset is score.
+        const mode = req.body.mode === 'arena' && !isCode ? 'arena' : 'score';
         const systemPrompt = typeof req.body.systemPrompt === 'string' && req.body.systemPrompt.trim()
             ? req.body.systemPrompt.trim() : undefined;
         // Per-item prompt: a text item folds its input into the prompt; a file item
         // shares the same prompt and rides its image at its own prompt_index. Arena
-        // is human-judged, so no JSON-keys hint.
+        // and code get the raw task — no JSON-keys hint (the model returns code, not
+        // a scored object).
         const itemPrompts = items.map(it => {
             const base = it.input ? `${prompt}\n\n${it.input}` : prompt;
-            return mode === 'arena' ? base.trim() : buildRunPrompt(base, dataset.schema);
+            return mode === 'arena' || isCode ? base.trim() : buildRunPrompt(base, dataset.schema);
         });
         const runId = randomUUID();
         const now = Date.now();
@@ -541,6 +600,18 @@ export async function registerDatasetsRoutes(app) {
         if (mode === 'arena') {
             // No scoring — the human judges post-hoc; just finalize when cells settle.
             finalizeRun(runId, [Promise.allSettled(tasks).then(() => { })]);
+        }
+        else if (isCode) {
+            // Code is scored by running each answer against its item's tests in a
+            // subprocess — async, so it awaits inside the finalize barrier just like
+            // per-field scoring does, keeping run_done after the scores land.
+            const scored = Promise.allSettled(tasks).then(async () => {
+                try {
+                    await scoreCodeRun(runId, codeLanguage, items);
+                }
+                catch { /* leave rows unscored */ }
+            });
+            finalizeRun(runId, [scored]);
         }
         else {
             // run_done must not fire until scores are written, or the client refetches
