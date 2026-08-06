@@ -5,7 +5,7 @@ Dev mode uses backend port 4243 and stores config/database under `~/.benchy-dev/
 Self-hosted AI model benchmarking tool. One command starts a local server on port 4242, opens browser. Run same prompts against multiple LLM providers in parallel — see TTFS / latency / token metrics side by side.
 
 → **[agents.md](agents.md)** — architecture, file map, design system, SSE protocol, agent split strategy  
-→ **[rules/](rules/)** — focused rulesets: TypeScript, API, UI, testing, adapters
+→ **[rules/](rules/)** — focused rulesets: TypeScript, API, UI, testing, adapters, devops, [branching](rules/branching.md)
 
 ## Commands
 
