@@ -213,6 +213,9 @@ export const DICT: Record<string, Entry> = {
   'dataset.codeTestsHint': { en: "Hidden from the model. Python: def test_*() with assert. JavaScript: test('name', () => …) with assert(). Score = passed / total.", ru: "Скрыто от модели. Python: def test_*() с assert. JavaScript: test('имя', () => …) с assert(). Оценка = пройдено / всего." },
   'dataset.codeRunHint': { en: 'Each model gets the task, then its code runs against the hidden tests. Score = share of tests passed.', ru: 'Каждая модель получает задачу, затем её код исполняется против скрытых тестов. Оценка = доля пройденных тестов.' },
   'dataset.codeResultsHint': { en: 'Score = tests passed / total, run locally against the hidden tests.', ru: 'Оценка = пройдено / всего тестов, исполнено локально против скрытых тестов.' },
+  'dataset.codePerTest': { en: 'Per-test results', ru: 'Результаты по тестам' },
+  'dataset.codePerTestSub': { en: 'Which hidden test each model passed, task by task.', ru: 'Какой скрытый тест прошла каждая модель — по каждой задаче.' },
+  'dataset.codeNoTestData': { en: 'no test results — the code did not run', ru: 'нет результатов тестов — код не запустился' },
   'dataset.delete': { en: 'Delete', ru: 'Удалить' },
   'dataset.deleteConfirm': { en: 'Delete this dataset and all its files?', ru: 'Удалить датасет и все его файлы?' },
 
