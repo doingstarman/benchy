@@ -205,6 +205,26 @@ async function scoreCodeRun(runId: string, language: CodeLanguage, items: Datase
   }
 }
 
+// Pick the items an actual run covers. `first` takes the head, `random` a
+// shuffled sample kept in original order (so prompt_index reads stably). Anything
+// malformed, non-positive, or >= the full size runs everything — the safe default.
+function selectRunItems(all: DatasetItem[], raw: unknown): DatasetItem[] {
+  if (!raw || typeof raw !== 'object') return all
+  const s = raw as { strategy?: unknown; n?: unknown }
+  const n = typeof s.n === 'number' && Number.isInteger(s.n) ? s.n : NaN
+  if (!Number.isFinite(n) || n <= 0 || n >= all.length) return all
+  if (s.strategy === 'first') return all.slice(0, n)
+  if (s.strategy === 'random') {
+    const idx = all.map((_, i) => i)
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[idx[i], idx[j]] = [idx[j], idx[i]]
+    }
+    return idx.slice(0, n).sort((a, b) => a - b).map(i => all[i])
+  }
+  return all
+}
+
 export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/datasets', async () => {
     const rows = getDb().prepare('SELECT * FROM datasets ORDER BY updated_at DESC').all() as DatasetRow[]
@@ -541,7 +561,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
     }
   })
 
-  app.post<{ Params: { id: string }; Body: { models?: string[]; prompt?: string; systemPrompt?: string; mode?: string } }>(
+  app.post<{ Params: { id: string }; Body: { models?: string[]; prompt?: string; systemPrompt?: string; mode?: string; sample?: { strategy?: string; n?: number } } }>(
     '/api/datasets/:id/run',
     async (req, reply) => {
       const db = getDb()
@@ -549,8 +569,12 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       if (!row) return reply.code(404).send({ error: 'Dataset not found' })
 
       const dataset = rowToDataset(row, { withItems: true })
-      const items = dataset.items ?? []
-      if (!items.length) return reply.code(400).send({ error: 'dataset has no items to run' })
+      const allItems = dataset.items ?? []
+      if (!allItems.length) return reply.code(400).send({ error: 'dataset has no items to run' })
+      // Subsample: run only a subset (first N / random N) so a quick pass need not
+      // spend the whole dataset. prompt_index then indexes this subset, and scoring
+      // reads the same subset — everything below derives from `items`.
+      const items = selectRunItems(allItems, req.body.sample)
 
       const prompt = req.body.prompt?.trim()
       if (!prompt) return reply.code(400).send({ error: 'prompt is required' })

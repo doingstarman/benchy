@@ -21,6 +21,9 @@ const CSS = `
   .drp-opt { text-align: left; border: 0.5px solid var(--border); background: var(--bg-base); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
   .drp-opt.on { border-color: var(--p-bd); background: var(--p-bg); }
   .drp-opt:disabled { opacity: 0.45; cursor: default; }
+  .drp-chip { border-radius: 20px; padding: 5px 12px; font: 12px var(--font-mono); border: 0.5px solid var(--border); background: var(--bg-base); color: var(--text-muted); cursor: pointer; }
+  .drp-chip.on { border-color: var(--p-bd); background: var(--p-bg); color: var(--p); }
+  .drp-num { width: 70px; box-sizing: border-box; padding: 5px 10px; background: var(--bg-base); border: 0.5px solid var(--p-bd); border-radius: 20px; color: var(--text-primary); font: 12px var(--font-mono); outline: none; }
   .drp-primary { text-align: center; background: var(--p); color: #fff; border: none; border-radius: 7px; padding: 10px 18px; font: 600 13px var(--font-mono); cursor: pointer; }
   .drp-primary:disabled { opacity: 0.45; cursor: default; }
   .drp-link { background: none; border: none; color: var(--p); font: 12px var(--font-mono); cursor: pointer; padding: 0; }
@@ -41,6 +44,8 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
   const [selId, setSelId] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
   const [scoreMode, setScoreMode] = useState<'score' | 'arena'>('score')
+  const [sampleMode, setSampleMode] = useState<'all' | 'random' | 'first'>('all')
+  const [sampleN, setSampleN] = useState(20)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,8 +55,9 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
   const sel = useMemo(() => datasets?.find(d => d.id === selId) ?? null, [datasets, selId])
   const models = selectedModels.length
   const items = sel?.itemCount ?? 0
+  const effItems = sampleMode === 'all' ? items : Math.min(Math.max(1, sampleN || 1), items)
   const labeled = sel?.labeledCount ?? 0
-  const calls = items * models
+  const calls = effItems * models
   const isCode = sel?.type === 'code'
   const labeledFull = items > 0 && labeled >= items
   const effMode: 'score' | 'arena' = isCode ? 'score' : scoreMode
@@ -61,7 +67,8 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
     if (!sel || !canLaunch) return
     setLaunching(true); setError(null)
     try {
-      await datasetsApi.run(sel.id, { models: selectedModels, prompt: prompt.trim(), mode: effMode })
+      const sample = sampleMode === 'all' ? undefined : { strategy: sampleMode, n: effItems }
+      await datasetsApi.run(sel.id, { models: selectedModels, prompt: prompt.trim(), mode: effMode, ...(sample ? { sample } : {}) })
       nav(`/datasets/${sel.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -120,6 +127,21 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
               </div>
             )}
 
+            {sel && items > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="drp-label">{t('datasetRun.subsample')}<i /></div>
+                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button className={`drp-chip${sampleMode === 'all' ? ' on' : ''}`} onClick={() => setSampleMode('all')}>{t('datasetRun.sampleAll', { n: items })}</button>
+                  <button className={`drp-chip${sampleMode === 'random' ? ' on' : ''}`} onClick={() => setSampleMode('random')}>{t('datasetRun.sampleRandom')}</button>
+                  <button className={`drp-chip${sampleMode === 'first' ? ' on' : ''}`} onClick={() => setSampleMode('first')}>{t('datasetRun.sampleFirst')}</button>
+                  {sampleMode !== 'all' && (
+                    <input className="drp-num" type="number" min={1} max={items} value={sampleN}
+                      onChange={e => setSampleN(Math.max(1, Math.min(items, Number(e.target.value) || 1)))} />
+                  )}
+                </div>
+              </div>
+            )}
+
             {sel && !isCode && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className="drp-label">{t('datasetRun.prompt')}<i /></div>
@@ -149,7 +171,8 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
           <div className="drp-insp">
             <div className="drp-label" style={{ marginBottom: 2 }}>{t('datasetRun.run')}</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-primary)' }}>
-              <span style={{ color: 'var(--text-bright)' }}>{items}</span><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('datasetRun.items')}</span>
+              <span style={{ color: 'var(--text-bright)' }}>{effItems}</span><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('datasetRun.items')}</span>
+              {effItems < items && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('datasetRun.sampleOf', { n: items })}</span>}
               <span style={{ color: 'var(--text-muted)' }}>×</span>
               <span style={{ color: 'var(--text-bright)' }}>{models}</span><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('datasetRun.modelsWord')}</span>
             </div>

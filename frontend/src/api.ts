@@ -136,7 +136,7 @@ export const datasetsApi = {
   importCsv: (id: string, csv: string) =>
     apiFetch<{ imported: number }>(`/api/datasets/${id}/import-csv`, { method: 'POST', body: JSON.stringify({ csv }) }),
   runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
-  run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena' }) =>
+  run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena'; sample?: { strategy: 'first' | 'random'; n: number } }) =>
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
   arena: (id: string, runId: string) => apiFetch<ArenaState>(`/api/datasets/${id}/runs/${runId}/arena`),
   putVerdict: (id: string, runId: string, promptIndex: number, body: { bestModel?: string; worstModel?: string; skipped?: boolean }) =>
