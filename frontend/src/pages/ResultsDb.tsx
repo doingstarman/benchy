@@ -5,7 +5,7 @@ import { resultsApi } from '../api'
 import type { ResultsRow } from '../api'
 
 const CSS = `
-  .rdb { --p: #7F77DD; --p-bg: rgba(127,119,221,0.12); --p-bd: rgba(127,119,221,0.45); --ok: #5ab87a; }
+  .rdb { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); }
   .rdb-row { cursor: pointer; }
   .rdb-row:hover td { background: rgba(127,119,221,0.05); }
   .rdb-table { width: 100%; border-collapse: collapse; font-size: 12px; }

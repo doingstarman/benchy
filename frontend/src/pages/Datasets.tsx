@@ -5,7 +5,7 @@ import { datasetsApi } from '../api'
 import type { Dataset } from '../../../src/types'
 
 const CSS = `
-  .dsx { --p: #7F77DD; --p-strong: #6a61d0; --p-bg: rgba(127,119,221,0.12); --p-bd: rgba(127,119,221,0.45); --ok: #5ab87a; }
+  .dsx { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); }
   .dsx-card { position: relative; text-align: left; background: var(--bg-elevated); border: 0.5px solid var(--border); border-radius: var(--radius-md); padding: 15px 16px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; overflow: hidden; transition: border-color 0.12s, transform 0.12s; }
   .dsx-card:hover { border-color: var(--p-bd); transform: translateY(-1px); }
   .dsx-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--p); opacity: 0.55; }
@@ -14,7 +14,7 @@ const CSS = `
   .dsx-bar > i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
   .dsx-in { width: 100%; box-sizing: border-box; padding: 8px 11px; background: var(--bg-base); border: 0.5px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono); outline: none; }
   .dsx-in:focus { border-color: var(--p-bd); }
-  .dsx-primary { background: var(--p); color: #fff; border: none; border-radius: var(--radius-sm); padding: 8px 16px; font-size: 12px; cursor: pointer; font-weight: 600; white-space: nowrap; font-family: var(--font-mono); }
+  .dsx-primary { background: var(--p); color: var(--on-accent); border: none; border-radius: var(--radius-sm); padding: 8px 16px; font-size: 12px; cursor: pointer; font-weight: 600; white-space: nowrap; font-family: var(--font-mono); }
   .dsx-primary:disabled { opacity: 0.5; cursor: default; }
 `
 
