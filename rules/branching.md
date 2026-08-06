@@ -2,6 +2,23 @@
 
 Companion to [devops.md](devops.md), which owns `main`/`master` hygiene, publishing, and the release ritual. This file is narrower: **moving between branches without dragging work where it doesn't belong** — the failure mode being an unrelated fix landing on a feature branch that is about something else.
 
+## Trigger — a new request in chat
+
+When the user asks for a new change — a feature, a fix, anything touching code — the **first action is to branch**, before any edit. Do not start editing on whatever branch happens to be checked out.
+
+```bash
+git checkout main
+git fetch origin && git merge --ff-only origin/main
+git checkout -b codex/<short-desc>
+```
+
+Then state which branch you're on in the reply. Only two cases stay put:
+
+- The request **continues the same concern** already in progress on the current feature branch (iteration, fixes from review) → commit there, no new branch.
+- A **docs-only** change (see the exception at the bottom) → may go straight to `main`.
+
+When unsure whether it's a new concern or a continuation, treat it as new and branch.
+
 ## The rule everything else serves
 
 **One branch = one concern, based on `main`.** A branch name (`codex/<short-desc>`) is a promise about what's in it. Anything that doesn't serve that promise belongs on a different branch.
