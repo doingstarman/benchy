@@ -11,7 +11,7 @@ import {
   IconLayers, IconModeFan, IconModePairs, IconModeMatrix,
 } from '../components/icons'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
-import { useShowReasoning } from '../prefs'
+import { useShowReasoning, getDefaultMode, type PromptMode } from '../prefs'
 import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
 
@@ -476,9 +476,6 @@ export function ChipsRow({ groups, selectedModels, onToggle, onToggleProvider, o
 }
 
 // ─── ModeSelector ─────────────────────────────────────────────────────────
-
-// 0: one prompt → all models · 1: prompt per model · 2: many prompts → all models
-type PromptMode = 0 | 1 | 2
 
 const MODE_ICON: Record<PromptMode, (p: { size?: number }) => React.JSX.Element> = {
   0: IconModeFan,
@@ -1395,7 +1392,7 @@ export function NewRun() {
   // One system prompt for every model in the run — kept out of runSettings since
   // it isn't a generation parameter.
   const [systemPrompt, setSystemPrompt] = useState<string>(() => savedSession?.systemPrompt ?? '')
-  const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
+  const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? getDefaultMode())
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
   const [batchPrompts, setBatchPrompts] = useState<string[]>(() => savedSession?.batchPrompts ?? [''])
