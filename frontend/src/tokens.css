@@ -20,8 +20,10 @@
   --success-dim:    #2c5039;
   --success-bg:     #132018;
   --error:          #e05c5c;
+  --error-dim:      #4a2a2f;
   --error-bg:       #271515;
   --warning:        #d4944a;
+  --warning-dim:    #4a3a1e;
   --warning-bg:     #251d0e;
   --info:           #5b9bd5;
   --info-bg:        #0e1825;
@@ -55,14 +57,41 @@
   --success-dim:    #a9d5bb;
   --success-bg:     #e8f5ee;
   --error:          #c23636;
+  --error-dim:      #f0c2c2;
   --error-bg:       #fdeeee;
   --warning:        #96601f;
+  --warning-dim:    #e6d3ae;
   --warning-bg:     #fbf3e7;
   --info:           #3572b0;
   --info-bg:        #eaf2fa;
 
   --overlay:        rgba(30, 30, 45, 0.35);
 }
+
+/* Accent palettes. data-accent rides on <html> beside data-theme, so every
+   var(--accent*) consumer — focus ring, sidebar bar, primary buttons, pills —
+   follows without touching a component.
+
+   The pairing is load-bearing. [data-accent="x"] is (0,1,0) and sits after the
+   light block, so on its own it would win in light mode too. The
+   theme-qualified twin is (0,2,0) and beats it whatever the source order. A
+   palette that defines only the first line silently leaks its dark accent into
+   the light theme — tokens.accent.test.ts is what catches that.
+
+   --on-accent is what lets a mid-tone accent stay usable as a button fill:
+   white on rose reads at ~2.6:1, so the darker accents take a near-black
+   label instead of forcing the accent itself lighter. */
+[data-accent="purple"]                     { --accent: #7F77DD; --accent-dim: #4a4390; --accent-bg: #1e1a3a; --on-accent: #ffffff; }
+[data-theme="light"][data-accent="purple"] { --accent: #6a61d0; --accent-dim: #b3aeea; --accent-bg: #eeedf9; --on-accent: #ffffff; }
+
+[data-accent="blue"]                       { --accent: #5B9BE0; --accent-dim: #2f5583; --accent-bg: #101d2e; --on-accent: #08131f; }
+[data-theme="light"][data-accent="blue"]   { --accent: #2F6FBF; --accent-dim: #a8c4e6; --accent-bg: #eaf1fb; --on-accent: #ffffff; }
+
+[data-accent="teal"]                       { --accent: #3FB0A0; --accent-dim: #245c55; --accent-bg: #0c1f1d; --on-accent: #06201c; }
+[data-theme="light"][data-accent="teal"]   { --accent: #0F6E5F; --accent-dim: #9dd2c9; --accent-bg: #e7f5f2; --on-accent: #ffffff; }
+
+[data-accent="rose"]                       { --accent: #D97393; --accent-dim: #7a3d51; --accent-bg: #2c1620; --on-accent: #1c0c12; }
+[data-theme="light"][data-accent="rose"]   { --accent: #B85273; --accent-dim: #e8b4c6; --accent-bg: #fbeef2; --on-accent: #ffffff; }
 
 :root {
 

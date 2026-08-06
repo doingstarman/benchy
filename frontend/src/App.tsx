@@ -5,7 +5,7 @@ import { UiStyles } from './components/ui'
 import { UpdateBanner } from './components/UpdateBanner'
 import { hasActiveNewRunSession } from './pages/NewRun'
 import { useT } from './i18n'
-import { useTheme, resolveTheme, watchSystem } from './theme'
+import { useTheme, useAccent, resolveTheme, watchSystem } from './theme'
 
 const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
 
@@ -15,10 +15,15 @@ export function App() {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
   const theme = useTheme()
+  const accent = useAccent()
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? '1' : '0')
   }, [collapsed])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-accent', accent)
+  }, [accent])
 
   // Re-resolve rather than re-set the pref: setting 'system' to 'system' is a
   // no-op in the store, so an OS light/dark flip would never reach the DOM.
