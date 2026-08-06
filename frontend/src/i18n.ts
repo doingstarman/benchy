@@ -388,6 +388,9 @@ export const DICT: Record<string, Entry> = {
   'run.mode0': { en: 'one prompt → all models', ru: 'один промпт → все модели' },
   'run.mode1': { en: 'prompt per model', ru: 'промпт на модель' },
   'run.mode2': { en: 'many prompts → all models', ru: 'много промптов → все модели' },
+  'run.desc0': { en: 'One prompt sent to every model', ru: 'Один запрос сразу во все модели' },
+  'run.desc1': { en: 'Its own prompt for each model', ru: 'Свой запрос для каждой модели' },
+  'run.desc2': { en: 'Matrix: every prompt × every model', ru: 'Матрица: все запросы × все модели' },
   'run.ask': { en: 'Ask anything…', ru: 'Спросите что угодно…' },
   'run.followup': { en: 'Follow-up or new prompt…', ru: 'Продолжение или новый промпт…' },
   'run.promptForModel': { en: 'Prompt for {model}…', ru: 'Промпт для {model}…' },
@@ -456,6 +459,7 @@ export const DICT: Record<string, Entry> = {
   'run.fastest': { en: 'fastest', ru: 'быстрее всех' },
 
   // ── titles (tooltips) ──
+  'title.testMode': { en: 'Test mode', ru: 'Режим теста' },
   'title.remove': { en: 'Remove', ru: 'Убрать' },
   'title.removePrompt': { en: 'Remove prompt', ru: 'Убрать промпт' },
   'title.regenerate': { en: 'Regenerate', ru: 'Перегенерировать' },

@@ -8,6 +8,7 @@ import { Button, IconButton, PillToggle } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile, IconChevron,
+  IconLayers, IconModeFan, IconModePairs, IconModeMatrix,
 } from '../components/icons'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning } from '../prefs'
@@ -268,6 +269,8 @@ const ANIM_CSS = `
   .settings-tab { background: none; border: 0.5px solid transparent; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-family: var(--font-mono); cursor: pointer; color: var(--text-muted); white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   .settings-tab:hover { color: var(--text-secondary); border-color: var(--border); }
   .settings-tab.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-dim); }
+  .mode-trigger:hover { background: var(--bg-elevated); border-color: var(--border-hover); }
+  .mode-opt:not(.active):hover { background: var(--bg-base); }
 `
 
 // ─── ChipsRow ─────────────────────────────────────────────────────────────
@@ -472,16 +475,139 @@ export function ChipsRow({ groups, selectedModels, onToggle, onToggleProvider, o
   )
 }
 
-// ─── Promptbox ────────────────────────────────────────────────────────────
+// ─── ModeSelector ─────────────────────────────────────────────────────────
 
 // 0: one prompt → all models · 1: prompt per model · 2: many prompts → all models
 type PromptMode = 0 | 1 | 2
 
-interface PromptboxProps {
-  simplified: boolean
+const MODE_ICON: Record<PromptMode, (p: { size?: number }) => React.JSX.Element> = {
+  0: IconModeFan,
+  1: IconModePairs,
+  2: IconModeMatrix,
+}
+
+// The mode decides what the whole composer IS — three textareas or one, a
+// matrix or a single call. As a tab strip welded to the top of the promptbox it
+// read as a formatting toggle and stole the first line of the box; up in the
+// page header it reads as the frame around everything below it, and the box
+// gets to start with the prompt.
+export function ModeSelector({ mode, onModeChange, selectedCount }: {
   mode: PromptMode
   onModeChange: (m: PromptMode) => void
   selectedCount: number
+}) {
+  const { t } = useT()
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (!wrapRef.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const CurrentIcon = MODE_ICON[mode]
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        position: 'relative', flexShrink: 0, height: 52,
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}
+    >
+      <button
+        className="mode-trigger"
+        title={t('title.testMode')}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+          borderRadius: 7, cursor: 'pointer',
+          background: open ? 'var(--accent-bg)' : 'transparent',
+          border: `0.5px solid ${open ? 'var(--accent-dim)' : 'transparent'}`,
+          fontSize: 'var(--fs-base)', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)',
+        }}
+      >
+        <span style={{ color: 'var(--accent)', display: 'flex' }}><CurrentIcon size={16} /></span>
+        {t(`run.mode${mode}`)}
+        <span style={{ color: 'var(--text-muted)', display: 'flex' }}><IconChevron open={open} size={10} /></span>
+      </button>
+
+      <span style={{
+        display: 'flex', alignItems: 'center', gap: 7, padding: '5px 11px', borderRadius: 20,
+        background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+        fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+      }}>
+        <span style={{ color: 'var(--accent)', display: 'flex' }}><IconLayers size={12} /></span>
+        {t('run.selected', { n: selectedCount })}
+      </span>
+
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute', top: 'calc(100% - 4px)', left: 0, zIndex: 30,
+            width: 372, maxWidth: 'calc(100vw - 32px)',
+            background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+            borderRadius: 'var(--radius-lg)', boxShadow: '0 18px 44px rgba(0,0,0,0.6)', overflow: 'hidden',
+          }}
+        >
+          {([0, 1, 2] as const).map((m, i) => {
+            const active = mode === m
+            const Icon = MODE_ICON[m]
+            return (
+              <button
+                key={m}
+                role="option"
+                aria-selected={active}
+                className={`mode-opt${active ? ' active' : ''}`}
+                onClick={() => { onModeChange(m); setOpen(false) }}
+                style={{
+                  display: 'flex', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
+                  padding: '13px 15px', border: 'none',
+                  borderTop: i > 0 ? '0.5px solid var(--border)' : 'none',
+                  borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                  background: active ? 'var(--accent-bg)' : 'transparent',
+                }}
+              >
+                <span style={{ color: active ? 'var(--accent)' : 'var(--text-muted)', display: 'flex', marginTop: 1 }}>
+                  <Icon size={20} />
+                </span>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                  <span style={{
+                    fontSize: 'var(--fs-base)', fontFamily: 'var(--font-mono)',
+                    color: active ? 'var(--text-bright)' : 'var(--text-primary)',
+                  }}>
+                    {t(`run.mode${m}`)}
+                  </span>
+                  <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-muted)' }}>
+                    {t(`run.desc${m}`)}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Promptbox ────────────────────────────────────────────────────────────
+
+interface PromptboxProps {
+  simplified: boolean
+  // Chosen in the page header, not here — the box only reacts to it by laying
+  // itself out as one textarea, one per model, or a prompt list.
+  mode: PromptMode
   selectedModels: string[]
   prompt: string
   onPromptChange: (v: string) => void
@@ -621,7 +747,7 @@ function ArtifactChips({ artifacts, selectedTools, selectedSkills, selectedMcp, 
 }
 
 export function Promptbox({
-  simplified, mode, onModeChange, selectedCount, selectedModels,
+  simplified, mode, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
@@ -1014,30 +1140,6 @@ export function Promptbox({
       )}
 
       <div style={{ borderRadius: 10, overflow: 'hidden' }}>
-      {!simplified && (
-        <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
-          {([0, 1, 2] as const).map(i => (
-            <button
-              key={i}
-              onClick={() => onModeChange(i as PromptMode)}
-              style={{
-                flex: 1, padding: '9px 14px', fontSize: 11, fontFamily: 'var(--font-mono)',
-                cursor: 'pointer', textAlign: 'left', background: 'none', border: 'none',
-                borderRight: i < 2 ? '0.5px solid var(--border)' : 'none',
-                borderBottom: mode === i ? '1.5px solid var(--accent)' : '1.5px solid transparent',
-                marginBottom: -0.5,
-                color: mode === i ? 'var(--accent)' : 'var(--text-muted)',
-              }}
-            >
-              {t(`run.mode${i}`)}
-            </button>
-          ))}
-          <div style={{ padding: '9px 14px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
-            {t('run.selected', { n: selectedCount })}
-          </div>
-        </div>
-      )}
-
       {/* Selected-artifact chips sit above every prompt mode, so a skill picked
           in mode 0 stays visible and removable after switching to 1/2. */}
       <ArtifactChips
@@ -1986,8 +2088,6 @@ export function NewRun() {
 
   const promptboxProps: Omit<PromptboxProps, 'simplified'> = {
     mode,
-    onModeChange: setMode,
-    selectedCount: selectedModels.size,
     selectedModels: [...selectedModels],
     prompt,
     onPromptChange: setPrompt,
@@ -2025,6 +2125,12 @@ export function NewRun() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
         <style>{ANIM_CSS}</style><ActivityTraceStyles />
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          padding: '0 16px', borderBottom: '0.5px solid var(--border)',
+        }}>
+          <ModeSelector mode={mode} onModeChange={setMode} selectedCount={selectedModels.size} />
+        </div>
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',

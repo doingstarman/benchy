@@ -100,3 +100,55 @@ export function IconSliders(p: IconProps) {
 export function IconFile(p: IconProps) {
   return <Svg {...p}><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z" /><path d="M9 1.5V5h3.5" /></Svg>
 }
+
+// Stacked layers — "how many models this run hits".
+export function IconLayers(p: IconProps) {
+  return <Svg {...p}><path d="M8 1.8 14.2 5 8 8.2 1.8 5 8 1.8Z" /><path d="M1.8 8.6 8 11.8l6.2-3.2" /></Svg>
+}
+
+// ─── Test-mode glyphs ─────────────────────────────────────────────────────
+// Each one draws the shape of its run: prompts on the left, the models they
+// land on as blocks on the right. Read side by side in the mode selector, the
+// difference between them is the picture, not the label.
+
+// one prompt → all models
+export function IconModeFan(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="2.4" cy="8" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M4.3 8h2.5M6.8 8c1.7 0 1.3-4.8 3-4.8h1.3M6.8 8h4.3M6.8 8c1.7 0 1.3 4.8 3 4.8h1.3" />
+      <rect x="11.3" y="1.9" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="6.7" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="11.5" width="2.9" height="2.6" rx=".8" />
+    </Svg>
+  )
+}
+
+// prompt per model
+export function IconModePairs(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="2.2" cy="3.2" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="2.2" cy="8" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="2.2" cy="12.8" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M4.1 3.2h7M4.1 8h7M4.1 12.8h7" />
+      <rect x="11.3" y="1.9" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="6.7" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="11.5" width="2.9" height="2.6" rx=".8" />
+    </Svg>
+  )
+}
+
+// many prompts → all models
+export function IconModeMatrix(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="2" cy="3.2" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="2" cy="8" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="2" cy="12.8" r="1.2" fill="currentColor" stroke="none" />
+      <path d="M3.7 3.2h2.5M3.7 8h2.5M3.7 12.8h2.5" />
+      <rect x="6.4" y="1.9" width="7.8" height="12.2" rx="1" />
+      <path d="M9 1.9v12.2M11.6 1.9v12.2M6.4 6h7.8M6.4 10.1h7.8" />
+    </Svg>
+  )
+}

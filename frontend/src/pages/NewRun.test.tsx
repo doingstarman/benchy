@@ -69,6 +69,14 @@ async function waitForProviders() {
   return screen.findByPlaceholderText('Ask anything…')
 }
 
+// The mode lives behind the header selector, so switching is open-then-pick.
+// The trigger shows the CURRENT mode's label, so the option's label is only
+// ambiguous when picking the mode already selected — which no test does.
+async function pickMode(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByTitle('Test mode'))
+  await user.click(screen.getByRole('option', { name: new RegExp(label) }))
+}
+
 describe('Fork from history', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -227,15 +235,15 @@ describe('Promptbox — run trigger', () => {
   })
 })
 
-describe('Promptbox — mode switching', () => {
+describe('ModeSelector — mode switching', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('switches to "prompt per model" mode when that tab is clicked', async () => {
+  it('switches to "prompt per model" mode when that option is picked', async () => {
     const user = userEvent.setup()
     renderNewRun()
     await waitForProviders()
 
-    await user.click(screen.getByText('prompt per model'))
+    await pickMode(user, 'prompt per model')
 
     // In per-model mode, there's no single "Ask anything…" textarea
     expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
@@ -243,13 +251,24 @@ describe('Promptbox — mode switching', () => {
     expect(screen.getByPlaceholderText(/Prompt for gpt-4o/)).toBeInTheDocument()
   })
 
+  it('closes the dropdown after a pick, and the trigger names the new mode', async () => {
+    const user = userEvent.setup()
+    renderNewRun()
+    await waitForProviders()
+
+    await pickMode(user, 'prompt per model')
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Test mode')).toHaveTextContent('prompt per model')
+  })
+
   it('switching back to "one prompt" mode restores the single textarea', async () => {
     const user = userEvent.setup()
     renderNewRun()
     await waitForProviders()
 
-    await user.click(screen.getByText('prompt per model'))
-    await user.click(screen.getByText('one prompt → all models'))
+    await pickMode(user, 'prompt per model')
+    await pickMode(user, 'one prompt → all models')
 
     expect(screen.getByPlaceholderText('Ask anything…')).toBeInTheDocument()
   })
@@ -260,7 +279,7 @@ describe('Promptbox — mode switching', () => {
     renderNewRun()
     await waitForProviders()
 
-    await user.click(screen.getByText('many prompts → all models'))
+    await pickMode(user, 'many prompts → all models')
     expect(screen.getByPlaceholderText('Prompt 1…')).toBeInTheDocument()
 
     await user.click(screen.getByText('+ add prompt'))
@@ -453,7 +472,7 @@ describe('slash menu — library artifacts', () => {
 
     await user.type(ta, '/pir')
     await user.click(await screen.findByText('Pirate'))
-    await user.click(screen.getByText('prompt per model'))
+    await pickMode(user, 'prompt per model')
 
     // Still a removable chip, not a hidden selection.
     expect(screen.getByText('Pirate')).toBeInTheDocument()
