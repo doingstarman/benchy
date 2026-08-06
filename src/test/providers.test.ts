@@ -297,3 +297,74 @@ describe('probing a draft', () => {
     }
   })
 })
+
+// benchy is unauthenticated on localhost, so while it runs, any page the user
+// has open can script requests to it. Every route in this file reads or writes
+// API keys, so every one of them has to refuse a cross-site Origin — GET most
+// of all, because that is the one that hands the keys back.
+describe('Providers API — cross-site requests', () => {
+  const EVIL = 'https://evil.example.com'
+
+  async function asEvil(path: string, init: RequestInit = {}) {
+    const res = await fetch(`${base}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', Origin: EVIL, ...(init.headers ?? {}) },
+    })
+    return { status: res.status, text: await res.text(), headers: res.headers }
+  }
+
+  async function seedKeyedProvider() {
+    await post('/api/providers', {
+      name: 'Secret', type: 'openai', apiKey: 'sk-SUPER-SECRET-KEY-123', models: ['gpt-4o'],
+    })
+  }
+
+  it('refuses to hand a foreign page the provider list', async () => {
+    await seedKeyedProvider()
+    const { status, text } = await asEvil('/api/providers')
+
+    expect(status).toBe(403)
+    // The exploit was worth having because the body carried the key itself.
+    expect(text).not.toContain('sk-')
+  })
+
+  it('does not tell the browser a foreign page may read the response', async () => {
+    // Belt and braces: even a route that answered would be unreadable, because
+    // the reflected Access-Control-Allow-Origin is what made this exploitable
+    // from a browser rather than just from curl.
+    const { headers } = await asEvil('/api/providers')
+    expect(headers.get('access-control-allow-origin')).not.toBe(EVIL)
+  })
+
+  it('refuses cross-site writes, probes and deletes too', async () => {
+    await seedKeyedProvider()
+    const { body } = await get<{ data: Provider[] }>('/api/providers')
+    const id = body.data[0].id
+
+    for (const [path, init] of [
+      ['/api/providers', { method: 'POST', body: JSON.stringify({ name: 'x', type: 'openai', models: [] }) }],
+      ['/api/providers/models', { method: 'POST', body: JSON.stringify({ type: 'openai' }) }],
+      ['/api/providers/test', { method: 'POST', body: JSON.stringify({ type: 'openai', model: 'gpt-4o' }) }],
+      [`/api/providers/${id}`, { method: 'DELETE' }],
+    ] as [string, RequestInit][]) {
+      expect((await asEvil(path, init)).status, `${init.method} ${path}`).toBe(403)
+    }
+
+    // The delete really was refused, not merely reported as refused.
+    const after = await get<{ data: Provider[] }>('/api/providers')
+    expect(after.body.data).toHaveLength(1)
+  })
+
+  it('still serves benchy itself — no Origin, and the dev server on another port', async () => {
+    await seedKeyedProvider()
+
+    // The app's own fetches are same-origin and send no Origin at all.
+    expect((await get<{ data: Provider[] }>('/api/providers')).status).toBe(200)
+
+    // `npm run dev` is Vite on 5173 talking to the backend on 4243. If this
+    // breaks, the fix is unshippable however secure it is.
+    const res = await fetch(`${base}/api/providers`, { headers: { Origin: 'http://localhost:5173' } })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:5173')
+  })
+})
