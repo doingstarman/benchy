@@ -3,28 +3,7 @@ import { useTheme, setTheme } from '../theme'
 import { useT, type Lang } from '../i18n'
 import { useShowReasoning, setShowReasoning } from '../prefs'
 import { versionApi, settingsApi, type VersionInfo } from '../api'
-import { Button } from '../components/ui'
-
-const SEGMENT_CSS = `
-  .seg-btn {
-    padding: 5px 14px;
-    font-size: 11px;
-    font-family: var(--font-mono);
-    letter-spacing: 0.04em;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-radius: calc(var(--radius-sm) - 1px);
-    transition: color 0.15s, background 0.15s;
-  }
-  .seg-btn:hover { color: var(--text-secondary); }
-  .seg-btn.active {
-    background: var(--bg-base);
-    color: var(--text-bright);
-    box-shadow: 0 0 0 0.5px var(--border-hover);
-  }
-`
+import { Button, Segmented } from '../components/ui'
 
 export function Settings() {
   const { t, lang, setLang } = useT()
@@ -46,60 +25,55 @@ export function Settings() {
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 480 }}>
-      <style>{SEGMENT_CSS}</style>
       <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>{t('settings.title')}</h1>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <SectionLabel>{t('settings.appearance')}</SectionLabel>
         <SegmentRow label={t('settings.theme')}>
-          {(['dark', 'light', 'system'] as const).map(th => (
-            <button
-              key={th}
-              className={`seg-btn${theme === th ? ' active' : ''}`}
-              onClick={() => setTheme(th)}
-            >
-              {th === 'dark' ? t('settings.themeDark') : th === 'light' ? t('settings.themeLight') : t('settings.themeSystem')}
-            </button>
-          ))}
+          <Segmented
+            value={theme}
+            onChange={setTheme}
+            options={[
+              { value: 'dark' as const, label: t('settings.themeDark') },
+              { value: 'light' as const, label: t('settings.themeLight') },
+              { value: 'system' as const, label: t('settings.themeSystem') },
+            ]}
+          />
         </SegmentRow>
         <SegmentRow label={t('settings.language')}>
-          {(['en', 'ru'] as const).map(l => (
-            <button
-              key={l}
-              className={`seg-btn${lang === l ? ' active' : ''}`}
-              onClick={() => setLang(l as Lang)}
-            >
-              {l === 'en' ? 'English' : 'Русский'}
-            </button>
-          ))}
+          <Segmented
+            value={lang}
+            onChange={setLang}
+            options={[
+              { value: 'en' as Lang, label: 'English' },
+              { value: 'ru' as Lang, label: 'Русский' },
+            ]}
+          />
         </SegmentRow>
         <SegmentRow label={t('settings.showReasoning')}>
-          {([true, false] as const).map(on => (
-            <button
-              key={String(on)}
-              className={`seg-btn${showReasoning === on ? ' active' : ''}`}
-              onClick={() => setShowReasoning(on)}
-              title={t('settings.showReasoningHint')}
-            >
-              {on ? t('common.on') : t('common.off')}
-            </button>
-          ))}
+          <Segmented
+            value={showReasoning}
+            onChange={setShowReasoning}
+            options={[
+              { value: true, label: t('common.on'), title: t('settings.showReasoningHint') },
+              { value: false, label: t('common.off'), title: t('settings.showReasoningHint') },
+            ]}
+          />
         </SegmentRow>
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <SectionLabel>{t('settings.codeExecTitle')}</SectionLabel>
         <SegmentRow label={t('settings.codeExec')}>
-          {([true, false] as const).map(on => (
-            <button
-              key={String(on)}
-              className={`seg-btn${codeExec === on ? ' active' : ''}`}
-              onClick={() => void applyCodeExec(on)}
-              disabled={codeExec === null}
-            >
-              {on ? t('common.on') : t('common.off')}
-            </button>
-          ))}
+          <Segmented
+            value={codeExec}
+            onChange={v => void applyCodeExec(v)}
+            disabled={codeExec === null}
+            options={[
+              { value: true, label: t('common.on') },
+              { value: false, label: t('common.off') },
+            ]}
+          />
         </SegmentRow>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>{t('settings.codeExecHint')}</div>
       </section>
@@ -192,16 +166,7 @@ function SegmentRow({ label, children }: { label: string; children: React.ReactN
       borderRadius: 'var(--radius-sm)',
     }}>
       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
-      <div style={{
-        display: 'inline-flex',
-        background: 'var(--bg-elevated)',
-        border: '0.5px solid var(--border)',
-        borderRadius: 'var(--radius-sm)',
-        padding: 2,
-        gap: 1,
-      }}>
-        {children}
-      </div>
+      {children}
     </div>
   )
 }
