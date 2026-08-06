@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -27,10 +27,15 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ─── providers ──────────────────────────────────────────────────────────────
 
+// Saving a provider. `apiKey` is write-only and tri-state, because the client
+// no longer holds the key and so cannot echo it back unchanged:
+//   omitted → keep the stored key · '' → erase it · a value → replace it
+export type ProviderUpsert = Omit<ProviderView, 'id' | 'apiKeyMask'> & { id?: string; apiKey?: string }
+
 export const providersApi = {
-  list: () => apiFetch<Provider[]>('/api/providers'),
-  upsert: (p: Omit<Provider, 'id'> & { id?: string }) =>
-    apiFetch<Provider>('/api/providers', { method: 'POST', body: JSON.stringify(p) }),
+  list: () => apiFetch<ProviderView[]>('/api/providers'),
+  upsert: (p: ProviderUpsert) =>
+    apiFetch<ProviderView>('/api/providers', { method: 'POST', body: JSON.stringify(p) }),
   remove: (id: string) =>
     fetch(`/api/providers/${id}`, { method: 'DELETE' }),
   // Test and fetchModels take the DRAFT the form is holding, not a saved id —
@@ -47,7 +52,10 @@ export const providersApi = {
 
 export interface ProviderDraft {
   type: Provider['type']
+  // Only set while the user is typing a replacement. For a saved provider the
+  // form sends providerId instead and the backend supplies the key.
   apiKey?: string
+  providerId?: string
   baseUrl?: string
   model?: string
 }

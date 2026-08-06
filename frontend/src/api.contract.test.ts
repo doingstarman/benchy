@@ -77,7 +77,9 @@ describe('frontend API client ↔ real server contract', () => {
     // error, rather than throwing on the way there.
     const result = await providersApi.test({
       type: provider.type,
-      apiKey: provider.apiKey,
+      // No apiKey to pass — the client never received one. The backend looks
+      // the stored key up from this id.
+      providerId: provider.id,
       baseUrl: provider.baseUrl,
       model: provider.models[0],
     })

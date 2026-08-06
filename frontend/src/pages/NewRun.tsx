@@ -13,7 +13,7 @@ import {
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning } from '../prefs'
 import { useT, t } from '../i18n'
-import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
+import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
   temperature: 0.7,
@@ -1380,7 +1380,7 @@ export function NewRun() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [providers, setProviders] = useState<Provider[]>([])
+  const [providers, setProviders] = useState<ProviderView[]>([])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
   // Which tools this run enables. Empty by default — an ordinary run sends no
   // tools and measures exactly what it measured before tools existed. Holds both
@@ -1585,7 +1585,7 @@ export function NewRun() {
       setSelectedModels(prev => {
         if (prev.size > 0) return prev
         const all = ps
-          .filter(p => p.enabled && (p.apiKey || p.baseUrl))
+          .filter(p => p.enabled && (p.apiKeyMask || p.baseUrl))
           .flatMap(p => p.models.map(m => `${p.id}:${m}`))
         return all.length > 0 ? new Set([all[0]]) : prev
       })
@@ -1623,7 +1623,7 @@ export function NewRun() {
     .map(p => ({
       id: p.id,
       name: p.name,
-      needsKey: !p.apiKey && !p.baseUrl,
+      needsKey: !p.apiKeyMask && !p.baseUrl,
       models: p.models.map(m => ({ key: `${p.id}:${m}`, label: m })),
     }))
 

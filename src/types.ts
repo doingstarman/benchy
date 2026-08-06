@@ -46,6 +46,23 @@ export interface Provider {
   defaults?: ProviderDefaults
 }
 
+// What the API hands back for a provider. `apiKey` is absent by construction,
+// not by convention: the key stays on the backend and only its mask travels, so
+// a frontend that tries to read one stops compiling rather than shipping it.
+// The mask is a ready-to-render string; null means no key is stored.
+export type ProviderView = Omit<Provider, 'apiKey'> & { apiKeyMask: string | null }
+
+export function toProviderView({ apiKey, ...rest }: Provider): ProviderView {
+  return { ...rest, apiKeyMask: maskApiKey(apiKey) }
+}
+
+// Last four characters only. Enough to tell two keys apart when you have a
+// couple of them; useless to anyone who obtains it.
+function maskApiKey(key: string | undefined): string | null {
+  if (!key) return null
+  return key.length <= 4 ? '•'.repeat(key.length) : '•'.repeat(16) + key.slice(-4)
+}
+
 // ─── Library artifacts (user-authored, stored in config.json) ────────────────
 
 // JSON-Schema object for a tool's arguments. Kept loose — providers forward it

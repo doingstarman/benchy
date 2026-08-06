@@ -1,14 +1,14 @@
 import { useT } from '../i18n'
-import type { Provider } from '../../../src/types'
+import type { ProviderView } from '../../../src/types'
 
 interface ProviderTileProps {
-  provider: Provider
+  provider: ProviderView
   onClick: () => void
 }
 
 export function ProviderTile({ provider, onClick }: ProviderTileProps) {
   const { t } = useT()
-  const isConnected = provider.enabled && (!!provider.apiKey || !!provider.baseUrl)
+  const isConnected = provider.enabled && (!!provider.apiKeyMask || !!provider.baseUrl)
 
   return (
     <button

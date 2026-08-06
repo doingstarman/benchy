@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { getProviders, upsertProvider, removeProvider } from '../config.js'
 import { humanizeNetworkError, describeHttpError } from '../errors.js'
 import { isLocalRequest } from './csrf.js'
+import { toProviderView } from '../types.js'
 import type { Provider, ProviderType, ProviderDefaults } from '../types.js'
 
 interface ProviderBody {
@@ -31,6 +32,18 @@ interface ProbeBody {
   apiKey?: string
   baseUrl?: string
   model?: string
+  // Names a SAVED provider whose key the backend should supply itself. The UI
+  // no longer has the key to put in `apiKey`, and a draft the user is still
+  // typing has no id — so the two fields cover the two callers, not one
+  // caller twice.
+  providerId?: string
+}
+
+// The key for a probe: whatever the draft carries, else the stored provider's.
+async function probeKey(body: ProbeBody | undefined): Promise<string | undefined> {
+  if (body?.apiKey) return body.apiKey
+  if (!body?.providerId) return undefined
+  return (await getProviders()).find(p => p.id === body.providerId)?.apiKey
 }
 
 // "https://api.x.ai/v1/" + "/models" is "/v1//models", which real servers 404 —
@@ -79,7 +92,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
 
     scope.get('/api/providers', async () => {
       const providers = await getProviders()
-      return { data: providers }
+      return { data: providers.map(toProviderView) }
     })
 
     scope.post<{ Body: ProviderBody }>('/api/providers', async (req, reply) => {
@@ -97,11 +110,21 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
         return reply.code(400).send({ error: 'models must be an array of model ids' })
       }
 
+      // The client no longer holds the key, so it cannot send it back
+      // unchanged on an unrelated edit. Three cases, and the distinction
+      // between the first two is the whole contract:
+      //   absent  → keep what is stored (renaming a provider must not wipe it)
+      //   ''      → erase it
+      //   a value → replace it
+      const id = body.id ?? randomUUID()
+      const stored = body.id ? (await getProviders()).find(p => p.id === body.id) : undefined
+      const apiKey = body.apiKey === undefined ? stored?.apiKey : (body.apiKey || undefined)
+
       const provider: Provider = {
-        id: body.id ?? randomUUID(),
+        id,
         name: body.name.trim(),
         type: body.type,
-        apiKey: body.apiKey,
+        apiKey,
         // Stored normalized so the trailing slash can't come back to bite the
         // next caller that builds a URL from it.
         baseUrl: body.baseUrl?.trim().replace(/\/+$/, ''),
@@ -112,7 +135,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
         defaults: body.defaults,
       }
       await upsertProvider(provider)
-      return reply.code(201).send({ data: provider })
+      return reply.code(201).send({ data: toProviderView(provider) })
     })
 
     scope.delete<{ Params: { id: string } }>('/api/providers/:id', async (req, reply) => {
@@ -126,10 +149,11 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     // provider, which forced the UI to save before it could look anything up —
     // so "Cancel" silently kept whatever you had typed.
     scope.post<{ Body: ProbeBody }>('/api/providers/models', async (req, reply) => {
-      const { type, apiKey, baseUrl } = req.body ?? {}
+      const { type, baseUrl } = req.body ?? {}
       if (!type || !KNOWN_TYPES.has(type)) {
         return reply.code(400).send({ error: `Unknown provider type "${type ?? ''}"` })
       }
+      const apiKey = await probeKey(req.body)
 
       if (STATIC_MODELS[type]) return { data: STATIC_MODELS[type] }
       if (['http-json', 'script', 'webhook'].includes(type)) return { data: [] }
@@ -169,7 +193,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
     // Body, not id, for the same reason as /models above: you are testing what is
     // on screen, not what is on disk.
     scope.post<{ Body: ProbeBody }>('/api/providers/test', async (req, reply) => {
-      const { type, apiKey, baseUrl, model } = req.body ?? {}
+      const { type, baseUrl, model } = req.body ?? {}
       if (!type) return reply.code(400).send({ error: 'type is required' })
       if (!model) return reply.code(400).send({ error: 'No models configured' })
       // An unknown type silently fell back to the OpenAI adapter, which then sent
@@ -177,6 +201,7 @@ export async function registerProvidersRoutes(app: FastifyInstance): Promise<voi
       if (!KNOWN_TYPES.has(type)) {
         return reply.code(400).send({ error: `Unknown provider type "${type}"` })
       }
+      const apiKey = await probeKey(req.body)
 
       // The only question worth asking: does this model answer? It used to gate on
       // /models first and call a provider broken when that failed — but /models is
