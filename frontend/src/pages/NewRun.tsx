@@ -11,7 +11,7 @@ import {
   IconLayers, IconModeFan, IconModePairs, IconModeMatrix,
 } from '../components/icons'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
-import { useShowReasoning, getDefaultMode, type PromptMode } from '../prefs'
+import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } from '../prefs'
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 import { useT, t } from '../i18n'
 import type { Provider, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
@@ -1377,6 +1377,7 @@ function notifyRunsChanged() {
 export function NewRun() {
   const { t } = useT()
   const showReasoning = useShowReasoning()
+  const monoAnswers = useMonoAnswers()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -2038,7 +2039,8 @@ export function NewRun() {
             className="col-body"
             style={{
               flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
-              color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word',
+              color: 'var(--text-primary)', lineHeight: 1.7, wordBreak: 'break-word',
+              fontFamily: monoAnswers ? 'var(--font-mono)' : 'var(--font-sans)',
               // Fullscreen: become a flex column so a lone code artifact can
               // stretch to the whole cell instead of sitting in a 280px window
               // with dead space beneath it.

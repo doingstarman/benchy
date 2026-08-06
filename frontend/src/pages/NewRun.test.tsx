@@ -35,6 +35,11 @@ vi.mock('../api', () => ({
   toolsApi: { list: vi.fn().mockResolvedValue([]) },
   skillsApi: { list: vi.fn().mockResolvedValue([]) },
   mcpApi: { list: vi.fn().mockResolvedValue([]) },
+  // Feeds the "inherited" readouts in the run-settings panel. Absent from this
+  // mock, every case here died on `settingsApi.get is not a function`.
+  settingsApi: {
+    get: vi.fn().mockResolvedValue({ codeExecution: false, codeExecTimeoutMs: 10000, runDefaults: {} }),
+  },
 }))
 
 // EventSource is not available in jsdom — stub it so run flow doesn't throw

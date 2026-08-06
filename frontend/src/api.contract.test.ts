@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify'
 // calls, so the seam between them was never exercised — which is exactly
 // where the empty-body 400 (FST_ERR_CTP_EMPTY_JSON_BODY) shipped from.
 // These tests import the untouched client and would have caught it.
-import { providersApi, runsApi, benchmarkApi } from './api'
+import { providersApi, runsApi, benchmarkApi, settingsApi } from './api'
 
 const PORT = 14400
 const BASE = `http://localhost:${PORT}`
@@ -128,5 +128,27 @@ describe('frontend API client ↔ real server contract', () => {
     const runs = await runsApi.list()
     const saved = await runsApi.save(runs[0].id, true)
     expect(saved.saved).toBe(true)
+  })
+
+  // The client's AppSettings type and the server's response shape are declared
+  // independently — this is the only place they are checked against each other.
+  it('settings round-trip through the real client and the real handler', async () => {
+    expect(await settingsApi.get()).toEqual({
+      codeExecution: false, codeExecTimeoutMs: 10000, runDefaults: {},
+    })
+
+    const after = await settingsApi.update({ runDefaults: { temperature: 0.2 }, codeExecTimeoutMs: 30000 })
+    expect(after).toEqual({
+      codeExecution: false, codeExecTimeoutMs: 30000, runDefaults: { temperature: 0.2 },
+    })
+    expect(await settingsApi.get()).toEqual(after)
+
+    // null unsets, which Partial<AppSettings> could not express.
+    const unset = await settingsApi.update({ runDefaults: { temperature: null } })
+    expect(unset.runDefaults).toEqual({})
+  })
+
+  it('surfaces a rejected setting as a readable error, not a silent no-op', async () => {
+    await expect(settingsApi.update({ codeExecTimeoutMs: 999999 })).rejects.toThrow(/between/)
   })
 })
