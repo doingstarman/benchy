@@ -21,6 +21,46 @@ describe('valuesMatch', () => {
   })
 })
 
+// A tool call's arguments arrive as decoded JSON — an object/array, not a string.
+// String-comparing them reads the model's object as "[object Object]" and always
+// misses; these compare by shape so a differently-written-but-equal call scores.
+describe('valuesMatch — structured tool arguments', () => {
+  it('object keys match in any order, and the model object arrives decoded', () => {
+    expect(valuesMatch('text', '{"a":1,"b":2}', { b: 2, a: 1 })).toBe(true)
+  })
+
+  it('whitespace and numeric formatting inside the JSON are irrelevant', () => {
+    expect(valuesMatch('text', '{"a": 1}', '{"a":1}')).toBe(true)
+    expect(valuesMatch('text', '{"n":5.0}', { n: 5 })).toBe(true)
+  })
+
+  it('a number equals its stringified form inside a structure (5 vs "5")', () => {
+    expect(valuesMatch('text', '{"limit":5}', { limit: '5' })).toBe(true)
+  })
+
+  it('nested objects and case/trim on string leaves', () => {
+    expect(valuesMatch('text', '{"q":"Moscow","opts":{"safe":true}}', { opts: { safe: true }, q: 'moscow ' })).toBe(true)
+  })
+
+  it('arrays stay order-sensitive — argument order carries meaning', () => {
+    expect(valuesMatch('text', '{"tags":["a","b"]}', { tags: ['a', 'b'] })).toBe(true)
+    expect(valuesMatch('text', '{"tags":["a","b"]}', { tags: ['b', 'a'] })).toBe(false)
+  })
+
+  it('a genuinely different structure still misses', () => {
+    expect(valuesMatch('text', '{"a":1,"b":2}', { a: 1 })).toBe(false)          // missing key
+    expect(valuesMatch('text', '{"a":1}', { a: 2 })).toBe(false)                // different value
+    expect(valuesMatch('text', '{"a":1}', 'sorry, no idea')).toBe(false)        // structure expected, prose given
+  })
+
+  it('does not disturb scalar matching — only JSON-structure ground truth triggers it', () => {
+    expect(valuesMatch('text', 'Moscow', 'moscow')).toBe(true)                  // plain text unchanged
+    expect(valuesMatch('text', 'true', 'True')).toBe(true)                      // JSON scalar → still text-folded
+    expect(valuesMatch('number', '1 105,90', '1105.90')).toBe(true)            // number path unchanged
+    expect(valuesMatch('text', '5', '6')).toBe(false)
+  })
+})
+
 describe('parseModelOutput', () => {
   it('pulls the JSON object out of surrounding prose / fences', () => {
     expect(parseModelOutput('Here you go:\n```json\n{"a":1}\n```')).toEqual({ a: 1 })
@@ -62,5 +102,19 @@ describe('scoreResult', () => {
     const { score, detail } = scoreResult(schema, { total: '10', merchant: 'X' }, 'sorry, no idea')
     expect(score).toBe(0)
     expect(detail).toEqual({ total: 'miss', merchant: 'miss' })
+  })
+
+  it('scores a tool call whose object argument is written differently but equal', () => {
+    const toolsSchema: DatasetVar[] = [
+      { key: 'tool', type: 'text' },
+      { key: 'args', type: 'text' },
+    ]
+    const { score, detail } = scoreResult(
+      toolsSchema,
+      { tool: 'search', args: '{"query":"pizza","limit":5}' },
+      '{"tool":"search","args":{"limit":"5","query":"Pizza"}}',
+    )
+    expect(score).toBe(1)
+    expect(detail).toEqual({ tool: 'match', args: 'match' })
   })
 })

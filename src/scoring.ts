@@ -70,10 +70,66 @@ function normalizeText(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-// Do two values match, given the variable's type? Ground truth and the model's
-// value are both coerced to strings first (the model may emit a number/null).
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+// A scalar as a number, whether it arrives as 5 or "5" — so a stringified tool
+// argument ({"limit":"5"}) matches its numeric ground truth ({"limit":5}).
+function asNumber(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (s === '') return null
+    const n = Number(s)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+// Compare two JSON-decoded argument values by shape, not by text: object keys in
+// any order, whitespace and numeric formatting irrelevant, a number equal whether
+// written 5 or "5". Arrays stay order-sensitive — a tool's argument list order
+// usually carries meaning. String leaves keep the flat-text trim/case leniency.
+function looseValueEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  const na = asNumber(a), nb = asNumber(b)
+  if (na !== null && nb !== null) return na === nb
+  if (typeof a === 'string' && typeof b === 'string') return normalizeText(a) === normalizeText(b)
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((el, i) => looseValueEqual(el, b[i]))
+  }
+  if (isObject(a) && isObject(b)) {
+    const ka = Object.keys(a), kb = Object.keys(b)
+    if (ka.length !== kb.length) return false
+    return ka.every(k => Object.prototype.hasOwnProperty.call(b, k) && looseValueEqual(a[k], b[k]))
+  }
+  return false
+}
+
+// Structured tool arguments (an object/array value) compare by shape, not string:
+// the model's object arrives decoded, so a string compare would read it as
+// "[object Object]" and always miss. Fires only when the ground truth is itself
+// JSON structure; scalars return null and fall through to the per-type rules.
+function structuralMatch(truthStr: string, actual: unknown): boolean | null {
+  let truthVal: unknown
+  try { truthVal = JSON.parse(truthStr) } catch { return null }
+  if (!isObject(truthVal) && !Array.isArray(truthVal)) return null
+  let actualVal = actual
+  if (typeof actual === 'string') {
+    try { actualVal = JSON.parse(actual) } catch { return false }
+  }
+  return looseValueEqual(truthVal, actualVal)
+}
+
+// Do two values match, given the variable's type? A structured argument compares
+// by shape; otherwise ground truth and the model's value are coerced to strings
+// (the model may emit a number/null) and compared under the type's rules.
 export function valuesMatch(type: DatasetVarType, truth: unknown, actual: unknown): boolean {
   const t = toStr(truth)
+  const structural = structuralMatch(t, actual)
+  if (structural !== null) return structural
   const a = toStr(actual)
   if (type === 'number') {
     const nt = normalizeNumber(t)
