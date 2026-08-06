@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTheme, setTheme, watchSystem, type Theme } from '../theme'
+import { useTheme, setTheme } from '../theme'
 import { useT, type Lang } from '../i18n'
 import { useShowReasoning, setShowReasoning } from '../prefs'
 import { versionApi, settingsApi, type VersionInfo } from '../api'
@@ -29,7 +29,7 @@ const SEGMENT_CSS = `
 export function Settings() {
   const { t, lang, setLang } = useT()
   const showReasoning = useShowReasoning()
-  const [theme, setThemeState] = useState<Theme>(getTheme)
+  const theme = useTheme()
   const [info, setInfo] = useState<VersionInfo | null>(null)
   const [codeExec, setCodeExec] = useState<boolean | null>(null)
 
@@ -44,17 +44,6 @@ export function Settings() {
     catch { settingsApi.get().then(s => setCodeExec(s.codeExecution)).catch(() => {}) }
   }
 
-  useEffect(() => {
-    if (theme === 'system') {
-      return watchSystem(() => setTheme('system'))
-    }
-  }, [theme])
-
-  function applyTheme(th: Theme) {
-    setTheme(th)
-    setThemeState(th)
-  }
-
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 480 }}>
       <style>{SEGMENT_CSS}</style>
@@ -67,7 +56,7 @@ export function Settings() {
             <button
               key={th}
               className={`seg-btn${theme === th ? ' active' : ''}`}
-              onClick={() => applyTheme(th)}
+              onClick={() => setTheme(th)}
             >
               {th === 'dark' ? t('settings.themeDark') : th === 'light' ? t('settings.themeLight') : t('settings.themeSystem')}
             </button>

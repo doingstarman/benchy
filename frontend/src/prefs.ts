@@ -15,7 +15,7 @@ interface Pref<T> {
 // would wake every subscriber on every unrelated change — invisible in behaviour
 // but it makes each pref's cost grow with how many others exist.
 // Scalars only: the equality guard is Object.is.
-function makePref<T>(key: string, parse: (raw: string | null) => T, serialize: (v: T) => string): Pref<T> {
+export function makePref<T>(key: string, parse: (raw: string | null) => T, serialize: (v: T) => string): Pref<T> {
   const listeners = new Set<() => void>()
 
   let value: T = (() => {

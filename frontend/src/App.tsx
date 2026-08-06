@@ -5,6 +5,7 @@ import { UiStyles } from './components/ui'
 import { UpdateBanner } from './components/UpdateBanner'
 import { hasActiveNewRunSession } from './pages/NewRun'
 import { useT } from './i18n'
+import { useTheme, resolveTheme, watchSystem } from './theme'
 
 const SIDEBAR_STORAGE_KEY = 'benchy-sidebar-collapsed'
 
@@ -13,10 +14,19 @@ export function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
+  const theme = useTheme()
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? '1' : '0')
   }, [collapsed])
+
+  // Re-resolve rather than re-set the pref: setting 'system' to 'system' is a
+  // no-op in the store, so an OS light/dark flip would never reach the DOM.
+  useEffect(() => {
+    const apply = () => document.documentElement.setAttribute('data-theme', resolveTheme(theme))
+    apply()
+    return theme === 'system' ? watchSystem(apply) : undefined
+  }, [theme])
 
   // With the sidebar collapsed there's no readable "Тест" nav label, so give
   // an explicit way back to the ongoing conversation from other sections.
