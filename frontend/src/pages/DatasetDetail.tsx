@@ -487,36 +487,38 @@ export function DatasetDetail() {
                 <div className="dsx-h">{tt('dataset.markup')}</div>
                 <div className="dsx-sub">{tt('dataset.markupSub')}</div>
               </div>
-              {dataset.schema.length > 0 && items.length > 0 && (
-                <div style={{ display: 'flex', gap: 4, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
-                  {(['focus', 'table'] as const).map(v => (
-                    <button key={v} onClick={() => setMarkupView(v)}
-                      style={{ border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', background: markupView === v ? 'var(--p-bg)' : 'transparent', color: markupView === v ? 'var(--p)' : 'var(--text-muted)' }}>
-                      {v === 'focus' ? tt('dataset.viewFocus') : tt('dataset.viewTable')}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {dataset.schema.length > 0 && items.length > 0 && (
-                <button onClick={() => void runAiFill()} disabled={aiFilling || !trusted}
-                  title={!trusted ? tt('dataset.aiNoTrusted') : undefined}
-                  style={{ border: '0.5px solid var(--p-bd)', background: 'var(--p-bg)', color: 'var(--p)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 12, fontFamily: 'var(--font-mono)', cursor: trusted && !aiFilling ? 'pointer' : 'default', opacity: !trusted ? 0.55 : 1, whiteSpace: 'nowrap' }}>
-                  ✦ {aiFilling ? tt('dataset.aiFilling') : tt('dataset.labelWithAi')}
-                </button>
-              )}
-              {isText ? (
-                <>
-                  <button className="dsx-ghost" onClick={() => setCsvOpen(o => !o)}>↓ {tt('dataset.importCsv')}</button>
-                  <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
-                </>
-              ) : (
-                <>
-                  <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
-                  <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                    {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                {dataset.schema.length > 0 && items.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
+                    {(['focus', 'table'] as const).map(v => (
+                      <button key={v} onClick={() => setMarkupView(v)}
+                        style={{ border: 'none', borderRadius: 4, padding: '6px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', background: markupView === v ? 'var(--p-bg)' : 'transparent', color: markupView === v ? 'var(--p)' : 'var(--text-muted)' }}>
+                        {v === 'focus' ? tt('dataset.viewFocus') : tt('dataset.viewTable')}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {dataset.schema.length > 0 && items.length > 0 && (
+                  <button onClick={() => void runAiFill()} disabled={aiFilling || !trusted}
+                    title={!trusted ? tt('dataset.aiNoTrusted') : undefined}
+                    style={{ border: '0.5px solid var(--p-bd)', background: 'var(--p-bg)', color: 'var(--p)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 12, fontFamily: 'var(--font-mono)', cursor: trusted && !aiFilling ? 'pointer' : 'default', opacity: !trusted ? 0.55 : 1, whiteSpace: 'nowrap' }}>
+                    ✦ {aiFilling ? tt('dataset.aiFilling') : tt('dataset.labelWithAi')}
                   </button>
-                </>
-              )}
+                )}
+                {isText ? (
+                  <>
+                    <button className="dsx-ghost" onClick={() => setCsvOpen(o => !o)}>↓ {tt('dataset.importCsv')}</button>
+                    <button className="dsx-ghost" onClick={() => void addTextItem()}>{tt('dataset.addItem')}</button>
+                  </>
+                ) : (
+                  <>
+                    <input ref={fileRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" style={{ display: 'none' }} onChange={e => void onFiles(e.target.files)} />
+                    <button className="dsx-ghost" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                      {uploading ? tt('dataset.uploading') : `＋ ${tt('dataset.chooseFiles')}`}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {isText && csvOpen && (
