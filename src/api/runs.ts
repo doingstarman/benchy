@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
-import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js'
+import { deleteAttachmentsForRun, deleteAttachmentsForRuns, cloneAttachmentsForRun } from './uploads.js'
+import { isLocalRequest } from './csrf.js'
 import type { Run, Result, Metrics, RunSettings, RunKind, ToolActivity } from '../types.js'
 
 interface RunRow {
@@ -199,6 +200,35 @@ export async function registerRunsRoutes(app: FastifyInstance): Promise<void> {
     }))
 
     return { data: { ...rowToRun(run), results: results.map(rowToResult), attachments } }
+  })
+
+  // Clear the whole history. CSRF-guarded even though the per-run delete below
+  // is not, and the asymmetry is the point: /api/runs/:id needs an id an
+  // attacker does not have, while this one needs nothing but the URL, so a
+  // cross-site page could wipe someone's history with a single fetch.
+  //
+  // Datasets and their items survive — they are authored content, and only
+  // their per-run verdicts belong to a run. Answering 200 with counts rather
+  // than the 204 rules/api.md prescribes for DELETE, because the caller has to
+  // be told how many went and that an in-flight run was kept.
+  app.delete('/api/runs', async (req, reply) => {
+    if (!isLocalRequest(req)) return reply.code(403).send({ error: 'cross-site request refused' })
+    const db = getDb()
+
+    // A running run is skipped: its stream is still INSERTing result rows, and
+    // the foreign key to a deleted run would throw inside the SSE handler.
+    const doomed = db.prepare("SELECT id FROM runs WHERE status != 'running'").all() as { id: string }[]
+    const total = (db.prepare('SELECT count(*) AS n FROM runs').get() as { n: number }).n
+
+    // results and dataset verdicts cascade; attachments have no foreign key at
+    // all, so nothing removes them unless this line does — and their files
+    // outlive the rows, leaking in the uploads dir with no way to find them
+    // again. The ids are captured above, so this may sit either side of the
+    // run delete; what it may not do is not happen.
+    await deleteAttachmentsForRuns(doomed.map(r => r.id))
+    const info = db.prepare("DELETE FROM runs WHERE status != 'running'").run()
+
+    return { data: { deleted: info.changes, skipped: total - info.changes } }
   })
 
   app.delete<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {

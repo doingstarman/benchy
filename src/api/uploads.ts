@@ -64,6 +64,27 @@ export function getAttachmentRow(id: string): AttachmentRow | undefined {
 // when a run is deleted so "deleted" media doesn't linger on disk/URL and
 // storage doesn't leak unbounded (the attachments table has no FK cascade
 // because it predates the run when unbound).
+// The bulk twin of deleteAttachmentsForRun, for clearing every run at once.
+// Written as two statements rather than a loop over deleteAttachmentsForRun
+// because that is one prepared-statement execution per run, and this runs
+// against a whole history.
+//
+// Only rows whose run_id is set are touched: a dataset's source file and a
+// still-unbound upload both survive, since neither belongs to a run.
+export async function deleteAttachmentsForRuns(runIds: string[]): Promise<void> {
+  if (runIds.length === 0) return
+  const db = getDb()
+  const holes = runIds.map(() => '?').join(',')
+  const rows = db.prepare(`SELECT id, mime_type FROM attachments WHERE run_id IN (${holes})`)
+    .all(...runIds) as { id: string; mime_type: string }[]
+  // Unlink BEFORE the delete, and outside any transaction — better-sqlite3
+  // transactions are synchronous and cannot await.
+  for (const row of rows) {
+    await unlink(uploadPath(row.id, row.mime_type)).catch(() => {})
+  }
+  db.prepare(`DELETE FROM attachments WHERE run_id IN (${holes})`).run(...runIds)
+}
+
 export async function deleteAttachmentsForRun(runId: string): Promise<void> {
   const db = getDb()
   const rows = db.prepare('SELECT id, mime_type FROM attachments WHERE run_id = ?')

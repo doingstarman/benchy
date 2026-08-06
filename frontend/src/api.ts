@@ -240,6 +240,8 @@ export const runsApi = {
   },
   get: (id: string) => apiFetch<RunWithResults>(`/api/runs/${id}`),
   remove: (id: string) => fetch(`/api/runs/${id}`, { method: 'DELETE' }),
+  // skipped counts runs still streaming, which the server refuses to delete.
+  clearAll: () => apiFetch<{ deleted: number; skipped: number }>('/api/runs', { method: 'DELETE' }),
   fork: (id: string) => apiFetch<Run>(`/api/runs/${id}/fork`, { method: 'POST' }),
   save: (id: string, saved: boolean) =>
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ saved }) }),

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { getUploadsDir, uploadPath } from '../api/uploads.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../server.js'
@@ -174,5 +175,100 @@ describe('Runs API — real SQLite', () => {
 
     const row = getDb().prepare('SELECT feedback FROM results WHERE id = ?').get(resultId) as { feedback: string }
     expect(row.feedback).toBe('up')
+  })
+})
+
+describe('DELETE /api/runs — clear the whole history', () => {
+  // The blast radius here is unbounded, which is what makes each of these
+  // matter: an attachment left behind is an invisible disk leak, a dataset
+  // taken with the runs is authored work nobody asked to delete, and a running
+  // run deleted mid-stream throws inside its SSE handler.
+  function attach(runId: string | null, datasetId: string | null = null): { id: string; path: string } {
+    const id = randomUUID()
+    const mime = 'image/png'
+    mkdirSync(getUploadsDir(), { recursive: true })
+    const path = uploadPath(id, mime)
+    writeFileSync(path, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    getDb().prepare(
+      'INSERT INTO attachments (id, run_id, dataset_id, prompt_index, mime_type, name, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, runId, datasetId, 0, mime, 'x.png', 4, Date.now())
+    return { id, path }
+  }
+
+  function reset() {
+    const db = getDb()
+    db.prepare('DELETE FROM attachments').run()
+    db.prepare('DELETE FROM runs').run()
+    db.prepare('DELETE FROM datasets').run()
+  }
+
+  async function clearAll(): Promise<{ status: number; body: { data?: { deleted: number; skipped: number } } }> {
+    const res = await fetch(`${base}/api/runs`, { method: 'DELETE' })
+    return { status: res.status, body: await res.json() as { data?: { deleted: number; skipped: number } } }
+  }
+
+  it('unlinks the files of every cleared run, not just their rows', async () => {
+    reset()
+    const a = attach(seed())
+    const b = attach(seed())
+
+    const res = await clearAll()
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual({ deleted: 2, skipped: 0 })
+
+    // Both assertions are load-bearing: attachments has no FK, so deleting the
+    // runs first would strand the rows AND leak the files. The rows are the
+    // visible symptom; the files are the actual leak.
+    expect(getDb().prepare('SELECT count(*) AS n FROM attachments').get()).toEqual({ n: 0 })
+    expect(existsSync(a.path), 'attachment file left on disk').toBe(false)
+    expect(existsSync(b.path), 'attachment file left on disk').toBe(false)
+  })
+
+  it('keeps uploads that belong to no run', async () => {
+    reset()
+    const runFile = attach(seed())
+    const unbound = attach(null)                       // a chip picked but never sent
+    const datasetFile = attach(null, 'ds-1')           // a dataset item's own file
+
+    await clearAll()
+
+    expect(existsSync(runFile.path)).toBe(false)
+    expect(existsSync(unbound.path), 'an unsent upload is not a run').toBe(true)
+    expect(existsSync(datasetFile.path), "a dataset's file is not a run").toBe(true)
+    expect(getDb().prepare('SELECT count(*) AS n FROM attachments').get()).toEqual({ n: 2 })
+  })
+
+  it('leaves a run that is still streaming, and says so', async () => {
+    reset()
+    seed({ status: 'done' })
+    const live = seed({ status: 'running' })
+
+    const res = await clearAll()
+    expect(res.body.data).toEqual({ deleted: 1, skipped: 1 })
+    expect(getDb().prepare('SELECT id FROM runs').all()).toEqual([{ id: live }])
+  })
+
+  it('takes the results with the runs', async () => {
+    reset()
+    const runId = seed()
+    getDb().prepare(
+      'INSERT INTO results (id, run_id, prompt_index, model, provider_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(randomUUID(), runId, 0, 'gpt-4o', 'openai', 'hi', Date.now())
+
+    await clearAll()
+    // Cascades via the FK — which only holds while foreign_keys = ON.
+    expect(getDb().prepare('SELECT count(*) AS n FROM results').get()).toEqual({ n: 0 })
+  })
+
+  it('refuses a cross-site Origin and deletes nothing', async () => {
+    reset()
+    seed()
+    const res = await fetch(`${base}/api/runs`, {
+      method: 'DELETE',
+      headers: { Origin: 'http://evil.example' },
+    })
+    expect(res.status).toBe(403)
+    expect(getDb().prepare('SELECT count(*) AS n FROM runs').get()).toEqual({ n: 1 })
+    reset()
   })
 })

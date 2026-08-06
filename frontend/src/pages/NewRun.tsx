@@ -1349,6 +1349,13 @@ export function __resetNewRunSessionForTests(): void {
   savedSession = null
 }
 
+// Clearing the run history deletes the run this session is attached to. Left
+// alone, navigating back to /run would try to continue into a runId the server
+// no longer has.
+export function clearNewRunSession(): void {
+  savedSession = null
+}
+
 // Whether a conversation is in progress on /run — lets the app shell offer a
 // way back to it when the user has navigated elsewhere.
 export function hasActiveNewRunSession(): boolean {
