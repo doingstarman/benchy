@@ -23,8 +23,6 @@ const SERVER_DEFAULTS = { codeExecution: false, codeExecTimeoutMs: 10_000, runDe
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
-  // jsdom implements neither of these, and both are reached by ordinary clicks.
-  Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(settingsApi.get).mockResolvedValue({ ...SERVER_DEFAULTS })
   vi.mocked(settingsApi.update).mockResolvedValue({ ...SERVER_DEFAULTS })
   vi.mocked(versionApi.get).mockResolvedValue({
@@ -39,42 +37,79 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function renderSettings() {
-  return render(<MemoryRouter initialEntries={['/settings']}><Settings /></MemoryRouter>)
+function renderSettings(hash = '') {
+  return render(<MemoryRouter initialEntries={[`/settings${hash}`]}><Settings /></MemoryRouter>)
 }
 
-// Waits for the two boot fetches so assertions don't race the loading state.
+// Both boot fetches resolved and flushed into state. Can't key off a rendered
+// value: the panes are separate now, so nothing from /api/settings is on screen
+// until the pane holding it is opened.
 async function ready() {
-  await screen.findByText('4243')
+  await screen.findByText('Start view')
+  await waitFor(() => expect(settingsApi.get).toHaveBeenCalled())
+  await act(async () => {})
+}
+
+async function openPane(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole('tab', { name }))
 }
 
 // Several rows share the labels On/Off, so queries have to be scoped to the
-// card under test rather than matching the first one on the page.
+// card under test rather than matching the first one in the pane.
 function rowFor(label: string): HTMLElement {
   return screen.getByText(label).closest('div')!.parentElement!
 }
 
-describe('Settings — sections', () => {
-  it('renders every section on one scrolling page', async () => {
+describe('Settings — panes', () => {
+  it('opens on General and shows only that pane', async () => {
     renderSettings()
     await ready()
 
-    // The design puts all six under one nav, so a nav anchor only means
-    // something if its section is on the page to be scrolled to.
-    for (const heading of ['General', 'Appearance', 'Models', 'Code execution', 'Server', 'About benchy']) {
-      expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
-    }
     expect(screen.getByText('Start view')).toBeInTheDocument()
-    expect(screen.getByText('Clear run history')).toBeInTheDocument()
+    // Rows from the other panes are not merely off-screen — they are not
+    // mounted, so they stay out of the tab order and out of Ctrl-F.
+    expect(screen.queryByText('Clear run history')).not.toBeInTheDocument()
+    expect(screen.queryByText('Run code datasets')).not.toBeInTheDocument()
   })
 
-  it('scrolls to a section when its nav item is clicked', async () => {
+  it('swaps panes when a nav item is picked', async () => {
     const user = userEvent.setup()
     renderSettings()
     await ready()
 
-    await user.click(screen.getByRole('button', { name: 'Models' }))
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    await openPane(user, 'Code execution')
+
+    expect(screen.getByText('Run code datasets')).toBeInTheDocument()
+    expect(screen.queryByText('Start view')).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Code execution' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('reaches every pane, so no row is stranded', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await ready()
+
+    const panes: [string, string][] = [
+      ['General', 'Start view'],
+      ['Appearance', 'Accent'],
+      ['Models', 'Show reasoning'],
+      ['Code execution', 'Run code datasets'],
+      ['Server', 'Clear run history'],
+      ['About benchy', 'Build'],
+    ]
+    for (const [tab, row] of panes) {
+      await openPane(user, tab)
+      expect(screen.getByText(row), `${tab} pane is missing "${row}"`).toBeInTheDocument()
+    }
+  })
+
+  // The dataset-run error tells people to "enable it in Settings"; a link
+  // carrying that hash has to land on the pane with the toggle, not on General.
+  it('opens the pane named in the URL hash', async () => {
+    renderSettings('#code')
+    await screen.findByText('Run code datasets')
+    expect(screen.queryByText('Start view')).not.toBeInTheDocument()
   })
 })
 
@@ -83,6 +118,7 @@ describe('Settings — preferences', () => {
     const user = userEvent.setup()
     renderSettings()
     await ready()
+    await openPane(user, 'Appearance')
 
     await user.click(within(rowFor('Monospace answers')).getByRole('button', { name: 'On' }))
 
@@ -99,6 +135,7 @@ describe('Settings — preferences', () => {
     const user = userEvent.setup()
     renderSettings()
     await ready()
+    await openPane(user, 'Models')
 
     await user.click(within(rowFor('Show reasoning')).getByRole('button', { name: 'Off' }))
     expect(localStorage.getItem('benchy-show-reasoning')).toBe('off')
@@ -108,11 +145,11 @@ describe('Settings — preferences', () => {
 describe('Settings — server-backed rows', () => {
   it('debounces a dragged slider into a single write', async () => {
     vi.useFakeTimers()
-    renderSettings()
+    // userEvent needs the real clock, so the pane is opened by hash instead.
+    renderSettings('#code')
 
-    // The execution-timeout slider, not temperature: temperature is allowAuto
-    // and unset by default, and SliderField disables itself while a value is
-    // Auto — so the enabled one is the only one a drag can reach.
+    // The execution-timeout slider: temperature is allowAuto and unset by
+    // default, and SliderField disables itself while a value is Auto.
     const slider = await vi.waitFor(() => {
       const found = [...document.querySelectorAll('input[type="range"]')]
         .find((el): el is HTMLInputElement => !(el as HTMLInputElement).disabled)
@@ -139,6 +176,7 @@ describe('Settings — server-backed rows', () => {
     const user = userEvent.setup()
     renderSettings()
     await ready()
+    await openPane(user, 'Code execution')
 
     const row = rowFor('Run code datasets')
     await user.click(within(row).getByRole('button', { name: 'On' }))
@@ -151,14 +189,35 @@ describe('Settings — server-backed rows', () => {
     // And the page says so, instead of leaving "saved automatically" standing.
     expect(screen.getByText(/Could not save/)).toBeInTheDocument()
   })
-})
 
-describe('Settings — clear run history', () => {
-  it('takes two clicks, and the first one calls nothing', async () => {
-    vi.mocked(runsApi.clearAll).mockResolvedValue({ deleted: 12, skipped: 0 })
+  it('keeps the failure notice visible across a pane switch', async () => {
+    // The notice lives in the nav, not the pane, so it must not vanish the
+    // moment you go looking at another section.
+    vi.mocked(settingsApi.update).mockRejectedValue(new Error('nope'))
     const user = userEvent.setup()
     renderSettings()
     await ready()
+    await openPane(user, 'Code execution')
+
+    await user.click(within(rowFor('Run code datasets')).getByRole('button', { name: 'On' }))
+    await waitFor(() => expect(screen.getByText(/Could not save/)).toBeInTheDocument())
+
+    await openPane(user, 'General')
+    expect(screen.getByText(/Could not save/)).toBeInTheDocument()
+  })
+})
+
+describe('Settings — clear run history', () => {
+  async function openServer(user: ReturnType<typeof userEvent.setup>) {
+    renderSettings()
+    await ready()
+    await openPane(user, 'Server')
+  }
+
+  it('takes two clicks, and the first one calls nothing', async () => {
+    vi.mocked(runsApi.clearAll).mockResolvedValue({ deleted: 12, skipped: 0 })
+    const user = userEvent.setup()
+    await openServer(user)
 
     await user.click(screen.getByRole('button', { name: 'Clear…' }))
     expect(runsApi.clearAll).not.toHaveBeenCalled()
@@ -170,8 +229,7 @@ describe('Settings — clear run history', () => {
 
   it('cancelling arms nothing', async () => {
     const user = userEvent.setup()
-    renderSettings()
-    await ready()
+    await openServer(user)
 
     await user.click(screen.getByRole('button', { name: 'Clear…' }))
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -180,11 +238,26 @@ describe('Settings — clear run history', () => {
     expect(runsApi.clearAll).not.toHaveBeenCalled()
   })
 
+  // Leaving a half-armed button behind would mean one stray click on return
+  // wipes the history, with the confirmation step already spent.
+  it('disarms when the pane is left and re-entered', async () => {
+    const user = userEvent.setup()
+    await openServer(user)
+
+    await user.click(screen.getByRole('button', { name: 'Clear…' }))
+    expect(screen.getByRole('button', { name: 'Delete everything' })).toBeInTheDocument()
+
+    await openPane(user, 'General')
+    await openPane(user, 'Server')
+
+    expect(screen.getByRole('button', { name: 'Clear…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete everything' })).not.toBeInTheDocument()
+  })
+
   it('reports a run it could not delete rather than claiming a clean sweep', async () => {
     vi.mocked(runsApi.clearAll).mockResolvedValue({ deleted: 3, skipped: 1 })
     const user = userEvent.setup()
-    renderSettings()
-    await ready()
+    await openServer(user)
 
     await user.click(screen.getByRole('button', { name: 'Clear…' }))
     await user.click(screen.getByRole('button', { name: 'Delete everything' }))

@@ -105,7 +105,6 @@ export function Settings() {
   const [saveError, setSaveError] = useState(false)
   const [active, setActive] = useState<SectionId>('general')
 
-  const scrollRef = useRef<HTMLDivElement>(null)
   const pending = useRef<AppSettingsPatch>({})
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -142,29 +141,9 @@ export function Settings() {
 
   // Deep links: /settings#code is what the "enable it in Settings" error points at.
   useEffect(() => {
-    const id = location.hash.replace('#', '')
-    if (SECTIONS.some(s => s === id)) scrollTo(id as SectionId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const id = SECTIONS.find(s => s === location.hash.replace('#', ''))
+    if (id) setActive(id)
   }, [location.hash])
-
-  function scrollTo(id: SectionId) {
-    setActive(id)
-    document.getElementById(`set-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  // The last section whose heading has reached the top of the viewport — the
-  // one you are reading. Cosmetic: it only moves the highlight, so if layout
-  // measurement is unavailable (jsdom reports every rect as 0) it simply keeps
-  // whatever a click set, and clicking still scrolls.
-  function onScroll() {
-    const top = scrollRef.current?.getBoundingClientRect().top
-    if (top == null) return
-    const passed = SECTIONS.filter(id => {
-      const rect = document.getElementById(`set-${id}`)?.getBoundingClientRect()
-      return rect != null && rect.top - top <= 24
-    })
-    setActive(passed[passed.length - 1] ?? SECTIONS[0])
-  }
 
   const runDefaults = settings?.runDefaults ?? {}
 
@@ -172,10 +151,14 @@ export function Settings() {
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <style>{SETTINGS_CSS}</style>
 
-      <nav style={{
-        width: 214, minWidth: 214, flexShrink: 0, borderRight: '0.5px solid var(--border)',
-        display: 'flex', flexDirection: 'column', gap: 2, padding: '24px 12px 16px', overflowY: 'auto',
-      }}>
+      <nav
+        role="tablist"
+        aria-orientation="vertical"
+        style={{
+          width: 214, minWidth: 214, flexShrink: 0, borderRight: '0.5px solid var(--border)',
+          display: 'flex', flexDirection: 'column', gap: 2, padding: '24px 12px 16px', overflowY: 'auto',
+        }}
+      >
         <h1 style={{
           fontSize: 'var(--fs-lg)', fontWeight: 600, color: 'var(--text-bright)',
           fontFamily: 'var(--font-sans)', padding: '0 12px 12px',
@@ -187,9 +170,12 @@ export function Settings() {
           return (
             <button
               key={id}
+              role="tab"
+              id={`set-tab-${id}`}
+              aria-selected={active === id}
+              aria-controls={`set-${id}`}
               className={`set-nav-item${active === id ? ' on' : ''}`}
-              onClick={() => scrollTo(id)}
-              aria-current={active === id}
+              onClick={() => setActive(id)}
             >
               <span style={{ display: 'flex', color: active === id ? 'var(--accent)' : 'var(--text-muted)' }}>
                 <Icon size={14} />
@@ -206,15 +192,11 @@ export function Settings() {
         </div>
       </nav>
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        style={{
-          flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px 48px',
-          display: 'flex', flexDirection: 'column', gap: 24,
-        }}
-      >
-        <Section id="general" title={tr('settings.general')} subtitle={tr('settings.generalSub')}>
+      <div style={{
+        flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px 48px',
+        display: 'flex', flexDirection: 'column', gap: 24,
+      }}>
+        <Section active={active} id="general" title={tr('settings.general')} subtitle={tr('settings.generalSub')}>
           <Card label={tr('settings.language')} description={tr('settings.languageHint')}>
             <Segmented
               value={lang}
@@ -241,7 +223,7 @@ export function Settings() {
           </Card>
         </Section>
 
-        <Section id="appearance" title={tr('settings.appearance')} subtitle={tr('settings.appearanceSub')}>
+        <Section active={active} id="appearance" title={tr('settings.appearance')} subtitle={tr('settings.appearanceSub')}>
           <Card label={tr('settings.theme')}>
             <Segmented
               value={theme}
@@ -281,7 +263,7 @@ export function Settings() {
           </Card>
         </Section>
 
-        <Section id="models" title={tr('settings.models')} subtitle={tr('settings.modelsSub')}>
+        <Section active={active} id="models" title={tr('settings.models')} subtitle={tr('settings.modelsSub')}>
           <Card label={tr('settings.showReasoning')} description={tr('settings.showReasoningHint')}>
             <Segmented
               value={showReasoning}
@@ -328,7 +310,7 @@ export function Settings() {
           </Card>
         </Section>
 
-        <Section id="code" title={tr('settings.codeExecTitle')} subtitle={tr('settings.codeExecSub')}>
+        <Section active={active} id="code" title={tr('settings.codeExecTitle')} subtitle={tr('settings.codeExecSub')}>
           <Card label={tr('settings.codeExec')}>
             <Segmented
               value={settings ? settings.codeExecution : null}
@@ -359,7 +341,7 @@ export function Settings() {
           </Card>
         </Section>
 
-        <Section id="server" title={tr('settings.server')} subtitle={tr('settings.serverSub')}>
+        <Section active={active} id="server" title={tr('settings.server')} subtitle={tr('settings.serverSub')}>
           <Card label={tr('settings.port')}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-md)', color: 'var(--text-muted)' }}>
               {info?.runtime.port != null ? String(info.runtime.port) : '…'}
@@ -370,7 +352,7 @@ export function Settings() {
           <ClearHistoryCard />
         </Section>
 
-        <Section id="about" title={tr('settings.aboutTitle')}>
+        <Section active={active} id="about" title={tr('settings.aboutTitle')}>
           <UpdateRow info={info} onChecked={setInfo} />
           <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-secondary)', lineHeight: 1.6, padding: '0 4px' }}>
             {tr('settings.aboutText')}
@@ -384,14 +366,25 @@ export function Settings() {
   )
 }
 
-function Section({ id, title, subtitle, children }: {
+// One pane at a time. Unmounting the inactive ones is deliberate rather than
+// hiding them: nothing here holds unsaved state — every control writes on
+// change — so a pane costs nothing to rebuild, and a hidden pane would still
+// put its rows in the tab order and in Ctrl-F.
+function Section({ active, id, title, subtitle, children }: {
+  active: SectionId
   id: SectionId
   title: string
   subtitle?: string
   children: React.ReactNode
 }) {
+  if (active !== id) return null
   return (
-    <section id={`set-${id}`} style={{ display: 'flex', flexDirection: 'column', gap: 8, scrollMarginTop: 24 }}>
+    <section
+      id={`set-${id}`}
+      role="tabpanel"
+      aria-labelledby={`set-tab-${id}`}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+    >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
         <h2 style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--text-bright)', fontFamily: 'var(--font-sans)' }}>
           {title}
