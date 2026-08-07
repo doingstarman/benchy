@@ -106,6 +106,25 @@ function heat(v: number | null): { color: string; background: string } {
   return { color: 'var(--bad)', background: 'rgba(224,92,92,0.13)' }
 }
 
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
+}
+
+// The one variable every model struggles on — usually a ground-truth or prompt
+// problem, not a model one. Flags it only when it's clearly the laggard (well
+// below the other variables) and not already good, so the hint stays meaningful.
+function weakestVar(matrix: MatrixRow[], schema: DatasetVar[]): { key: string; avg: number } | null {
+  if (schema.length < 2) return null
+  const avgs = schema.flatMap(v => {
+    const vals = matrix.map(m => m.perVar[v.key]).filter((x): x is number => x != null)
+    return vals.length ? [{ key: v.key, avg: vals.reduce((a, b) => a + b, 0) / vals.length }] : []
+  })
+  if (avgs.length < 2) return null
+  const min = avgs.reduce((a, b) => b.avg < a.avg ? b : a)
+  const mean = avgs.reduce((s, x) => s + x.avg, 0) / avgs.length
+  return (min.avg < 0.8 && mean - min.avg >= 0.12) ? min : null
+}
+
 export function DatasetDetail() {
   const { id = '' } = useParams()
   const { t: tt } = useT()
@@ -839,6 +858,28 @@ export function DatasetDetail() {
               <div className="dsx-sec">
                 <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
                 <div className="dsx-sub">{isCode ? tt('dataset.codeResultsHint') : tt('dataset.resultsHint')}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
+                  {matrix.map((row, i) => {
+                    const best = i === 0 && row.overall != null
+                    const rr = (runResults ?? []).filter(r => r.model === row.model)
+                    const times = rr.map(r => r.metrics.totalTime).filter((tm): tm is number => tm != null)
+                    const avgSec = times.length ? times.reduce((a, b) => a + b, 0) / times.length / 1000 : null
+                    const tokens = rr.reduce((s, r) => s + (r.metrics.inputTokens ?? 0) + (r.metrics.outputTokens ?? 0), 0)
+                    const h = heat(row.overall)
+                    return (
+                      <div key={row.model} style={{ background: 'var(--bg-base)', border: `0.5px solid ${best ? 'var(--p-bd)' : 'var(--border)'}`, borderLeft: best ? '2px solid var(--p)' : undefined, borderRadius: 'var(--radius-sm)', padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'var(--font-mono)', color: best ? 'var(--p)' : 'var(--text-secondary)' }}>
+                          {best && <span>★</span>}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel(row.model)}</span>
+                        </div>
+                        <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: h.color, lineHeight: 1.1 }}>{pct(row.overall)}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                          {tt('dataset.summaryAccuracy')}<br />
+                          {[tokens ? tt('dataset.tokensN', { n: fmtTokens(tokens) }) : null, avgSec != null ? tt('dataset.perItem', { s: avgSec.toFixed(1) }) : null].filter(Boolean).join(' · ') || '—'}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="dsx-table">
                     <thead><tr>
@@ -865,6 +906,14 @@ export function DatasetDetail() {
                     </tbody>
                   </table>
                 </div>
+                {!isCode && (() => {
+                  const weak = weakestVar(matrix, dataset.schema)
+                  return weak ? (
+                    <div style={{ marginTop: 12, background: 'var(--bg-base)', border: '0.5px solid var(--border)', borderLeft: '2px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                      <b style={{ color: 'var(--warning)', fontWeight: 600 }}>{weak.key}</b> {tt('dataset.weakVar')}
+                    </div>
+                  ) : null
+                })()}
               </div>
             )}
 

@@ -213,6 +213,10 @@ export const DICT: Record<string, Entry> = {
   'dataset.codeTestsHint': { en: "Hidden from the model. Python: def test_*() with assert. JavaScript: test('name', () => …) with assert(). Score = passed / total.", ru: "Скрыто от модели. Python: def test_*() с assert. JavaScript: test('имя', () => …) с assert(). Оценка = пройдено / всего." },
   'dataset.codeRunHint': { en: 'Each model gets the task, then its code runs against the hidden tests. Score = share of tests passed.', ru: 'Каждая модель получает задачу, затем её код исполняется против скрытых тестов. Оценка = доля пройденных тестов.' },
   'dataset.codeResultsHint': { en: 'Score = tests passed / total, run locally against the hidden tests.', ru: 'Оценка = пройдено / всего тестов, исполнено локально против скрытых тестов.' },
+  'dataset.summaryAccuracy': { en: 'accuracy vs truth', ru: 'точность по эталону' },
+  'dataset.tokensN': { en: '{n} tokens', ru: '{n} токенов' },
+  'dataset.perItem': { en: '{s}s / item', ru: '{s} с/элемент' },
+  'dataset.weakVar': { en: 'is weak across every model — usually the ground truth or the prompt, not the model.', ru: 'проседает у всех моделей — чаще дело в эталоне или промпте, а не в самой модели.' },
   'dataset.delete': { en: 'Delete', ru: 'Удалить' },
   'dataset.deleteConfirm': { en: 'Delete this dataset and all its files?', ru: 'Удалить датасет и все его файлы?' },
 
