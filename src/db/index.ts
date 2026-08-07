@@ -188,6 +188,9 @@ export async function initDb(path?: string): Promise<void> {
     // prompt_index order). Subsampling means prompt_index no longer maps to the
     // full item list, so per-item views must resolve items through these ids.
     'ALTER TABLE runs ADD COLUMN dataset_item_ids TEXT',
+    // The dataset run's base prompt (before each item's input was folded in), so a
+    // subsampled run can be relaunched over the full dataset without guessing it.
+    'ALTER TABLE runs ADD COLUMN base_prompt TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

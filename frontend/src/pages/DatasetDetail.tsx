@@ -202,6 +202,7 @@ export function DatasetDetail() {
   const [runId, setRunId] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Result[] | null>(null)
   const [runItemIds, setRunItemIds] = useState<string[] | null>(null)
+  const [runMeta, setRunMeta] = useState<{ models: string[]; basePrompt?: string; systemPrompt?: string | null } | null>(null)
   const [adopting, setAdopting] = useState(false)
   const [starting, setStarting] = useState(false)
   // arena (benchmark) state
@@ -230,6 +231,7 @@ export function DatasetDetail() {
       const full = await runsApi.get(last.id)
       setRunResults(full.results)
       setRunItemIds(full.datasetItemIds ?? null)
+      setRunMeta({ models: full.models, basePrompt: full.basePrompt, systemPrompt: full.systemPrompt })
       setViewRunId(last.id)
       if (last.mode === 'arena') {
         setRunMode('arena')
@@ -248,6 +250,7 @@ export function DatasetDetail() {
     void runsApi.get(e.runId).then(r => {
       setRunResults(r.results)
       setRunItemIds(r.datasetItemIds ?? null)
+      setRunMeta({ models: r.models, basePrompt: r.basePrompt, systemPrompt: r.systemPrompt })
       if (runMode === 'arena') void datasetsApi.arena(id, e.runId).then(setArena)
     })
   })
@@ -406,6 +409,7 @@ export function DatasetDetail() {
     setStarting(true)
     setRunResults(null)
     setRunItemIds(null)
+    setRunMeta(null)
     setArena(null)
     setCurWorst(null)
     try {
@@ -457,6 +461,20 @@ export function DatasetDetail() {
       if (viewRunId) await datasetsApi.rescore(id, viewRunId)
       await load()
     } finally { setAdopting(false) }
+  }
+
+  // The viewed run covered fewer items than the dataset now has ⇒ it was a
+  // subsample; offer a one-click full run with the same models + prompt.
+  const coveredCount = runItemIds?.length ?? (runResults ? new Set(runResults.map(r => r.promptIndex)).size : 0)
+  const subsampled = viewRunId != null && !running && coveredCount > 0 && coveredCount < items.length && !!runMeta?.basePrompt
+
+  async function runAll(): Promise<void> {
+    if (!runMeta?.basePrompt || runMeta.models.length === 0) return
+    const { runId: newRun } = await datasetsApi.run(id, {
+      models: runMeta.models, prompt: runMeta.basePrompt,
+      ...(runMeta.systemPrompt ? { systemPrompt: runMeta.systemPrompt } : {}), mode: runMode,
+    })
+    setRunResults(null); setRunItemIds(null); setRunMeta(null); setViewRunId(newRun); setRunId(newRun)
   }
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
   // Input-based datasets (text + tools) share the whole markup/run path; only
@@ -926,8 +944,15 @@ export function DatasetDetail() {
 
             {(isCode || runMode === 'score') && matrix.length > 0 && (
               <div className="dsx-sec">
-                <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
-                <div className="dsx-sub">{isCode ? tt('dataset.codeResultsHint') : tt('dataset.resultsHint')}</div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="dsx-h">{tt('dataset.resultsTitle')}</div>
+                    <div className="dsx-sub">{isCode ? tt('dataset.codeResultsHint') : tt('dataset.resultsHint')}</div>
+                  </div>
+                  {subsampled && (
+                    <button className="dsx-primary" style={{ flexShrink: 0 }} onClick={() => void runAll()}>{tt('dataset.runAll', { n: items.length })}</button>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
                   {matrix.map((row, i) => {
                     const best = i === 0 && row.overall != null

@@ -143,8 +143,11 @@ describe('dataset run + scoring', () => {
     const firstRunId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 2 } })).runId
     const first = await waitForRun(firstRunId)
     expect(first.results).toHaveLength(2)
-    // The run records the exact items it covered, in order — so per-item views map right.
-    expect(data<{ datasetItemIds: string[] }>(await req('GET', `/api/runs/${firstRunId}`)).datasetItemIds).toEqual(ids.slice(0, 2))
+    // The run records the exact items it covered (per-item mapping) and its base
+    // prompt (so a subsample can later be relaunched over the whole dataset).
+    const firstRun = data<{ datasetItemIds: string[]; basePrompt: string }>(await req('GET', `/api/runs/${firstRunId}`))
+    expect(firstRun.datasetItemIds).toEqual(ids.slice(0, 2))
+    expect(firstRun.basePrompt).toBe('go')
 
     const rand = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'random', n: 3 } })).runId)
     expect(rand.results).toHaveLength(3)

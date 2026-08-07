@@ -635,10 +635,10 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const runId = randomUUID()
       const now = Date.now()
       db.prepare(
-        'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode, dataset_item_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode, dataset_item_ids, base_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(
         runId, JSON.stringify(itemPrompts), JSON.stringify(models),
-        'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode, JSON.stringify(items.map(it => it.id)),
+        'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode, JSON.stringify(items.map(it => it.id)), prompt,
       )
 
       // File items ride their image at their own prompt_index (runCell's vision
