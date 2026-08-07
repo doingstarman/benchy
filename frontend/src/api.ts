@@ -138,6 +138,8 @@ export const datasetsApi = {
   runs: (id: string) => apiFetch<DatasetRunSummary[]>(`/api/datasets/${id}/runs`),
   run: (id: string, body: { models: string[]; prompt: string; systemPrompt?: string; mode?: 'score' | 'arena'; sample?: { strategy: 'first' | 'random'; n: number } }) =>
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
+  rescore: (id: string, runId: string) =>
+    apiFetch<{ rescored: boolean }>(`/api/datasets/${id}/runs/${runId}/rescore`, { method: 'POST' }),
   arena: (id: string, runId: string) => apiFetch<ArenaState>(`/api/datasets/${id}/runs/${runId}/arena`),
   putVerdict: (id: string, runId: string, promptIndex: number, body: { bestModel?: string; worstModel?: string; skipped?: boolean }) =>
     apiFetch<{ standings: ArenaStanding[]; nextIndex: number }>(`/api/datasets/${id}/runs/${runId}/verdicts/${promptIndex}`, { method: 'PUT', body: JSON.stringify(body) }),

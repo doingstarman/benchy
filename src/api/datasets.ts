@@ -172,7 +172,7 @@ function buildRunPrompt(prompt: string, schema: DatasetVar[]): string {
 // Score every result of a finished dataset run against the item snapshot taken
 // when the run started (prompt_index === item position). Writes score columns so
 // the results endpoint carries them.
-function scoreDatasetRun(runId: string, schema: DatasetVar[], items: DatasetItem[]): void {
+function scoreDatasetRun(runId: string, schema: DatasetVar[], items: (DatasetItem | undefined)[]): void {
   const db = getDb()
   const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
     .all(runId) as { id: string; prompt_index: number; text: string }[]
@@ -673,6 +673,36 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       }
 
       return reply.code(202).send({ data: { runId } })
+    },
+  )
+
+  // Re-score a finished field-scored run against the CURRENT ground truth — no
+  // model calls. Used after the disagreements review edits a truth value: the fix
+  // recomputes accuracy from the answers already on disk. Items are resolved
+  // through the run's covered ids (prompt_index order) so subsampling stays right.
+  app.post<{ Params: { id: string; runId: string } }>(
+    '/api/datasets/:id/runs/:runId/rescore',
+    async (req, reply) => {
+      const db = getDb()
+      const row = getDatasetRow(req.params.id)
+      if (!row) return reply.code(404).send({ error: 'Dataset not found' })
+      const dataset = rowToDataset(row, { withItems: true })
+      if (dataset.type === 'code') return reply.code(400).send({ error: 'rescore applies to field-scored datasets, not code' })
+
+      const runRow = db.prepare('SELECT dataset_id, dataset_item_ids FROM runs WHERE id = ?').get(req.params.runId) as
+        { dataset_id: string | null; dataset_item_ids: string | null } | undefined
+      if (!runRow || runRow.dataset_id !== req.params.id) return reply.code(404).send({ error: 'Run not found for this dataset' })
+
+      const all = dataset.items ?? []
+      const byId = new Map(all.map(it => [it.id, it]))
+      let itemIds: string[] | null = null
+      try { itemIds = runRow.dataset_item_ids ? JSON.parse(runRow.dataset_item_ids) as string[] : null } catch { /* keep null */ }
+      // Undefined slots (an item deleted since the run) keep prompt_index aligned;
+      // scoreDatasetRun skips them, leaving those results' old score untouched.
+      const covered = itemIds ? itemIds.map(id => byId.get(id)) : all
+
+      scoreDatasetRun(req.params.runId, dataset.schema, covered)
+      return reply.code(200).send({ data: { rescored: true } })
     },
   )
 

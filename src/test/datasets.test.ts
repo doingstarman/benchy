@@ -153,6 +153,27 @@ describe('dataset run + scoring', () => {
     const all = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 99 } })).runId)
     expect(all.results).toHaveLength(4)
   })
+
+  it('rescore re-grades a run against the edited ground truth with no model calls', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', {
+      name: 'R2', schema: [{ key: 'total', type: 'number' }],
+    }))
+    const itemId = data<{ id: string }>(await req('POST', `/api/datasets/${ds.id}/items`, { groundTruth: { total: '99' } })).id
+
+    // The model returns 100; the truth says 99 ⇒ a miss.
+    mockOutput = '{"total": 100}'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'read' })).runId
+    const done = await waitForRun(runId)
+    expect(done.results[0].score).toBe(0)
+
+    // Adopt the model's value as truth, then rescore — the same answer now matches.
+    await req('PATCH', `/api/datasets/${ds.id}/items/${itemId}`, { groundTruth: { total: '100' } })
+    mockOutput = 'THIS MUST NOT BE USED — rescore never re-calls the model'
+    expect((await req('POST', `/api/datasets/${ds.id}/runs/${runId}/rescore`)).status).toBe(200)
+
+    const after = data<{ results: { score: number | null }[] }>(await req('GET', `/api/runs/${runId}`))
+    expect(after.results[0].score).toBe(1)
+  })
 })
 
 describe('trusted model', () => {

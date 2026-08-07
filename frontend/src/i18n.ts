@@ -224,6 +224,8 @@ export const DICT: Record<string, Entry> = {
   'dataset.modelsDiffer': { en: '{k}/{m} models differ', ru: '{k}/{m} моделей разошлись' },
   'dataset.matched': { en: 'matched', ru: 'совпало' },
   'dataset.andMore': { en: '+{n} more', ru: 'ещё {n}' },
+  'dataset.adoptTruth': { en: 'use as truth', ru: 'принять как эталон' },
+  'dataset.adoptTruthHint': { en: 'Set the ground truth to this value and re-score the run — no model calls.', ru: 'Сделать это значение эталоном и пересчитать прогон — без вызовов моделей.' },
   'dataset.delete': { en: 'Delete', ru: 'Удалить' },
   'dataset.deleteConfirm': { en: 'Delete this dataset and all its files?', ru: 'Удалить датасет и все его файлы?' },
 

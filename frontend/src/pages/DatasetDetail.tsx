@@ -202,6 +202,7 @@ export function DatasetDetail() {
   const [runId, setRunId] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Result[] | null>(null)
   const [runItemIds, setRunItemIds] = useState<string[] | null>(null)
+  const [adopting, setAdopting] = useState(false)
   const [starting, setStarting] = useState(false)
   // arena (benchmark) state
   const [runMode, setRunMode] = useState<'score' | 'arena'>('score')
@@ -445,6 +446,18 @@ export function DatasetDetail() {
   const disagreements = dataset.type !== 'code' && runMode === 'score' && runResults && dataset.schema.length > 0
     ? computeDisagreements(runResults, dataset.schema, promptItem)
     : []
+
+  // Adopt a model's value as the ground truth, then re-score the run from the
+  // answers already on disk — no model calls. load() refreshes items + results.
+  async function adoptTruth(item: DatasetItem, key: string, value: string): Promise<void> {
+    if (adopting) return
+    setAdopting(true)
+    try {
+      await datasetsApi.updateItem(id, item.id, { groundTruth: { ...item.groundTruth, [key]: value } })
+      if (viewRunId) await datasetsApi.rescore(id, viewRunId)
+      await load()
+    } finally { setAdopting(false) }
+  }
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
   // Input-based datasets (text + tools) share the whole markup/run path; only
   // 'files' uses attachments. `isText` = "input-based" (kept the name to avoid churn).
@@ -1000,7 +1013,15 @@ export function DatasetDetail() {
                             <div key={r.model} style={{ display: 'flex', alignItems: 'center', gap: 12, border: '0.5px solid var(--border)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', width: 84, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel(r.model)}</span>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ok ? 'var(--ok)' : 'var(--bad)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val ?? '—'}</span>
-                              {ok && <span style={{ fontSize: 10.5, color: 'var(--ok)' }}>{tt('dataset.matched')}</span>}
+                              {ok
+                                ? <span style={{ fontSize: 10.5, color: 'var(--ok)', flexShrink: 0 }}>{tt('dataset.matched')}</span>
+                                : val != null && (
+                                  <button disabled={adopting} onClick={() => void adoptTruth(d.item, d.key, val)}
+                                    title={tt('dataset.adoptTruthHint')}
+                                    style={{ border: '0.5px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', padding: '3px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: adopting ? 'default' : 'pointer', flexShrink: 0, opacity: adopting ? 0.5 : 1 }}>
+                                    {tt('dataset.adoptTruth')}
+                                  </button>
+                                )}
                             </div>
                           )
                         })}
