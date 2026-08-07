@@ -136,11 +136,15 @@ describe('dataset run + scoring', () => {
 
   it('subsamples the run — only n items are covered; an out-of-range n runs all', async () => {
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'S', type: 'text', schema: [{ key: 'a', type: 'text' }] }))
-    for (let i = 0; i < 4; i++) await req('POST', `/api/datasets/${ds.id}/items`, { input: `item ${i}`, groundTruth: { a: String(i) } })
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) ids.push(data<{ id: string }>(await req('POST', `/api/datasets/${ds.id}/items`, { input: `item ${i}`, groundTruth: { a: String(i) } })).id)
     mockOutput = '{"a":"x"}'
 
-    const first = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 2 } })).runId)
+    const firstRunId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 2 } })).runId
+    const first = await waitForRun(firstRunId)
     expect(first.results).toHaveLength(2)
+    // The run records the exact items it covered, in order — so per-item views map right.
+    expect(data<{ datasetItemIds: string[] }>(await req('GET', `/api/runs/${firstRunId}`)).datasetItemIds).toEqual(ids.slice(0, 2))
 
     const rand = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'random', n: 3 } })).runId)
     expect(rand.results).toHaveLength(3)

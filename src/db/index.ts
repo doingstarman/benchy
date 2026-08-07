@@ -184,6 +184,10 @@ export async function initDb(path?: string): Promise<void> {
     // Code datasets: the interpreter, and per-item hidden test source.
     'ALTER TABLE datasets ADD COLUMN language TEXT',
     'ALTER TABLE dataset_items ADD COLUMN tests TEXT',
+    // Which dataset items a run actually covered (JSON array of ids, in
+    // prompt_index order). Subsampling means prompt_index no longer maps to the
+    // full item list, so per-item views must resolve items through these ids.
+    'ALTER TABLE runs ADD COLUMN dataset_item_ids TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

@@ -217,6 +217,13 @@ export const DICT: Record<string, Entry> = {
   'dataset.tokensN': { en: '{n} tokens', ru: '{n} токенов' },
   'dataset.perItem': { en: '{s}s / item', ru: '{s} с/элемент' },
   'dataset.weakVar': { en: 'is weak across every model — usually the ground truth or the prompt, not the model.', ru: 'проседает у всех моделей — чаще дело в эталоне или промпте, а не в самой модели.' },
+  'dataset.disagreements': { en: 'Disagreements', ru: 'Расхождения' },
+  'dataset.disagreementsSub': { en: 'Where at least one model differs from the ground truth — candidates for fixing the truth or the prompt.', ru: 'Там, где хотя бы одна модель разошлась с эталоном — кандидаты на правку эталона или промпта.' },
+  'dataset.groundTruth': { en: 'Truth', ru: 'Эталон' },
+  'dataset.itemN': { en: 'item {n}', ru: 'элемент {n}' },
+  'dataset.modelsDiffer': { en: '{k}/{m} models differ', ru: '{k}/{m} моделей разошлись' },
+  'dataset.matched': { en: 'matched', ru: 'совпало' },
+  'dataset.andMore': { en: '+{n} more', ru: 'ещё {n}' },
   'dataset.delete': { en: 'Delete', ru: 'Удалить' },
   'dataset.deleteConfirm': { en: 'Delete this dataset and all its files?', ru: 'Удалить датасет и все его файлы?' },
 

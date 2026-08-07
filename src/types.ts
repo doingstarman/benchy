@@ -232,6 +232,9 @@ export interface Run {
   systemPrompt?: string | null
   skills?: string[]
   mcp?: string[]
+  // Dataset runs only: the item ids this run covered, in prompt_index order.
+  // Present because subsampling breaks the prompt_index → full-item-list mapping.
+  datasetItemIds?: string[]
 }
 
 // What a run's prompts[] means. 'chat' = successive turns of one conversation

@@ -21,6 +21,7 @@ interface RunRow {
   system_prompt: string | null
   skills: string | null
   mcp: string | null
+  dataset_item_ids: string | null
 }
 
 interface ResultRow {
@@ -72,6 +73,7 @@ function rowToRun(row: RunRow): Run {
     ...(row.system_prompt != null ? { systemPrompt: row.system_prompt } : {}),
     ...(row.skills ? { skills: parseTools(row.skills) } : {}),
     ...(row.mcp ? { mcp: parseTools(row.mcp) } : {}),
+    ...(row.dataset_item_ids ? { datasetItemIds: JSON.parse(row.dataset_item_ids) as string[] } : {}),
   }
 }
 

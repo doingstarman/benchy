@@ -125,6 +125,53 @@ function weakestVar(matrix: MatrixRow[], schema: DatasetVar[]): { key: string; a
   return (min.avg < 0.8 && mean - min.avg >= 0.12) ? min : null
 }
 
+// Best-effort read of one field from a model's JSON answer (mirrors the backend's
+// balanced-object scan) so the review can show what a model actually returned.
+function parseField(text: string, key: string): string | null {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue
+    let depth = 0, inStr = false, esc = false, end = -1
+    for (let j = i; j < text.length; j++) {
+      const c = text[j]
+      if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false }
+      else if (c === '"') inStr = true
+      else if (c === '{') depth++
+      else if (c === '}' && --depth === 0) { end = j; break }
+    }
+    if (end === -1) break
+    try {
+      const obj = JSON.parse(text.slice(i, end + 1)) as unknown
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && key in obj) {
+        const v = (obj as Record<string, unknown>)[key]
+        return v == null ? null : String(v)
+      }
+    } catch { /* not this object — scan on */ }
+  }
+  return null
+}
+
+interface Disagreement { idx: number; item: DatasetItem; key: string; truth: string; results: Result[]; missCount: number }
+
+// The item×variable cells a run got wrong: at least one model's value missed the
+// ground truth. These are the candidates for fixing the truth or the prompt — the
+// item is resolved through the run's covered ids so subsampling stays correct.
+function computeDisagreements(results: Result[], schema: DatasetVar[], resolveItem: (i: number) => DatasetItem | undefined): Disagreement[] {
+  const byIdx = new Map<number, Result[]>()
+  for (const r of results) { const a = byIdx.get(r.promptIndex) ?? []; a.push(r); byIdx.set(r.promptIndex, a) }
+  const out: Disagreement[] = []
+  for (const [idx, rs] of [...byIdx.entries()].sort((a, b) => a[0] - b[0])) {
+    const item = resolveItem(idx)
+    if (!item) continue
+    for (const v of schema) {
+      const truth = item.groundTruth[v.key]
+      if (truth == null || String(truth).trim() === '') continue
+      const missCount = rs.filter(r => r.scoreDetail?.[v.key] === 'miss').length
+      if (missCount > 0) out.push({ idx, item, key: v.key, truth, results: rs, missCount })
+    }
+  }
+  return out
+}
+
 export function DatasetDetail() {
   const { id = '' } = useParams()
   const { t: tt } = useT()
@@ -154,6 +201,7 @@ export function DatasetDetail() {
   const [selModels, setSelModels] = useState<Set<string>>(new Set())
   const [runId, setRunId] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Result[] | null>(null)
+  const [runItemIds, setRunItemIds] = useState<string[] | null>(null)
   const [starting, setStarting] = useState(false)
   // arena (benchmark) state
   const [runMode, setRunMode] = useState<'score' | 'arena'>('score')
@@ -180,6 +228,7 @@ export function DatasetDetail() {
     if (last && last.status !== 'running') {
       const full = await runsApi.get(last.id)
       setRunResults(full.results)
+      setRunItemIds(full.datasetItemIds ?? null)
       setViewRunId(last.id)
       if (last.mode === 'arena') {
         setRunMode('arena')
@@ -197,6 +246,7 @@ export function DatasetDetail() {
     if (e.event !== 'run_done') return
     void runsApi.get(e.runId).then(r => {
       setRunResults(r.results)
+      setRunItemIds(r.datasetItemIds ?? null)
       if (runMode === 'arena') void datasetsApi.arena(id, e.runId).then(setArena)
     })
   })
@@ -354,6 +404,7 @@ export function DatasetDetail() {
     if (!chosen.length || !prompt.trim()) return
     setStarting(true)
     setRunResults(null)
+    setRunItemIds(null)
     setArena(null)
     setCurWorst(null)
     try {
@@ -388,6 +439,12 @@ export function DatasetDetail() {
 
   const matrix = runResults ? buildMatrix(runResults, dataset.schema) : []
   const running = runId != null && runResults == null
+  // Resolve a run prompt_index to its dataset item — via the run's covered ids
+  // when present (subsampled/random runs), else positionally (older/full runs).
+  const promptItem = (i: number): DatasetItem | undefined => runItemIds ? items.find(it => it.id === runItemIds[i]) : items[i]
+  const disagreements = dataset.type !== 'code' && runMode === 'score' && runResults && dataset.schema.length > 0
+    ? computeDisagreements(runResults, dataset.schema, promptItem)
+    : []
   const focusItem = items.length ? items[Math.min(focusIdx, items.length - 1)] : null
   // Input-based datasets (text + tools) share the whole markup/run path; only
   // 'files' uses attachments. `isText` = "input-based" (kept the name to avoid churn).
@@ -914,6 +971,44 @@ export function DatasetDetail() {
                     </div>
                   ) : null
                 })()}
+              </div>
+            )}
+
+            {disagreements.length > 0 && (
+              <div className="dsx-sec">
+                <div className="dsx-h">{tt('dataset.disagreements')} · {disagreements.length}</div>
+                <div className="dsx-sub">{tt('dataset.disagreementsSub')}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {disagreements.slice(0, 40).map(d => (
+                    <div key={`${d.idx}:${d.key}`} style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--p)', fontWeight: 600 }}>{d.key}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {d.item.input ? (d.item.input.length > 44 ? `${d.item.input.slice(0, 44)}…` : d.item.input) : tt('dataset.itemN', { n: d.idx + 1 })}
+                          {' · '}{tt('dataset.modelsDiffer', { k: d.missCount, m: d.results.length })}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '0.5px solid rgba(90,184,122,0.4)', background: 'rgba(90,184,122,0.10)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ok)', width: 84, flexShrink: 0 }}>{tt('dataset.groundTruth')}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-bright)' }}>{d.truth}</span>
+                        </div>
+                        {[...d.results].sort((a, b) => a.model.localeCompare(b.model)).map(r => {
+                          const ok = r.scoreDetail?.[d.key] === 'match'
+                          const val = parseField(r.text, d.key)
+                          return (
+                            <div key={r.model} style={{ display: 'flex', alignItems: 'center', gap: 12, border: '0.5px solid var(--border)', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', width: 84, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel(r.model)}</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: ok ? 'var(--ok)' : 'var(--bad)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val ?? '—'}</span>
+                              {ok && <span style={{ fontSize: 10.5, color: 'var(--ok)' }}>{tt('dataset.matched')}</span>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {disagreements.length > 40 && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{tt('dataset.andMore', { n: disagreements.length - 40 })}</div>}
+                </div>
               </div>
             )}
 
