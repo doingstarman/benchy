@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer } from '../server.js'
 import { closeDb } from '../db/index.js'
 import type { FastifyInstance } from 'fastify'
-import type { Provider } from '../types.js'
+import type { Provider, ProviderView } from '../types.js'
 
 let server: FastifyInstance
 let upstream: Server
@@ -19,6 +19,12 @@ let port: number
 // ones do.
 const UPSTREAM = 'http://127.0.0.1:14301/v1'
 const seenPaths: string[] = []
+// Which Authorization the upstream actually received — the only way to tell
+// whose key the backend chose when both a stored one and a typed one exist.
+const seenAuth: (string | undefined)[] = []
+function lastAuth(): string | undefined {
+  return seenAuth[seenAuth.length - 1]
+}
 
 beforeAll(async () => {
   port = 14300
@@ -27,6 +33,7 @@ beforeAll(async () => {
 
   upstream = createHttpServer((req, res) => {
     seenPaths.push(req.url ?? '')
+    seenAuth.push(req.headers.authorization)
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ data: [{ id: 'model-a' }, { id: 'model-b' }] }))
@@ -53,6 +60,7 @@ afterAll(async () => {
 beforeEach(async () => {
   const { writeConfig } = await import('../config.js')
   await writeConfig({ providers: [] })
+  seenAuth.length = 0
 })
 
 async function get<T>(path: string) {
@@ -111,10 +119,13 @@ describe('Providers API — real HTTP + real config file', () => {
 
     await post('/api/providers', { id, name: 'Anthropic', type: 'anthropic', apiKey: 'new-key', models: ['claude-haiku-4-5', 'claude-opus-4-5'], enabled: true })
 
-    const { body } = await get<{ data: Provider[] }>('/api/providers')
+    const { body } = await get<{ data: ProviderView[] }>('/api/providers')
     expect(body.data).toHaveLength(1)
-    expect(body.data[0].apiKey).toBe('new-key')
     expect(body.data[0].models).toHaveLength(2)
+    // The API answers with a mask; the key itself is checked on disk below.
+    expect(body.data[0].apiKeyMask).toBe('•'.repeat(16) + '-key')
+    const { readConfig } = await import('../config.js')
+    expect((await readConfig()).providers[0].apiKey).toBe('new-key')
   })
 
   it('DELETE /api/providers/:id removes provider', async () => {
@@ -295,5 +306,174 @@ describe('probing a draft', () => {
     } finally {
       await new Promise<void>(r => guarded.close(() => r()))
     }
+  })
+})
+
+// benchy is unauthenticated on localhost, so while it runs, any page the user
+// has open can script requests to it. Every route in this file reads or writes
+// API keys, so every one of them has to refuse a cross-site Origin — GET most
+// of all, because that is the one that hands the keys back.
+describe('Providers API — cross-site requests', () => {
+  const EVIL = 'https://evil.example.com'
+
+  async function asEvil(path: string, init: RequestInit = {}) {
+    const res = await fetch(`${base}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', Origin: EVIL, ...(init.headers ?? {}) },
+    })
+    return { status: res.status, text: await res.text(), headers: res.headers }
+  }
+
+  async function seedKeyedProvider() {
+    await post('/api/providers', {
+      name: 'Secret', type: 'openai', apiKey: 'sk-SUPER-SECRET-KEY-123', models: ['gpt-4o'],
+    })
+  }
+
+  it('refuses to hand a foreign page the provider list', async () => {
+    await seedKeyedProvider()
+    const { status, text } = await asEvil('/api/providers')
+
+    expect(status).toBe(403)
+    // The exploit was worth having because the body carried the key itself.
+    expect(text).not.toContain('sk-')
+  })
+
+  it('does not tell the browser a foreign page may read the response', async () => {
+    // Belt and braces: even a route that answered would be unreadable, because
+    // the reflected Access-Control-Allow-Origin is what made this exploitable
+    // from a browser rather than just from curl.
+    const { headers } = await asEvil('/api/providers')
+    expect(headers.get('access-control-allow-origin')).not.toBe(EVIL)
+  })
+
+  it('refuses cross-site writes, probes and deletes too', async () => {
+    await seedKeyedProvider()
+    const { body } = await get<{ data: Provider[] }>('/api/providers')
+    const id = body.data[0].id
+
+    for (const [path, init] of [
+      ['/api/providers', { method: 'POST', body: JSON.stringify({ name: 'x', type: 'openai', models: [] }) }],
+      ['/api/providers/models', { method: 'POST', body: JSON.stringify({ type: 'openai' }) }],
+      ['/api/providers/test', { method: 'POST', body: JSON.stringify({ type: 'openai', model: 'gpt-4o' }) }],
+      [`/api/providers/${id}`, { method: 'DELETE' }],
+    ] as [string, RequestInit][]) {
+      expect((await asEvil(path, init)).status, `${init.method} ${path}`).toBe(403)
+    }
+
+    // The delete really was refused, not merely reported as refused.
+    const after = await get<{ data: Provider[] }>('/api/providers')
+    expect(after.body.data).toHaveLength(1)
+  })
+
+  it('still serves benchy itself — no Origin, and the dev server on another port', async () => {
+    await seedKeyedProvider()
+
+    // The app's own fetches are same-origin and send no Origin at all.
+    expect((await get<{ data: Provider[] }>('/api/providers')).status).toBe(200)
+
+    // `npm run dev` is Vite on 5173 talking to the backend on 4243. If this
+    // breaks, the fix is unshippable however secure it is.
+    const res = await fetch(`${base}/api/providers`, { headers: { Origin: 'http://localhost:5173' } })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:5173')
+  })
+})
+
+// The CORS fix stops a browser reading the key. This is the other half: the key
+// is not in the response to begin with, so it never reaches page memory, an
+// error report, or whatever a devtools screenshot ends up in.
+describe('Providers API — the key stays on the backend', () => {
+  async function seed(apiKey: string) {
+    const { body } = await post<{ data: ProviderView }>('/api/providers', {
+      name: 'Secret', type: 'openai', apiKey, models: ['gpt-4o'], enabled: true,
+    })
+    return body.data.id
+  }
+
+  async function storedKey(id: string) {
+    const { readConfig } = await import('../config.js')
+    return (await readConfig()).providers.find(p => p.id === id)?.apiKey
+  }
+
+  it('never puts the key in a response, on read or on write', async () => {
+    const { body: created } = await post<{ data: ProviderView }>('/api/providers', {
+      name: 'Secret', type: 'openai', apiKey: 'sk-SUPER-SECRET-KEY-123', models: ['gpt-4o'], enabled: true,
+    })
+    const list = await get<{ data: ProviderView[] }>('/api/providers')
+
+    for (const payload of [created, list.body]) {
+      expect(JSON.stringify(payload)).not.toContain('sk-SUPER-SECRET-KEY-123')
+      expect(JSON.stringify(payload)).not.toContain('"apiKey"')
+    }
+    // What the UI renders instead: enough to tell two keys apart, useless alone.
+    expect(list.body.data[0].apiKeyMask).toBe('•'.repeat(16) + '-123')
+  })
+
+  it('reports no key as null rather than as a row of dots', async () => {
+    await post('/api/providers', {
+      name: 'Local', type: 'openai-compatible', baseUrl: 'http://localhost:1234/v1', models: ['m'], enabled: true,
+    })
+    const { body } = await get<{ data: ProviderView[] }>('/api/providers')
+    // isProviderActive keys off this, so "" and null must not be confusable.
+    expect(body.data[0].apiKeyMask).toBeNull()
+  })
+
+  // The client cannot echo a key it was never given, so an edit that does not
+  // mention apiKey has to mean "leave it alone". Getting this wrong wipes the
+  // key on every rename — the most ordinary edit there is.
+  it('keeps the stored key when a save omits apiKey', async () => {
+    const id = await seed('sk-keep-me-1234')
+
+    await post('/api/providers', {
+      id, name: 'Renamed', type: 'openai', models: ['gpt-4o', 'gpt-4o-mini'], enabled: true,
+    })
+
+    expect(await storedKey(id)).toBe('sk-keep-me-1234')
+    const { body } = await get<{ data: ProviderView[] }>('/api/providers')
+    expect(body.data[0].name).toBe('Renamed')
+    expect(body.data[0].apiKeyMask).toBe('•'.repeat(16) + '1234')
+  })
+
+  it('erases the key on an explicit empty string', async () => {
+    const id = await seed('sk-drop-me-9999')
+
+    await post('/api/providers', {
+      id, name: 'Secret', type: 'openai', apiKey: '', models: ['gpt-4o'], enabled: true,
+    })
+
+    expect(await storedKey(id)).toBeUndefined()
+    const { body } = await get<{ data: ProviderView[] }>('/api/providers')
+    expect(body.data[0].apiKeyMask).toBeNull()
+  })
+
+  it('probes a saved provider by id, so the UI need not hold the key', async () => {
+    const id = await seed('sk-stored-key')
+
+    // /models against the local upstream: it 404s an unauthorised request, so a
+    // 200 with the model list is proof the backend supplied the stored key.
+    const { status, body } = await post<{ data: string[] }>('/api/providers/models', {
+      type: 'openai-compatible', baseUrl: UPSTREAM, providerId: id,
+    })
+
+    expect(status).toBe(200)
+    expect(body.data).toEqual(['model-a', 'model-b'])
+  })
+
+  it('prefers a key typed into the form over the stored one', async () => {
+    // Replacing a key must be testable before it is saved, or "Test connection"
+    // would be checking the key you are about to discard.
+    const id = await seed('sk-stored-key')
+    await post('/api/providers/models', {
+      type: 'openai-compatible', baseUrl: UPSTREAM, providerId: id, apiKey: 'sk-typed-in-form',
+    })
+    expect(lastAuth()).toBe('Bearer sk-typed-in-form')
+  })
+
+  it('sends no key at all for an unknown providerId', async () => {
+    await post('/api/providers/models', {
+      type: 'openai-compatible', baseUrl: UPSTREAM, providerId: 'no-such-provider',
+    })
+    expect(lastAuth()).toBeUndefined()
   })
 })

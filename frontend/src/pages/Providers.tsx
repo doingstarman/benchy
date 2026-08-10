@@ -5,8 +5,8 @@ import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
 import { IconChevron, IconSliders } from '../components/icons'
 import { useT, t } from '../i18n'
-import type { ProviderDraft } from '../api'
-import type { Provider, ProviderType, ProviderDefaults } from '../../../src/types'
+import type { ProviderDraft, ProviderUpsert } from '../api'
+import type { ProviderView, ProviderType, ProviderDefaults } from '../../../src/types'
 
 const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
   temperature: 0.7,
@@ -27,11 +27,6 @@ function uid() {
   return typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
-function maskKey(key: string): string {
-  if (key.length < 8) return '•'.repeat(key.length)
-  return key.slice(0, 3) + '•'.repeat(16) + key.slice(-4)
 }
 
 // ─── Static data ──────────────────────────────────────────────────────────────
@@ -92,8 +87,8 @@ const PRESET_PROVIDERS: PresetProvider[] = [
   { name: 'Webhook', type: 'webhook', placeholderKey: 'Webhook secret (optional)', subtitle: 'Webhook · POST with JSON payload' },
 ]
 
-function isProviderActive(provider: Provider): boolean {
-  return provider.enabled && (!!provider.apiKey || !!provider.baseUrl)
+function isProviderActive(provider: ProviderView): boolean {
+  return provider.enabled && (!!provider.apiKeyMask || !!provider.baseUrl)
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -106,7 +101,7 @@ interface TestResult {
 }
 
 interface ModalState {
-  provider: Provider
+  provider: ProviderView
   preset?: PresetProvider
   selectedModels: Set<string>
   availableModels: string[]
@@ -147,7 +142,7 @@ const MODAL_CSS = `
 
 // ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
 
-interface Tile { key: string; provider: Provider; onClick: () => void }
+interface Tile { key: string; provider: ProviderView; onClick: () => void }
 
 // Was declared inside Providers, against the rule right above: every render
 // produced a new component type, so React threw the whole grid away and rebuilt
@@ -213,7 +208,9 @@ function SectionLabel({ children, actions }: SectionLabelProps) {
 }
 
 interface ApiKeySectionProps {
-  apiKey: string
+  // Null when no key is stored. This is a display string from the backend —
+  // the page has no way to obtain the key itself, which is the point.
+  apiKeyMask: string | null
   replacingKey: boolean
   newKey: string
   placeholder: string
@@ -221,14 +218,14 @@ interface ApiKeySectionProps {
   onNewKeyChange: (v: string) => void
 }
 
-function ApiKeySection({ apiKey, replacingKey, newKey, placeholder, onStartReplace, onNewKeyChange }: ApiKeySectionProps) {
+function ApiKeySection({ apiKeyMask, replacingKey, newKey, placeholder, onStartReplace, onNewKeyChange }: ApiKeySectionProps) {
   return (
     <div>
       <SectionLabel>{t('providers.apiKey')}</SectionLabel>
-      {!replacingKey && apiKey ? (
+      {!replacingKey && apiKeyMask ? (
         <div style={{ background: 'var(--bg-base)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>
-            {maskKey(apiKey)}
+            {apiKeyMask}
           </span>
           <button onClick={onStartReplace} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)', padding: '0 0 0 12px' }}>
             {t('providers.replaceKey')}
@@ -244,7 +241,7 @@ function ApiKeySection({ apiKey, replacingKey, newKey, placeholder, onStartRepla
           autoFocus={replacingKey}
         />
       )}
-      {!replacingKey && apiKey && (
+      {!replacingKey && apiKeyMask && (
         <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.storedLocally')}</div>
       )}
     </div>
@@ -613,7 +610,7 @@ function DangerZone({ onDisconnect }: DangerZoneProps) {
 
 export function Providers() {
   useT() // subscribe: a language switch re-renders this tree (sub-components use module t())
-  const [providers, setProviders] = useState<Provider[]>([])
+  const [providers, setProviders] = useState<ProviderView[]>([])
   const [modal, setModal] = useState<ModalState | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -623,7 +620,7 @@ export function Providers() {
 
   const CUSTOM_INTEGRATION_TYPES: string[] = ['http-json', 'script', 'webhook']
 
-  function buildModal(preset: PresetProvider, existing?: Provider): ModalState {
+  function buildModal(preset: PresetProvider, existing?: ProviderView): ModalState {
     const isCustomIntegration = CUSTOM_INTEGRATION_TYPES.includes(preset.type)
     if (existing) {
       return {
@@ -634,7 +631,7 @@ export function Providers() {
         manualMode: isCustomIntegration || existing.models.length > 0,
         manualText: existing.models.join(', '),
         modelSearch: '',
-        replacingKey: !existing.apiKey,
+        replacingKey: !existing.apiKeyMask,
         newKey: '',
         testModelId: existing.models[0] ?? '',
         testing: false,
@@ -646,11 +643,11 @@ export function Providers() {
         defaults: existing.defaults ?? { ...DEFAULT_DEFAULTS },
       }
     }
-    const p: Provider = {
+    const p: ProviderView = {
       id: uid(),
       name: preset.name,
       type: preset.type,
-      apiKey: '',
+      apiKeyMask: null,
       baseUrl: preset.baseUrl,
       models: [],
       enabled: true,
@@ -682,7 +679,7 @@ export function Providers() {
   }
 
   function openCustom() {
-    const p: Provider = { id: uid(), name: '', type: 'openai-compatible', apiKey: '', baseUrl: '', models: [], enabled: true }
+    const p: ProviderView = { id: uid(), name: '', type: 'openai-compatible', apiKeyMask: null, baseUrl: '', models: [], enabled: true }
     setModal({
       provider: p,
       selectedModels: new Set(),
@@ -703,7 +700,7 @@ export function Providers() {
     })
   }
 
-  function openExistingCustom(p: Provider) {
+  function openExistingCustom(p: ProviderView) {
     setModal({
       provider: p,
       selectedModels: new Set(p.models),
@@ -711,7 +708,7 @@ export function Providers() {
       manualMode: true,
       manualText: p.models.join(', '),
       modelSearch: '',
-      replacingKey: !p.apiKey,
+      replacingKey: !p.apiKeyMask,
       newKey: '',
       testModelId: p.models[0] ?? '',
       testing: false,
@@ -728,7 +725,7 @@ export function Providers() {
     setModal(m => m ? { ...m, ...patch } : m)
   }
 
-  function updateProvider(patch: Partial<Provider>) {
+  function updateProvider(patch: Partial<ProviderView>) {
     setModal(m => m ? { ...m, provider: { ...m.provider, ...patch } } : m)
   }
 
@@ -737,16 +734,20 @@ export function Providers() {
     return [...m.selectedModels]
   }
 
-  function getFinalProvider(m: ModalState): Provider {
+  // Only send apiKey when the user actually typed one. Omitting it means
+  // "leave the stored key alone" — which is what an ordinary edit (a rename, a
+  // model list change) now is, since the page has no key to send back.
+  function getFinalProvider(m: ModalState): ProviderUpsert {
+    const { apiKeyMask: _mask, ...rest } = m.provider
     return {
-      ...m.provider,
-      apiKey: m.replacingKey ? m.newKey : (m.provider.apiKey ?? ''),
+      ...rest,
+      ...(m.replacingKey ? { apiKey: m.newKey } : {}),
       models: getFinalModels(m),
       defaults: m.defaults,
     }
   }
 
-  function syncProviders(saved: Provider) {
+  function syncProviders(saved: ProviderView) {
     setProviders(prev => {
       const idx = prev.findIndex(p => p.id === saved.id)
       return idx >= 0 ? prev.map((p, i) => i === idx ? saved : p) : [...prev, saved]
@@ -775,9 +776,17 @@ export function Providers() {
   // What the form currently holds — testing and listing act on this, never on
   // whatever happens to be saved. Both used to upsert first, which meant
   // clicking Test quietly wrote the provider and Cancel could no longer undo it.
+  // A probe carries the typed key if there is one; otherwise it names the saved
+  // provider and lets the backend supply the key. An unsaved draft has neither,
+  // which is correct — there is nothing to authenticate with yet.
   function getDraft(m: ModalState): ProviderDraft {
     const final = getFinalProvider(m)
-    return { type: final.type, apiKey: final.apiKey, baseUrl: final.baseUrl }
+    const saved = providers.some(p => p.id === m.provider.id)
+    return {
+      type: final.type,
+      baseUrl: final.baseUrl,
+      ...(m.replacingKey ? { apiKey: m.newKey } : saved ? { providerId: m.provider.id } : {}),
+    }
   }
 
   async function handleTest() {
@@ -825,8 +834,8 @@ export function Providers() {
   const presetNames = new Set(PRESET_PROVIDERS.map(p => p.name))
 
 
-  function stub(preset: PresetProvider): Provider {
-    return { id: '', name: preset.name, type: preset.type, models: [], enabled: false }
+  function stub(preset: PresetProvider): ProviderView {
+    return { id: '', name: preset.name, type: preset.type, apiKeyMask: null, models: [], enabled: false }
   }
 
   const presetTiles = PRESET_PROVIDERS.map(preset => {
@@ -914,7 +923,7 @@ export function Providers() {
 
               {!isLocal && !isScript && (
                 <ApiKeySection
-                  apiKey={modal.provider.apiKey ?? ''}
+                  apiKeyMask={modal.provider.apiKeyMask}
                   replacingKey={modal.replacingKey}
                   newKey={modal.newKey}
                   placeholder={modal.preset?.placeholderKey ?? 'sk-…'}

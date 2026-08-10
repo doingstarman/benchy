@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useT, t } from '../i18n'
 import { datasetsApi, providersApi, runsApi, uploadsApi, useSSE, type ArenaState } from '../api'
-import type { Dataset, DatasetItem, DatasetVar, DatasetVarType, Provider, Result } from '../../../src/types'
+import type { Dataset, DatasetItem, DatasetVar, DatasetVarType, ProviderView, Result } from '../../../src/types'
 
 const VAR_TYPES: DatasetVarType[] = ['text', 'date', 'number']
 type Tab = 'schema' | 'markup' | 'run'
@@ -42,9 +42,9 @@ function modelLabel(key: string): string {
   return key.split(':').slice(1).join(':') || key
 }
 
-function availableModels(providers: Provider[]): string[] {
+function availableModels(providers: ProviderView[]): string[] {
   return providers
-    .filter(p => p.enabled && (p.apiKey || p.baseUrl))
+    .filter(p => p.enabled && (p.apiKeyMask || p.baseUrl))
     .flatMap(p => p.models.map(m => `${p.id}:${m}`))
 }
 
@@ -112,7 +112,7 @@ export function DatasetDetail() {
   const nav = useNavigate()
 
   const [dataset, setDataset] = useState<Dataset | null>(null)
-  const [providers, setProviders] = useState<Provider[]>([])
+  const [providers, setProviders] = useState<ProviderView[]>([])
   const [schema, setSchema] = useState<DatasetVar[]>([])
   const [schemaDirty, setSchemaDirty] = useState(false)
   const [items, setItems] = useState<DatasetItem[]>([])
