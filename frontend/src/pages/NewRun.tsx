@@ -8,8 +8,9 @@ import { Button, IconButton, PillToggle } from '../components/ui'
 import {
   IconRefresh, IconCopy, IconCheck, IconExpand, IconCollapse, IconClose,
   IconPlay, IconStop, IconPaperclip, IconPencil, IconFile, IconChevron,
-  IconLayers, IconModeFan, IconModePairs, IconModeMatrix,
+  IconLayers, IconModeFan, IconModePairs, IconModeMatrix, IconModeDataset,
 } from '../components/icons'
+import { DatasetRunPanel } from '../components/DatasetRunPanel'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } from '../prefs'
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
@@ -467,11 +468,15 @@ export function ChipsRow({ groups, selectedModels, onToggle, onToggleProvider, o
 
 // ─── ModeSelector ─────────────────────────────────────────────────────────
 
-const MODE_ICON: Record<PromptMode, (p: { size?: number }) => React.JSX.Element> = {
-  0: IconModeFan,
-  1: IconModePairs,
-  2: IconModeMatrix,
-}
+// PromptMode (0/1/2) lives in ../prefs so the default-mode setting can share it.
+export type SelMode = PromptMode | 'dataset'
+
+const MODE_OPTS: { value: SelMode; Icon: (p: { size?: number }) => React.JSX.Element; labelKey: string; descKey: string }[] = [
+  { value: 0, Icon: IconModeFan, labelKey: 'run.mode0', descKey: 'run.desc0' },
+  { value: 1, Icon: IconModePairs, labelKey: 'run.mode1', descKey: 'run.desc1' },
+  { value: 2, Icon: IconModeMatrix, labelKey: 'run.mode2', descKey: 'run.desc2' },
+  { value: 'dataset', Icon: IconModeDataset, labelKey: 'run.modeDataset', descKey: 'run.descDataset' },
+]
 
 // The mode decides what the whole composer IS — three textareas or one, a
 // matrix or a single call. As a tab strip welded to the top of the promptbox it
@@ -479,8 +484,8 @@ const MODE_ICON: Record<PromptMode, (p: { size?: number }) => React.JSX.Element>
 // page header it reads as the frame around everything below it, and the box
 // gets to start with the prompt.
 export function ModeSelector({ mode, onModeChange, selectedCount }: {
-  mode: PromptMode
-  onModeChange: (m: PromptMode) => void
+  mode: SelMode
+  onModeChange: (m: SelMode) => void
   selectedCount: number
 }) {
   const { t } = useT()
@@ -499,7 +504,8 @@ export function ModeSelector({ mode, onModeChange, selectedCount }: {
     }
   }, [open])
 
-  const CurrentIcon = MODE_ICON[mode]
+  const current = MODE_OPTS.find(o => o.value === mode) ?? MODE_OPTS[0]
+  const CurrentIcon = current.Icon
 
   return (
     <div
@@ -524,7 +530,7 @@ export function ModeSelector({ mode, onModeChange, selectedCount }: {
         }}
       >
         <span style={{ color: 'var(--accent)', display: 'flex' }}><CurrentIcon size={16} /></span>
-        {t(`run.mode${mode}`)}
+        {t(current.labelKey)}
         <span style={{ color: 'var(--text-muted)', display: 'flex' }}><IconChevron open={open} size={10} /></span>
       </button>
 
@@ -547,16 +553,16 @@ export function ModeSelector({ mode, onModeChange, selectedCount }: {
             borderRadius: 'var(--radius-lg)', boxShadow: '0 18px 44px rgba(0,0,0,0.6)', overflow: 'hidden',
           }}
         >
-          {([0, 1, 2] as const).map((m, i) => {
-            const active = mode === m
-            const Icon = MODE_ICON[m]
+          {MODE_OPTS.map((o, i) => {
+            const active = mode === o.value
+            const Icon = o.Icon
             return (
               <button
-                key={m}
+                key={String(o.value)}
                 role="option"
                 aria-selected={active}
                 className={`mode-opt${active ? ' active' : ''}`}
-                onClick={() => { onModeChange(m); setOpen(false) }}
+                onClick={() => { onModeChange(o.value); setOpen(false) }}
                 style={{
                   display: 'flex', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
                   padding: '13px 15px', border: 'none',
@@ -573,10 +579,10 @@ export function ModeSelector({ mode, onModeChange, selectedCount }: {
                     fontSize: 'var(--fs-base)', fontFamily: 'var(--font-mono)',
                     color: active ? 'var(--text-bright)' : 'var(--text-primary)',
                   }}>
-                    {t(`run.mode${m}`)}
+                    {t(o.labelKey)}
                   </span>
                   <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-muted)' }}>
-                    {t(`run.desc${m}`)}
+                    {t(o.descKey)}
                   </span>
                 </span>
               </button>
@@ -1397,6 +1403,11 @@ export function NewRun() {
   // it isn't a generation parameter.
   const [systemPrompt, setSystemPrompt] = useState<string>(() => savedSession?.systemPrompt ?? '')
   const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? getDefaultMode())
+  // The dataset run is a distinct 4th mode kept out of PromptMode so the 0/1/2
+  // run machinery is untouched; it swaps the idle body for its own config panel.
+  const [datasetMode, setDatasetMode] = useState(false)
+  const selMode: SelMode = datasetMode ? 'dataset' : mode
+  const onSelectMode = (m: SelMode) => { if (m === 'dataset') setDatasetMode(true); else { setDatasetMode(false); setMode(m) } }
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
   const [batchPrompts, setBatchPrompts] = useState<string[]>(() => savedSession?.batchPrompts ?? [''])
@@ -2140,21 +2151,31 @@ export function NewRun() {
           flexShrink: 0, display: 'flex', alignItems: 'center',
           padding: '0 16px', borderBottom: '0.5px solid var(--border)',
         }}>
-          <ModeSelector mode={mode} onModeChange={setMode} selectedCount={selectedModels.size} />
+          <ModeSelector mode={selMode} onModeChange={onSelectMode} selectedCount={selectedModels.size} />
         </div>
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',
-        }}>
-          <div style={{ fontSize: 24, color: 'var(--text-primary)', fontWeight: 400, letterSpacing: -0.4, textAlign: 'center' }}>
-            {t('run.title')}
+        {datasetMode ? (
+          <div style={{
+            flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 16, padding: '24px',
+          }}>
+            <div style={{ width: '100%', maxWidth: 1000 }}><ChipsRow {...chipsRowProps} wrap /></div>
+            <DatasetRunPanel selectedModels={[...selectedModels]} />
           </div>
-          {mode !== 2 && <ChipsRow {...chipsRowProps} wrap />}
-          <div style={{ width: '100%', maxWidth: 640 }}>
-            <Promptbox {...promptboxProps} simplified={false} />
+        ) : (
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 16, padding: '24px',
+          }}>
+            <div style={{ fontSize: 24, color: 'var(--text-primary)', fontWeight: 400, letterSpacing: -0.4, textAlign: 'center' }}>
+              {t('run.title')}
+            </div>
+            {mode !== 2 && <ChipsRow {...chipsRowProps} wrap />}
+            <div style={{ width: '100%', maxWidth: 640 }}>
+              <Promptbox {...promptboxProps} simplified={false} />
+            </div>
+            {error && <div style={{ fontSize: 12, color: 'var(--error)', maxWidth: 640, textAlign: 'center' }}>{error}</div>}
           </div>
-          {error && <div style={{ fontSize: 12, color: 'var(--error)', maxWidth: 640, textAlign: 'center' }}>{error}</div>}
-        </div>
+        )}
       </div>
     )
   }

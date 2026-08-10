@@ -134,6 +134,21 @@ export function IconLayers(p: IconProps) {
 // land on as blocks on the right. Read side by side in the mode selector, the
 // difference between them is the picture, not the label.
 
+// a dataset (cylinder) → all models (blocks): the 4th run mode
+export function IconModeDataset(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <ellipse cx="3.6" cy="3" rx="2.3" ry="1.1" />
+      <path d="M1.3 3v6.2c0 .6 1 1.1 2.3 1.1s2.3-.5 2.3-1.1V3" />
+      <path d="M6.2 6.6h4.9" />
+      <rect x="11.3" y="1.9" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="6.7" width="2.9" height="2.6" rx=".8" />
+      <rect x="11.3" y="11.5" width="2.9" height="2.6" rx=".8" />
+      <path d="M6.2 6.6c1.7 0 1.3-3.4 3-3.4h1.3M6.2 6.6c1.7 0 1.3 6.2 3 6.2h1.3" />
+    </Svg>
+  )
+}
+
 // one prompt → all models
 export function IconModeFan(p: IconProps) {
   return (

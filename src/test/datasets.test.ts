@@ -133,6 +133,50 @@ describe('dataset run + scoring', () => {
     expect(done.results[0].score).toBe(0.5)
     expect(done.results[0].scoreDetail).toEqual({ total: 'match', merchant: 'miss' })
   })
+
+  it('subsamples the run — only n items are covered; an out-of-range n runs all', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'S', type: 'text', schema: [{ key: 'a', type: 'text' }] }))
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) ids.push(data<{ id: string }>(await req('POST', `/api/datasets/${ds.id}/items`, { input: `item ${i}`, groundTruth: { a: String(i) } })).id)
+    mockOutput = '{"a":"x"}'
+
+    const firstRunId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 2 } })).runId
+    const first = await waitForRun(firstRunId)
+    expect(first.results).toHaveLength(2)
+    // The run records the exact items it covered (per-item mapping) and its base
+    // prompt (so a subsample can later be relaunched over the whole dataset).
+    const firstRun = data<{ datasetItemIds: string[]; basePrompt: string }>(await req('GET', `/api/runs/${firstRunId}`))
+    expect(firstRun.datasetItemIds).toEqual(ids.slice(0, 2))
+    expect(firstRun.basePrompt).toBe('go')
+
+    const rand = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'random', n: 3 } })).runId)
+    expect(rand.results).toHaveLength(3)
+
+    // n >= size (or malformed) falls back to the whole dataset.
+    const all = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'go', sample: { strategy: 'first', n: 99 } })).runId)
+    expect(all.results).toHaveLength(4)
+  })
+
+  it('rescore re-grades a run against the edited ground truth with no model calls', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', {
+      name: 'R2', schema: [{ key: 'total', type: 'number' }],
+    }))
+    const itemId = data<{ id: string }>(await req('POST', `/api/datasets/${ds.id}/items`, { groundTruth: { total: '99' } })).id
+
+    // The model returns 100; the truth says 99 ⇒ a miss.
+    mockOutput = '{"total": 100}'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'read' })).runId
+    const done = await waitForRun(runId)
+    expect(done.results[0].score).toBe(0)
+
+    // Adopt the model's value as truth, then rescore — the same answer now matches.
+    await req('PATCH', `/api/datasets/${ds.id}/items/${itemId}`, { groundTruth: { total: '100' } })
+    mockOutput = 'THIS MUST NOT BE USED — rescore never re-calls the model'
+    expect((await req('POST', `/api/datasets/${ds.id}/runs/${runId}/rescore`)).status).toBe(200)
+
+    const after = data<{ results: { score: number | null }[] }>(await req('GET', `/api/runs/${runId}`))
+    expect(after.results[0].score).toBe(1)
+  })
 })
 
 describe('trusted model', () => {
