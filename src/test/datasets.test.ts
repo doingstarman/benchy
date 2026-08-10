@@ -177,6 +177,14 @@ describe('dataset run + scoring', () => {
     const after = data<{ results: { score: number | null }[] }>(await req('GET', `/api/runs/${runId}`))
     expect(after.results[0].score).toBe(1)
   })
+
+  it('refuses to rescore an arena run — it is human-judged, not field-scored', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'A', schema: [{ key: 'x', type: 'text' }] }))
+    await req('POST', `/api/datasets/${ds.id}/items`, { groundTruth: { x: 'v' } })
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A', 'p:B'], prompt: 'go', mode: 'arena' })).runId
+    await waitForRun(runId)
+    expect((await req('POST', `/api/datasets/${ds.id}/runs/${runId}/rescore`)).status).toBe(400)
+  })
 })
 
 describe('trusted model', () => {

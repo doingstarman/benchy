@@ -692,16 +692,21 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const dataset = rowToDataset(row, { withItems: true })
       if (dataset.type === 'code') return reply.code(400).send({ error: 'rescore applies to field-scored datasets, not code' })
 
-      const runRow = db.prepare('SELECT dataset_id, dataset_item_ids FROM runs WHERE id = ?').get(req.params.runId) as
-        { dataset_id: string | null; dataset_item_ids: string | null } | undefined
+      const runRow = db.prepare('SELECT dataset_id, dataset_item_ids, mode FROM runs WHERE id = ?').get(req.params.runId) as
+        { dataset_id: string | null; dataset_item_ids: string | null; mode: string | null } | undefined
       if (!runRow || runRow.dataset_id !== req.params.id) return reply.code(404).send({ error: 'Run not found for this dataset' })
+      // An arena run is human-judged, never field-scored — rescoring it would stamp
+      // score=0 on every free-text answer and poison its average.
+      if (runRow.mode === 'arena') return reply.code(400).send({ error: 'an arena run has no field scores to recompute' })
 
       const all = dataset.items ?? []
       const byId = new Map(all.map(it => [it.id, it]))
       let itemIds: string[] | null = null
       try { itemIds = runRow.dataset_item_ids ? JSON.parse(runRow.dataset_item_ids) as string[] : null } catch { /* keep null */ }
-      // Undefined slots (an item deleted since the run) keep prompt_index aligned;
-      // scoreDatasetRun skips them, leaving those results' old score untouched.
+      // With the id map, a deleted item becomes an undefined slot that keeps
+      // prompt_index aligned and scoreDatasetRun skips it. A legacy run (no ids)
+      // falls back to positional over CURRENT items — correct unless one was
+      // deleted since, which there's no mapping to recover.
       const covered = itemIds ? itemIds.map(id => byId.get(id)) : all
 
       scoreDatasetRun(req.params.runId, dataset.schema, covered)
