@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
-import { deleteAttachmentsForRun, cloneAttachmentsForRun } from './uploads.js';
+import { deleteAttachmentsForRun, deleteAttachmentsForRuns, cloneAttachmentsForRun } from './uploads.js';
+import { isLocalRequest } from './csrf.js';
 // Backslash-escape LIKE's own metacharacters so the query means what it says.
 // Paired with ESCAPE '\' on the LIKE.
 function escapeLike(value) {
@@ -27,6 +28,8 @@ function rowToRun(row) {
         ...(row.system_prompt != null ? { systemPrompt: row.system_prompt } : {}),
         ...(row.skills ? { skills: parseTools(row.skills) } : {}),
         ...(row.mcp ? { mcp: parseTools(row.mcp) } : {}),
+        ...(row.dataset_item_ids ? { datasetItemIds: JSON.parse(row.dataset_item_ids) } : {}),
+        ...(row.base_prompt != null ? { basePrompt: row.base_prompt } : {}),
     };
 }
 function parseTools(raw) {
@@ -150,6 +153,32 @@ export async function registerRunsRoutes(app) {
             id: a.id, promptIndex: a.prompt_index, mimeType: a.mime_type, name: a.name, size: a.size,
         }));
         return { data: { ...rowToRun(run), results: results.map(rowToResult), attachments } };
+    });
+    // Clear the whole history. CSRF-guarded even though the per-run delete below
+    // is not, and the asymmetry is the point: /api/runs/:id needs an id an
+    // attacker does not have, while this one needs nothing but the URL, so a
+    // cross-site page could wipe someone's history with a single fetch.
+    //
+    // Datasets and their items survive — they are authored content, and only
+    // their per-run verdicts belong to a run. Answering 200 with counts rather
+    // than the 204 rules/api.md prescribes for DELETE, because the caller has to
+    // be told how many went and that an in-flight run was kept.
+    app.delete('/api/runs', async (req, reply) => {
+        if (!isLocalRequest(req))
+            return reply.code(403).send({ error: 'cross-site request refused' });
+        const db = getDb();
+        // A running run is skipped: its stream is still INSERTing result rows, and
+        // the foreign key to a deleted run would throw inside the SSE handler.
+        const doomed = db.prepare("SELECT id FROM runs WHERE status != 'running'").all();
+        const total = db.prepare('SELECT count(*) AS n FROM runs').get().n;
+        // results and dataset verdicts cascade; attachments have no foreign key at
+        // all, so nothing removes them unless this line does — and their files
+        // outlive the rows, leaking in the uploads dir with no way to find them
+        // again. The ids are captured above, so this may sit either side of the
+        // run delete; what it may not do is not happen.
+        await deleteAttachmentsForRuns(doomed.map(r => r.id));
+        const info = db.prepare("DELETE FROM runs WHERE status != 'running'").run();
+        return { data: { deleted: info.changes, skipped: total - info.changes } };
     });
     app.delete('/api/runs/:id', async (req, reply) => {
         const db = getDb();

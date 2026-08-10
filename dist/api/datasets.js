@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { getDb } from '../db/index.js';
-import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled } from '../config.js';
+import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled, getAppRunDefaults, getCodeExecTimeoutMs } from '../config.js';
 import { runCell, finalizeRun, getAdapter } from './benchmark.js';
 import { runTests, interpreterCommand } from '../codeRun.js';
 import { isLocalRequest } from './csrf.js';
@@ -166,6 +166,9 @@ function scoreDatasetRun(runId, schema, items) {
 // one subprocess at a time — code execution is deliberately never fanned out.
 async function scoreCodeRun(runId, language, items) {
     const db = getDb();
+    // Read once: the whole run shares one budget, and re-reading config per item
+    // would let a mid-run Settings change apply to half the dataset.
+    const timeoutMs = await getCodeExecTimeoutMs();
     const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
         .all(runId);
     const upd = db.prepare('UPDATE results SET score = ?, score_detail = ? WHERE id = ?');
@@ -173,13 +176,35 @@ async function scoreCodeRun(runId, language, items) {
         const item = items[r.prompt_index];
         if (!item || !item.tests || !item.tests.trim())
             continue;
-        const res = await runTests(language, r.text, item.tests);
+        const res = await runTests(language, r.text, item.tests, { timeoutMs });
         const score = res.total > 0 ? res.passed / res.total : null;
         const detail = {};
         for (const c of res.cases)
             detail[c.name] = c.ok ? 'match' : 'miss';
         upd.run(score, JSON.stringify(detail), r.id);
     }
+}
+// Pick the items an actual run covers. `first` takes the head, `random` a
+// shuffled sample kept in original order (so prompt_index reads stably). Anything
+// malformed, non-positive, or >= the full size runs everything — the safe default.
+function selectRunItems(all, raw) {
+    if (!raw || typeof raw !== 'object')
+        return all;
+    const s = raw;
+    const n = typeof s.n === 'number' && Number.isInteger(s.n) ? s.n : NaN;
+    if (!Number.isFinite(n) || n <= 0 || n >= all.length)
+        return all;
+    if (s.strategy === 'first')
+        return all.slice(0, n);
+    if (s.strategy === 'random') {
+        const idx = all.map((_, i) => i);
+        for (let i = idx.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [idx[i], idx[j]] = [idx[j], idx[i]];
+        }
+        return idx.slice(0, n).sort((a, b) => a - b).map(i => all[i]);
+    }
+    return all;
 }
 export async function registerDatasetsRoutes(app) {
     app.get('/api/datasets', async () => {
@@ -421,7 +446,7 @@ export async function registerDatasetsRoutes(app) {
                 return true;
             return keys.some(k => !(it.groundTruth[k] ?? '').trim() && !(it.aiSuggested[k] ?? '').trim());
         });
-        const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults };
+        const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults, ...(await getAppRunDefaults()) };
         const parseObj = (raw) => { try {
             return toGroundTruth(JSON.parse(raw));
         }
@@ -531,9 +556,13 @@ export async function registerDatasetsRoutes(app) {
         if (!row)
             return reply.code(404).send({ error: 'Dataset not found' });
         const dataset = rowToDataset(row, { withItems: true });
-        const items = dataset.items ?? [];
-        if (!items.length)
+        const allItems = dataset.items ?? [];
+        if (!allItems.length)
             return reply.code(400).send({ error: 'dataset has no items to run' });
+        // Subsample: run only a subset (first N / random N) so a quick pass need not
+        // spend the whole dataset. prompt_index then indexes this subset, and scoring
+        // reads the same subset — everything below derives from `items`.
+        const items = selectRunItems(allItems, req.body.sample);
         const prompt = req.body.prompt?.trim();
         if (!prompt)
             return reply.code(400).send({ error: 'prompt is required' });
@@ -587,7 +616,7 @@ export async function registerDatasetsRoutes(app) {
         });
         const runId = randomUUID();
         const now = Date.now();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(itemPrompts), JSON.stringify(models), 'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode);
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, system_prompt, dataset_id, mode, dataset_item_ids, base_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(runId, JSON.stringify(itemPrompts), JSON.stringify(models), 'running', 0, items.length * models.length, 0, now, 'batch', systemPrompt ?? null, req.params.id, mode, JSON.stringify(items.map(it => it.id)), prompt);
         // File items ride their image at their own prompt_index (runCell's vision
         // path loads it); text items carry no attachment.
         for (let pi = 0; pi < items.length; pi++) {
@@ -625,6 +654,40 @@ export async function registerDatasetsRoutes(app) {
             finalizeRun(runId, [scored]);
         }
         return reply.code(202).send({ data: { runId } });
+    });
+    // Re-score a finished field-scored run against the CURRENT ground truth — no
+    // model calls. Used after the disagreements review edits a truth value: the fix
+    // recomputes accuracy from the answers already on disk. Items are resolved
+    // through the run's covered ids (prompt_index order) so subsampling stays right.
+    app.post('/api/datasets/:id/runs/:runId/rescore', async (req, reply) => {
+        const db = getDb();
+        const row = getDatasetRow(req.params.id);
+        if (!row)
+            return reply.code(404).send({ error: 'Dataset not found' });
+        const dataset = rowToDataset(row, { withItems: true });
+        if (dataset.type === 'code')
+            return reply.code(400).send({ error: 'rescore applies to field-scored datasets, not code' });
+        const runRow = db.prepare('SELECT dataset_id, dataset_item_ids, mode FROM runs WHERE id = ?').get(req.params.runId);
+        if (!runRow || runRow.dataset_id !== req.params.id)
+            return reply.code(404).send({ error: 'Run not found for this dataset' });
+        // An arena run is human-judged, never field-scored — rescoring it would stamp
+        // score=0 on every free-text answer and poison its average.
+        if (runRow.mode === 'arena')
+            return reply.code(400).send({ error: 'an arena run has no field scores to recompute' });
+        const all = dataset.items ?? [];
+        const byId = new Map(all.map(it => [it.id, it]));
+        let itemIds = null;
+        try {
+            itemIds = runRow.dataset_item_ids ? JSON.parse(runRow.dataset_item_ids) : null;
+        }
+        catch { /* keep null */ }
+        // With the id map, a deleted item becomes an undefined slot that keeps
+        // prompt_index aligned and scoreDatasetRun skips it. A legacy run (no ids)
+        // falls back to positional over CURRENT items — correct unless one was
+        // deleted since, which there's no mapping to recover.
+        const covered = itemIds ? itemIds.map(id => byId.get(id)) : all;
+        scoreDatasetRun(req.params.runId, dataset.schema, covered);
+        return reply.code(200).send({ data: { rescored: true } });
     });
     function loadVerdicts(runId) {
         const rows = getDb().prepare('SELECT prompt_index, best_model, worst_model, skipped FROM dataset_run_verdicts WHERE run_id = ? ORDER BY prompt_index').all(runId);

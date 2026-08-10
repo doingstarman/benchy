@@ -23,8 +23,25 @@ export async function createServer(port, dbPath) {
     // Fire-and-forget — a cleanup failure must never block server startup.
     void gcUnboundUploads(UNBOUND_UPLOAD_TTL_MS).catch(() => { });
     const app = Fastify({ logger: false });
-    // CORS for dev (Vite on 5173 -> backend on 4243)
-    await app.register(fastifyCors, { origin: true });
+    // CORS exists for one reason: the dev server (Vite on 5173) talking to the
+    // backend on another localhost port. `origin: true` reflected whatever Origin
+    // asked, which turned every route into one any website could read while benchy
+    // was running — and /api/providers answered with API keys in the clear.
+    // Localhost only: a browser cannot forge Origin, so this is the whole fix for
+    // the read-the-response half. The refuse-the-request half is isLocalRequest.
+    await app.register(fastifyCors, {
+        origin: (origin, cb) => {
+            if (!origin)
+                return cb(null, true);
+            try {
+                const host = new URL(origin).hostname;
+                cb(null, host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]');
+            }
+            catch {
+                cb(null, false);
+            }
+        },
+    });
     // Every route answers {data} or {error}; a *thrown* error would otherwise fall
     // through to Fastify's own shape, which the frontend's apiFetch can't read —
     // the user gets a blank 500 and no idea what happened. This tool is localhost

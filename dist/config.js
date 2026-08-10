@@ -14,6 +14,81 @@ export const DEFAULT_PROVIDER_SETTINGS = {
     streaming: true,
     extendedThinking: false,
 };
+// Matches DEFAULT_TIMEOUT_MS in codeRun.ts, so upgrading an install that never
+// set one changes nothing. The ceiling is low because scoreCodeRun is
+// deliberately serial: a 50-item dataset at the maximum is already ~100 minutes
+// with no way to cancel.
+export const CODE_EXEC_TIMEOUT_DEFAULT_MS = 10_000;
+export const CODE_EXEC_TIMEOUT_MIN_MS = 1_000;
+export const CODE_EXEC_TIMEOUT_MAX_MS = 120_000;
+export const APP_TEMPERATURE_MIN = 0;
+export const APP_TEMPERATURE_MAX = 2;
+export const APP_MAX_OUTPUT_TOKENS_MIN = 1;
+export const APP_MAX_OUTPUT_TOKENS_MAX = 200_000;
+function clamp(n, min, max) {
+    return Math.min(max, Math.max(min, n));
+}
+// Read-side validation, which rules/api.md would normally reserve for a route
+// handler. config.json is hand-editable, so it IS a boundary: a typed
+// `"temperature": 99` must not reach a provider just because it never came
+// through the API.
+function readRunDefaults(raw) {
+    const out = {};
+    if (typeof raw?.temperature === 'number' && Number.isFinite(raw.temperature)) {
+        out.temperature = clamp(raw.temperature, APP_TEMPERATURE_MIN, APP_TEMPERATURE_MAX);
+    }
+    if (typeof raw?.maxOutputTokens === 'number' && Number.isInteger(raw.maxOutputTokens)) {
+        out.maxOutputTokens = clamp(raw.maxOutputTokens, APP_MAX_OUTPUT_TOKENS_MIN, APP_MAX_OUTPUT_TOKENS_MAX);
+    }
+    return out;
+}
+function readCodeExecTimeout(raw) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw))
+        return CODE_EXEC_TIMEOUT_DEFAULT_MS;
+    return clamp(Math.round(raw), CODE_EXEC_TIMEOUT_MIN_MS, CODE_EXEC_TIMEOUT_MAX_MS);
+}
+// One read for the whole blob — the route would otherwise parse config.json
+// three times to answer one GET.
+export async function getAppSettings() {
+    const config = await readConfig();
+    return {
+        codeExecution: config.codeExecution === true,
+        codeExecTimeoutMs: readCodeExecTimeout(config.codeExecTimeoutMs),
+        runDefaults: readRunDefaults(config.runDefaults),
+    };
+}
+export async function getCodeExecTimeoutMs() {
+    return readCodeExecTimeout((await readConfig()).codeExecTimeoutMs);
+}
+export async function getAppRunDefaults() {
+    return readRunDefaults((await readConfig()).runDefaults);
+}
+export async function setCodeExecTimeoutMs(ms) {
+    return serialize(async () => {
+        const config = await readConfig();
+        config.codeExecTimeoutMs = readCodeExecTimeout(ms);
+        await writeConfig(config);
+    });
+}
+// null deletes a key — that is how "inherit" is expressed, and it maps onto
+// SliderField's Auto. undefined leaves the key untouched.
+export async function setAppRunDefaults(patch) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const next = { ...readRunDefaults(config.runDefaults) };
+        for (const key of ['temperature', 'maxOutputTokens']) {
+            const value = patch[key];
+            if (value === undefined)
+                continue;
+            if (value === null)
+                delete next[key];
+            else
+                next[key] = value;
+        }
+        config.runDefaults = readRunDefaults(next);
+        await writeConfig(config);
+    });
+}
 export async function getSearchConfig() {
     const config = await readConfig();
     const s = config.search;
