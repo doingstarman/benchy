@@ -868,6 +868,56 @@ export function DatasetDetail() {
               </div>
             )}
 
+            {isCode && runResults && runResults.length > 0 && (
+              <div className="dsx-sec">
+                <div className="dsx-h">{tt('dataset.codePerTest')}</div>
+                <div className="dsx-sub">{tt('dataset.codePerTestSub')}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {items.map((item, i) => {
+                    const rs = answersFor(i)
+                    if (!rs.length) return null
+                    // Test names are the item's own — take them from the results that ran;
+                    // a model whose code never ran contributes none and shows — across.
+                    const tests = [...new Set(rs.flatMap(r => Object.keys(r.scoreDetail ?? {})))]
+                    const rows = [...rs].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+                    return (
+                      <div key={item.id}>
+                        <div className="dsx-label" style={{ marginBottom: 6 }}>
+                          {tt('dataset.codeTask')} {i + 1}
+                          {item.input && <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>{item.input.length > 64 ? `${item.input.slice(0, 64)}…` : item.input}</span>}
+                        </div>
+                        {tests.length === 0 ? (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{tt('dataset.codeNoTestData')}</div>
+                        ) : (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="dsx-table">
+                              <thead><tr>
+                                <th>{tt('dataset.model')}</th>
+                                {tests.map(n => <th key={n} style={{ textAlign: 'center' }}>{n}</th>)}
+                                <th style={{ textAlign: 'right' }}>{tt('dataset.overall')}</th>
+                              </tr></thead>
+                              <tbody>
+                                {rows.map(r => (
+                                  <tr key={r.model}>
+                                    <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{modelLabel(r.model)}</td>
+                                    {tests.map(n => {
+                                      const v = r.scoreDetail?.[n]
+                                      return <td key={n} style={{ textAlign: 'center', color: v === 'match' ? 'var(--ok)' : v === 'miss' ? 'var(--bad)' : 'var(--text-muted)' }}>{v === 'match' ? '✓' : v === 'miss' ? '✗' : '—'}</td>
+                                    })}
+                                    {(() => { const h = heat(r.score ?? null); return <td style={{ textAlign: 'right', fontWeight: 700, color: h.color, background: h.background }}>{pct(r.score ?? null)}</td> })()}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {runMode === 'arena' && arena && runResults && (
               <div className="dsx-sec">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
