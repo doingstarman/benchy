@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi } from '../api'
+import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi, settingsApi } from '../api'
 import { splitFencedSegments } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
@@ -11,22 +11,12 @@ import {
   IconLayers, IconModeFan, IconModePairs, IconModeMatrix,
 } from '../components/icons'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
-import { useShowReasoning } from '../prefs'
+import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } from '../prefs'
+import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 import { useT, t } from '../i18n'
 import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
 
-const RUN_DEFAULTS: Required<RunSettingsOverrides> = {
-  temperature: 0.7,
-  topP: 1.0,
-  topK: null,
-  maxOutputTokens: 2048,
-  contextBudget: null,
-  truncation: 'auto',
-  timeoutMs: 60000,
-  retries: 2,
-  streaming: true,
-  extendedThinking: false,
-}
+const RUN_DEFAULTS: Required<RunSettingsOverrides> = FACTORY_RUN_DEFAULTS
 
 interface UIToolCall {
   id: string
@@ -477,9 +467,6 @@ export function ChipsRow({ groups, selectedModels, onToggle, onToggleProvider, o
 
 // ─── ModeSelector ─────────────────────────────────────────────────────────
 
-// 0: one prompt → all models · 1: prompt per model · 2: many prompts → all models
-type PromptMode = 0 | 1 | 2
-
 const MODE_ICON: Record<PromptMode, (p: { size?: number }) => React.JSX.Element> = {
   0: IconModeFan,
   1: IconModePairs,
@@ -625,6 +612,9 @@ interface PromptboxProps {
   runSettings: RunSettings
   onRunSettingsChange: (rs: RunSettings) => void
   providerDefaultsByModel: Record<string, RunSettingsOverrides>
+  // App-wide defaults from /api/settings — one layer of the inherited baseline,
+  // not something this box can edit. {} until the fetch lands, and on failure.
+  appRunDefaults: RunSettingsOverrides
   // Which tools this run enables, and how to flip one. A run-level set, not a
   // per-model generation setting — hence its own props, not part of runSettings.
   selectedTools: Set<string>
@@ -751,7 +741,7 @@ export function Promptbox({
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
-  runSettings, onRunSettingsChange, providerDefaultsByModel,
+  runSettings, onRunSettingsChange, providerDefaultsByModel, appRunDefaults,
   selectedTools, onToggleTool,
   artifacts, selectedSkills, onToggleSkill, selectedMcp, onToggleMcp,
   systemPrompt, onSystemPromptChange,
@@ -886,9 +876,12 @@ export function Promptbox({
     ? (runSettings.global ?? {})
     : (runSettings.perModel?.[validTab] ?? {})
 
+  // Mirrors the server's merge in benchmark.ts, app defaults in the same place —
+  // this is what the panel PROMISES a value will be if you leave it alone, so a
+  // different order here would be a lie about the run that is about to happen.
   const currentTabInherited: RunSettingsOverrides = validTab === 'all'
-    ? RUN_DEFAULTS
-    : { ...RUN_DEFAULTS, ...(providerDefaultsByModel[validTab] ?? {}), ...(runSettings.global ?? {}) }
+    ? { ...RUN_DEFAULTS, ...appRunDefaults }
+    : { ...RUN_DEFAULTS, ...(providerDefaultsByModel[validTab] ?? {}), ...appRunDefaults, ...(runSettings.global ?? {}) }
 
   function updateTabOverrides(o: RunSettingsOverrides) {
     if (validTab === 'all') {
@@ -1356,6 +1349,13 @@ export function __resetNewRunSessionForTests(): void {
   savedSession = null
 }
 
+// Clearing the run history deletes the run this session is attached to. Left
+// alone, navigating back to /run would try to continue into a runId the server
+// no longer has.
+export function clearNewRunSession(): void {
+  savedSession = null
+}
+
 // Whether a conversation is in progress on /run — lets the app shell offer a
 // way back to it when the user has navigated elsewhere.
 export function hasActiveNewRunSession(): boolean {
@@ -1377,6 +1377,7 @@ function notifyRunsChanged() {
 export function NewRun() {
   const { t } = useT()
   const showReasoning = useShowReasoning()
+  const monoAnswers = useMonoAnswers()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -1395,12 +1396,13 @@ export function NewRun() {
   // One system prompt for every model in the run — kept out of runSettings since
   // it isn't a generation parameter.
   const [systemPrompt, setSystemPrompt] = useState<string>(() => savedSession?.systemPrompt ?? '')
-  const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? 0)
+  const [mode, setMode] = useState<PromptMode>(() => savedSession?.mode ?? getDefaultMode())
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
   const [batchPrompts, setBatchPrompts] = useState<string[]>(() => savedSession?.batchPrompts ?? [''])
 
   const [runSettings, setRunSettings] = useState<RunSettings>(() => savedSession?.runSettings ?? {})
+  const [appRunDefaults, setAppRunDefaults] = useState<RunSettingsOverrides>({})
 
   const [screenState, setScreenState] = useState<ScreenState>(() => savedSession?.screenState ?? 'idle')
   const [turns, setTurns] = useState<Turn[]>(() => savedSession?.turns ?? [])
@@ -1596,6 +1598,13 @@ export function NewRun() {
     Promise.all([toolsApi.list(), skillsApi.list(), mcpApi.list()])
       .then(([ts, ss, ms]) => { setCustomTools(ts); setSkills(ss); setMcpServers(ms) })
       .catch(() => {})
+  }, [])
+
+  // Only feeds the "inherited" readouts in the settings panel — the server does
+  // its own merge either way, so a failed fetch shows the factory values rather
+  // than blocking the page.
+  useEffect(() => {
+    settingsApi.get().then(s => setAppRunDefaults(s.runDefaults)).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -2030,7 +2039,8 @@ export function NewRun() {
             className="col-body"
             style={{
               flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
-              color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', lineHeight: 1.7, wordBreak: 'break-word',
+              color: 'var(--text-primary)', lineHeight: 1.7, wordBreak: 'break-word',
+              fontFamily: monoAnswers ? 'var(--font-mono)' : 'var(--font-sans)',
               // Fullscreen: become a flex column so a lone code artifact can
               // stretch to the whole cell instead of sitting in a 280px window
               // with dead space beneath it.
@@ -2103,6 +2113,7 @@ export function NewRun() {
     runSettings,
     onRunSettingsChange: setRunSettings,
     providerDefaultsByModel,
+    appRunDefaults,
     selectedTools,
     onToggleTool: toggleTool,
     artifacts: artifactCatalog,

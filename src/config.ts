@@ -34,6 +34,106 @@ interface Config {
   // Opt-in gate for 'code' datasets: running a code dataset executes the model's
   // solution locally in a subprocess (arbitrary code). Off unless explicitly set.
   codeExecution?: boolean
+  // Wall clock one dataset item's solution gets before it is killed.
+  codeExecTimeoutMs?: number
+  // App-wide generation defaults, layered under every run. Sparse on purpose: an
+  // absent key means "not set", which is what keeps an install that never opened
+  // Settings sending exactly what it sent before.
+  runDefaults?: AppRunDefaults
+}
+
+export interface AppRunDefaults {
+  temperature?: number
+  maxOutputTokens?: number
+}
+
+export interface AppSettings {
+  codeExecution: boolean
+  codeExecTimeoutMs: number
+  runDefaults: AppRunDefaults
+}
+
+// Matches DEFAULT_TIMEOUT_MS in codeRun.ts, so upgrading an install that never
+// set one changes nothing. The ceiling is low because scoreCodeRun is
+// deliberately serial: a 50-item dataset at the maximum is already ~100 minutes
+// with no way to cancel.
+export const CODE_EXEC_TIMEOUT_DEFAULT_MS = 10_000
+export const CODE_EXEC_TIMEOUT_MIN_MS = 1_000
+export const CODE_EXEC_TIMEOUT_MAX_MS = 120_000
+
+export const APP_TEMPERATURE_MIN = 0
+export const APP_TEMPERATURE_MAX = 2
+export const APP_MAX_OUTPUT_TOKENS_MIN = 1
+export const APP_MAX_OUTPUT_TOKENS_MAX = 200_000
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
+// Read-side validation, which rules/api.md would normally reserve for a route
+// handler. config.json is hand-editable, so it IS a boundary: a typed
+// `"temperature": 99` must not reach a provider just because it never came
+// through the API.
+function readRunDefaults(raw: AppRunDefaults | undefined): AppRunDefaults {
+  const out: AppRunDefaults = {}
+  if (typeof raw?.temperature === 'number' && Number.isFinite(raw.temperature)) {
+    out.temperature = clamp(raw.temperature, APP_TEMPERATURE_MIN, APP_TEMPERATURE_MAX)
+  }
+  if (typeof raw?.maxOutputTokens === 'number' && Number.isInteger(raw.maxOutputTokens)) {
+    out.maxOutputTokens = clamp(raw.maxOutputTokens, APP_MAX_OUTPUT_TOKENS_MIN, APP_MAX_OUTPUT_TOKENS_MAX)
+  }
+  return out
+}
+
+function readCodeExecTimeout(raw: number | undefined): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return CODE_EXEC_TIMEOUT_DEFAULT_MS
+  return clamp(Math.round(raw), CODE_EXEC_TIMEOUT_MIN_MS, CODE_EXEC_TIMEOUT_MAX_MS)
+}
+
+// One read for the whole blob — the route would otherwise parse config.json
+// three times to answer one GET.
+export async function getAppSettings(): Promise<AppSettings> {
+  const config = await readConfig()
+  return {
+    codeExecution: config.codeExecution === true,
+    codeExecTimeoutMs: readCodeExecTimeout(config.codeExecTimeoutMs),
+    runDefaults: readRunDefaults(config.runDefaults),
+  }
+}
+
+export async function getCodeExecTimeoutMs(): Promise<number> {
+  return readCodeExecTimeout((await readConfig()).codeExecTimeoutMs)
+}
+
+export async function getAppRunDefaults(): Promise<AppRunDefaults> {
+  return readRunDefaults((await readConfig()).runDefaults)
+}
+
+export async function setCodeExecTimeoutMs(ms: number): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    config.codeExecTimeoutMs = readCodeExecTimeout(ms)
+    await writeConfig(config)
+  })
+}
+
+// null deletes a key — that is how "inherit" is expressed, and it maps onto
+// SliderField's Auto. undefined leaves the key untouched.
+export async function setAppRunDefaults(
+  patch: { temperature?: number | null; maxOutputTokens?: number | null },
+): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const next: AppRunDefaults = { ...readRunDefaults(config.runDefaults) }
+    for (const key of ['temperature', 'maxOutputTokens'] as const) {
+      const value = patch[key]
+      if (value === undefined) continue
+      if (value === null) delete next[key]
+      else next[key] = value
+    }
+    config.runDefaults = readRunDefaults(next)
+    await writeConfig(config)
+  })
 }
 
 export async function getSearchConfig(): Promise<SearchConfig | undefined> {

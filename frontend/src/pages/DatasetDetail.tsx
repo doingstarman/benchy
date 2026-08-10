@@ -8,14 +8,14 @@ const VAR_TYPES: DatasetVarType[] = ['text', 'date', 'number']
 type Tab = 'schema' | 'markup' | 'run'
 
 const CSS = `
-  .dsx { --p: #7F77DD; --p-strong: #6a61d0; --p-bg: rgba(127,119,221,0.12); --p-bd: rgba(127,119,221,0.45); --ok: #5ab87a; --mid: #d8a24a; --bad: #e05c5c; }
+  .dsx { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); --mid: var(--warning); --bad: var(--error); }
   .dsx-in { box-sizing: border-box; padding: 6px 9px; background: var(--bg-base); border: 0.5px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); outline: none; }
   .dsx-in:focus { border-color: var(--p-bd); }
   .dsx-sec { background: var(--bg-elevated); border: 0.5px solid var(--border); border-radius: var(--radius-md); padding: 18px 20px; }
   .dsx-h { font-size: 13px; font-weight: 600; color: var(--text-bright); margin: 0 0 2px; }
   .dsx-sub { font-size: 11px; color: var(--text-muted); margin: 0 0 14px; }
   .dsx-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
-  .dsx-primary { border: none; background: var(--p); color: #fff; border-radius: var(--radius-sm); padding: 7px 15px; font-size: 12px; font-family: var(--font-mono); font-weight: 600; cursor: pointer; }
+  .dsx-primary { border: none; background: var(--p); color: var(--on-accent); border-radius: var(--radius-sm); padding: 7px 15px; font-size: 12px; font-family: var(--font-mono); font-weight: 600; cursor: pointer; }
   .dsx-primary:disabled { opacity: 0.45; cursor: default; }
   .dsx-ghost { border: 0.5px dashed var(--border); background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm); padding: 7px 13px; font-size: 12px; font-family: var(--font-mono); cursor: pointer; }
   .dsx-ghost:hover { border-color: var(--p-bd); color: var(--p); }

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { getDb } from '../db/index.js'
-import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled } from '../config.js'
+import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled, getAppRunDefaults, getCodeExecTimeoutMs } from '../config.js'
 import { runCell, finalizeRun, getAdapter } from './benchmark.js'
 import { runTests, interpreterCommand, type CodeLanguage } from '../codeRun.js'
 import { isLocalRequest } from './csrf.js'
@@ -191,13 +191,16 @@ function scoreDatasetRun(runId: string, schema: DatasetVar[], items: DatasetItem
 // one subprocess at a time — code execution is deliberately never fanned out.
 async function scoreCodeRun(runId: string, language: CodeLanguage, items: DatasetItem[]): Promise<void> {
   const db = getDb()
+  // Read once: the whole run shares one budget, and re-reading config per item
+  // would let a mid-run Settings change apply to half the dataset.
+  const timeoutMs = await getCodeExecTimeoutMs()
   const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
     .all(runId) as { id: string; prompt_index: number; text: string }[]
   const upd = db.prepare('UPDATE results SET score = ?, score_detail = ? WHERE id = ?')
   for (const r of results) {
     const item = items[r.prompt_index]
     if (!item || !item.tests || !item.tests.trim()) continue
-    const res = await runTests(language, r.text, item.tests)
+    const res = await runTests(language, r.text, item.tests, { timeoutMs })
     const score = res.total > 0 ? res.passed / res.total : null
     const detail: Record<string, 'match' | 'miss'> = {}
     for (const c of res.cases) detail[c.name] = c.ok ? 'match' : 'miss'
@@ -454,7 +457,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
         return keys.some(k => !(it.groundTruth[k] ?? '').trim() && !(it.aiSuggested[k] ?? '').trim())
       })
 
-      const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults }
+      const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults, ...(await getAppRunDefaults()) }
       const parseObj = (raw: string): Record<string, string> => { try { return toGroundTruth(JSON.parse(raw)) } catch { return {} } }
 
       const fillOne = async (it: DatasetItem): Promise<'filled' | 'skipped' | 'errored'> => {

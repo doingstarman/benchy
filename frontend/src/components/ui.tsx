@@ -49,6 +49,22 @@ const UI_CSS = `
   .ui-pill .ui-pill-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
   .ui-pill.on .ui-pill-dot { background: var(--on-accent); }
 
+  .ui-seg {
+    display: inline-flex; flex-shrink: 0;
+    background: var(--bg-base); border: 0.5px solid var(--border);
+    border-radius: 7px; padding: 3px; gap: 2px;
+  }
+  .ui-seg-btn {
+    padding: 5px 14px; border: 0.5px solid transparent; border-radius: 5px;
+    background: transparent; cursor: pointer; white-space: nowrap;
+    font-size: var(--fs-sm); font-family: var(--font-mono); letter-spacing: 0.04em;
+    color: var(--text-muted);
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .ui-seg-btn:hover:not(:disabled):not(.on) { color: var(--text-secondary); }
+  .ui-seg-btn.on { background: var(--bg-elevated); border-color: var(--border-hover); color: var(--text-bright); }
+  .ui-seg-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
   .ui-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: ui-spin .6s linear infinite; }
   @keyframes ui-spin { to { transform: rotate(360deg) } }
 `
@@ -97,5 +113,42 @@ export function PillToggle({ on, onToggle, labelOn, labelOff, title }: PillToggl
       <span className="ui-pill-dot" />
       {on ? labelOn : labelOff}
     </button>
+  )
+}
+
+interface SegmentedOption<T> {
+  value: T
+  label: string
+  title?: string
+}
+
+interface SegmentedProps<T> {
+  // null leaves every segment unlit — for a value still loading from the
+  // server, where guessing one would flash the wrong answer as if it were real.
+  value: T | null
+  options: SegmentedOption<T>[]
+  onChange: (v: T) => void
+  disabled?: boolean
+}
+
+// Two or three mutually exclusive choices, all of them visible. PillToggle is
+// the binary cousin that swaps its own label — use that when there is no second
+// option worth naming, this when the alternatives are the point.
+export function Segmented<T extends string | number | boolean>({ value, options, onChange, disabled }: SegmentedProps<T>) {
+  return (
+    <div className="ui-seg" role="group">
+      {options.map(o => (
+        <button
+          key={String(o.value)}
+          className={`ui-seg-btn${o.value === value ? ' on' : ''}`}
+          onClick={() => onChange(o.value)}
+          disabled={disabled}
+          title={o.title}
+          aria-pressed={o.value === value}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   )
 }

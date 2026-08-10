@@ -353,6 +353,26 @@ describe('text datasets', () => {
     expect(done.results[0].scoreDetail).toMatchObject({ a: 'match', b: 'miss' })
   }, 20000)
 
+  it('kills a solution that outruns the configured execution timeout', async () => {
+    // scoreCodeRun used to call runTests with no opts, so every item got the
+    // hardcoded 10s no matter what Settings said. At 10s this solution finishes
+    // and scores 1; the only thing that makes it score 0 is the setting being
+    // threaded through. (runTests reports the timeout as error, which
+    // scoreCodeRun does not store — the score is the whole observable effect.)
+    await req('PUT', '/api/settings', { codeExecution: true, codeExecTimeoutMs: 1000 })
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'CT', type: 'code', language: 'javascript' }))
+    await req('POST', `/api/datasets/${ds.id}/items`, {
+      input: 'Write slow().',
+      tests: "test('a', () => assert(slow() === 1))",
+    })
+
+    mockOutput = '```js\nfunction slow() { const end = Date.now() + 2500; while (Date.now() < end); return 1 }\n```'
+    const done = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'solve' })).runId)
+    expect(done.results[0].score).toBe(0)
+
+    await req('PUT', '/api/settings', { codeExecTimeoutMs: 10_000 })
+  }, 20000)
+
   it('a code run is refused unless code execution is enabled', async () => {
     // beforeEach rewrote config without the toggle, so execution is off here.
     const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'C2', type: 'code', language: 'javascript' }))

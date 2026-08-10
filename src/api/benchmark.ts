@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/index.js'
-import { getProviders, DEFAULT_PROVIDER_SETTINGS } from '../config.js'
+import { getProviders, DEFAULT_PROVIDER_SETTINGS, getAppRunDefaults } from '../config.js'
 import { openaiAdapter } from '../adapters/openai.js'
 import { anthropicAdapter } from '../adapters/anthropic.js'
 import { googleAdapter } from '../adapters/google.js'
@@ -163,9 +163,18 @@ export async function runCell(
     if (!provider) throw new Error(`Provider "${providerId}" is not configured — it may have been deleted`)
 
     const adapter = getAdapter(provider.type)
+    // The app defaults sit AFTER provider.defaults, not before, which is not the
+    // textbook specificity order. Providers.tsx persists a COMPLETE defaults
+    // blob on every save, so every provider on disk already carries an explicit
+    // temperature and maxOutputTokens — even for someone who never opened the
+    // Advanced section. Layered before, the Settings sliders would be inert for
+    // every existing install. They stay sparse, so an install that never moves
+    // them still sends exactly what it sent before, and a per-run override
+    // still wins over both.
     const effectiveSettings = {
       ...DEFAULT_PROVIDER_SETTINGS,
       ...provider.defaults,
+      ...(await getAppRunDefaults()),
       ...(runSettings?.global ?? {}),
       ...(runSettings?.perModel?.[modelKey] ?? {}),
     }

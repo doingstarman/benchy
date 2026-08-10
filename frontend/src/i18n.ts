@@ -422,6 +422,60 @@ export const DICT: Record<string, Entry> = {
     en: 'Off by default. When on, running a code dataset executes each model’s solution locally in a subprocess (arbitrary code). Only enable it for datasets you trust.',
     ru: 'По умолчанию выключено. Когда включено, прогон code-датасета исполняет решение каждой модели локально в подпроцессе (произвольный код). Включайте только для датасетов, которым доверяете.',
   },
+
+  // ── settings — sections ──
+  'settings.general': { en: 'General', ru: 'Общие' },
+  'settings.generalSub': { en: 'How the app behaves', ru: 'Поведение приложения' },
+  'settings.appearanceSub': { en: 'Look and feel', ru: 'Внешний вид' },
+  'settings.models': { en: 'Models', ru: 'Модели' },
+  'settings.modelsSub': { en: 'How models answer on runs', ru: 'Как модели отвечают на прогонах' },
+  'settings.codeExecSub': { en: 'Running code from datasets', ru: 'Запуск кода из датасетов' },
+  'settings.serverSub': { en: 'Local server and files', ru: 'Локальный сервер и файлы' },
+  'settings.aboutTitle': { en: 'About benchy', ru: 'О benchy' },
+  'settings.autosaved': { en: 'Changes are saved automatically', ru: 'Изменения сохраняются автоматически' },
+  'settings.saveFailed': { en: 'Could not save — the server kept its previous value', ru: 'Не удалось сохранить — сервер оставил прежнее значение' },
+
+  // ── settings — general ──
+  'settings.startView': { en: 'Start view', ru: 'Экран при запуске' },
+  'settings.startViewHint': { en: 'The page benchy opens on', ru: 'Экран, который открывается при старте' },
+  'settings.defaultMode': { en: 'Default test mode', ru: 'Режим теста по умолчанию' },
+  'settings.defaultModeHint': { en: 'Preselected in the header of a new test', ru: 'Выбран по умолчанию в шапке нового теста' },
+  'settings.languageHint': { en: 'Interface language', ru: 'Язык интерфейса' },
+
+  // ── settings — appearance ──
+  'settings.accent': { en: 'Accent', ru: 'Акцент' },
+  'settings.accentHint': { en: 'Highlight colour across the interface', ru: 'Акцентный цвет интерфейса' },
+  'settings.accentPurple': { en: 'Purple', ru: 'Фиолетовый' },
+  'settings.accentBlue': { en: 'Blue', ru: 'Синий' },
+  'settings.accentTeal': { en: 'Teal', ru: 'Бирюзовый' },
+  'settings.accentRose': { en: 'Rose', ru: 'Розовый' },
+  'settings.monoAnswers': { en: 'Monospace answers', ru: 'Моноширинные ответы' },
+  'settings.monoAnswersHint': { en: 'Code blocks stay monospace either way', ru: 'Блоки кода в любом случае моноширинные' },
+
+  // ── settings — model defaults ──
+  'settings.temperature': { en: 'Temperature', ru: 'Temperature' },
+  'settings.temperatureHint': {
+    en: 'Applied to every run unless the run or a model overrides it',
+    ru: 'Применяется ко всем прогонам, если прогон или модель не переопределит',
+  },
+  'settings.maxTokens': { en: 'Max tokens', ru: 'Max tokens' },
+  'settings.maxTokensHint': { en: 'Default output budget for new runs', ru: 'Бюджет вывода по умолчанию для новых прогонов' },
+  'settings.execTimeout': { en: 'Execution timeout', ru: 'Таймаут выполнения' },
+  'settings.execTimeoutHint': { en: 'Per dataset item, before the process is killed', ru: 'На один элемент датасета, до остановки процесса' },
+  'settings.appDefault': { en: 'App default', ru: 'По умолчанию' },
+
+  // ── settings — server & data ──
+  'settings.copied': { en: 'Copied', ru: 'Скопировано' },
+  'settings.clearHistory': { en: 'Clear run history', ru: 'Очистить историю прогонов' },
+  'settings.clearHistoryHint': {
+    en: 'Deletes every run, result and dataset verdict. Datasets, providers and library items are kept.',
+    ru: 'Удалит все прогоны, результаты и вердикты по датасетам. Датасеты, провайдеры и библиотека останутся.',
+  },
+  'settings.clear': { en: 'Clear…', ru: 'Очистить…' },
+  'settings.clearConfirm': { en: 'Delete everything', ru: 'Удалить всё' },
+  'settings.cleared': { en: 'Cleared {n} runs', ru: 'Удалено прогонов: {n}' },
+  'settings.clearedSkipped': { en: '{n} still running was kept', ru: 'ещё выполняется, оставлено: {n}' },
+  'settings.clearFailed': { en: 'Could not clear the history', ru: 'Не удалось очистить историю' },
   'run.reasoningSection': { en: 'Reasoning', ru: 'Размышления' },
   'run.extendedThinking': { en: 'Extended thinking', ru: 'Расширенные размышления' },
   'run.extendedThinkingHint': {

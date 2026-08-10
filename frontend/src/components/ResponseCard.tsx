@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { MetricsBar } from './MetricsBar'
 import { ActivityTrace, ActivityTraceStyles } from './ActivityTrace'
-import { useShowReasoning } from '../prefs'
+import { useShowReasoning, useMonoAnswers } from '../prefs'
 import { runsApi } from '../api'
 
 interface ResponseCardProps {
@@ -28,6 +28,7 @@ export function ResponseCard({
   feedback: initialFeedback, isFastest, isStreaming, error,
 }: ResponseCardProps) {
   const showReasoning = useShowReasoning()
+  const monoAnswers = useMonoAnswers()
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(initialFeedback ?? null)
   const [modelName, providerId] = (() => {
     const idx = model.indexOf(':')
@@ -112,7 +113,9 @@ export function ResponseCard({
       <div style={{
         flex: 1,
         padding: 14,
-        fontFamily: 'var(--font-mono)',
+        // Follows the Settings toggle so the two places an answer is read agree.
+        // Default off means this view is sans now, where it used to be mono.
+        fontFamily: monoAnswers ? 'var(--font-mono)' : 'var(--font-sans)',
         fontSize: 12,
         lineHeight: 1.7,
         color: error ? 'var(--error)' : 'var(--text-primary)',

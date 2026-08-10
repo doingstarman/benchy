@@ -101,6 +101,29 @@ export function IconFile(p: IconProps) {
   return <Svg {...p}><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z" /><path d="M9 1.5V5h3.5" /></Svg>
 }
 
+// Half-filled circle — the usual "theme / contrast" mark.
+export function IconContrast(p: IconProps) {
+  return <Svg {...p}><circle cx="8" cy="8" r="6" /><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none" /></Svg>
+}
+
+export function IconCode(p: IconProps) {
+  return <Svg {...p}><path d="M5.5 4.5 2 8l3.5 3.5" /><path d="M10.5 4.5 14 8l-3.5 3.5" /></Svg>
+}
+
+export function IconDatabase(p: IconProps) {
+  return <Svg {...p}><ellipse cx="8" cy="3.8" rx="5" ry="2" /><path d="M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></Svg>
+}
+
+export function IconInfo(p: IconProps) {
+  return <Svg {...p}><circle cx="8" cy="8" r="6" /><path d="M8 7.4v3.4" /><path d="M8 5.2h.01" /></Svg>
+}
+
+// Triangle-bang. Replaces the ⚠ glyph, which renders as a different shape and
+// weight on every OS.
+export function IconWarning(p: IconProps) {
+  return <Svg {...p}><path d="M8 2.2 15 13.8H1L8 2.2Z" /><path d="M8 6.6v3.1" /><path d="M8 11.8h.01" /></Svg>
+}
+
 // Stacked layers — "how many models this run hits".
 export function IconLayers(p: IconProps) {
   return <Svg {...p}><path d="M8 1.8 14.2 5 8 8.2 1.8 5 8 1.8Z" /><path d="M1.8 8.6 8 11.8l6.2-3.2" /></Svg>

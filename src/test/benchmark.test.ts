@@ -1690,3 +1690,72 @@ describe('MCP execution', () => {
     }
   })
 })
+
+describe('app-wide run defaults', () => {
+  // Settings can now set a temperature and a max-token budget for every run.
+  // Where that layer sits in the merge is the whole feature: one position makes
+  // the sliders authoritative, the neighbouring one makes them dead.
+
+  async function seedProvider(defaults?: Record<string, unknown>): Promise<string> {
+    const { writeConfig } = await import('../config.js')
+    await writeConfig({ providers: [] })
+    await fetch(`${base}/api/providers`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'OpenAI', type: 'openai', apiKey: 'sk-fake', models: ['gpt-4o-mini'], enabled: true,
+        ...(defaults ? { defaults } : {}),
+      }),
+    })
+    const list = await fetch(`${base}/api/providers`).then(r => r.json()) as { data: Array<{ id: string }> }
+    return list.data[0].id
+  }
+
+  async function settingsSentFor(pid: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    capturedSettings = []
+    const body = await startBenchmark(['x'], [`${pid}:gpt-4o-mini`], extra)
+    await waitForRun(body.data!.runId)
+    return capturedSettings[0]
+  }
+
+  afterAll(async () => {
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runDefaults: { temperature: null, maxOutputTokens: null } }),
+    })
+  })
+
+  it('changes nothing for an install that never set one', async () => {
+    const pid = await seedProvider({ temperature: 0.55, maxOutputTokens: 1234 })
+    expect(await settingsSentFor(pid)).toMatchObject({ temperature: 0.55, maxOutputTokens: 1234 })
+  })
+
+  // Providers.tsx persists a COMPLETE defaults blob on every save, so every
+  // provider on disk carries an explicit temperature — including for someone who
+  // never opened the Advanced section. Layered the textbook way (app defaults
+  // under provider defaults) the Settings slider would be silently inert for
+  // every existing install. If someone "corrects" the order, this fails.
+  it('overrides a provider default, because every provider already has one', async () => {
+    const pid = await seedProvider({ temperature: 0.7, maxOutputTokens: 2048 })
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runDefaults: { temperature: 0.2 } }),
+    })
+    expect(await settingsSentFor(pid)).toMatchObject({ temperature: 0.2, maxOutputTokens: 2048 })
+  })
+
+  it('loses to a per-run override, and that loses to a per-model one', async () => {
+    const pid = await seedProvider({ temperature: 0.7 })
+    await fetch(`${base}/api/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runDefaults: { temperature: 0.2 } }),
+    })
+
+    const global = await settingsSentFor(pid, { runSettings: { global: { temperature: 0.9 } } })
+    expect(global.temperature).toBe(0.9)
+
+    const perModel = await settingsSentFor(pid, {
+      runSettings: { global: { temperature: 0.9 }, perModel: { [`${pid}:gpt-4o-mini`]: { temperature: 1.4 } } },
+    })
+    expect(perModel.temperature).toBe(1.4)
+  })
+})

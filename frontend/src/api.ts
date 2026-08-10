@@ -193,13 +193,28 @@ export const resultsApi = {
 
 // ─── settings (server-side app toggles) ──────────────────────────────────────
 
+export interface AppRunDefaults {
+  temperature?: number
+  maxOutputTokens?: number
+}
+
 export interface AppSettings {
   codeExecution: boolean
+  codeExecTimeoutMs: number
+  runDefaults: AppRunDefaults
+}
+
+// Not Partial<AppSettings>: null is how a run default is UNSET, and it means
+// something different from leaving the key out (which changes nothing).
+export interface AppSettingsPatch {
+  codeExecution?: boolean
+  codeExecTimeoutMs?: number
+  runDefaults?: { temperature?: number | null; maxOutputTokens?: number | null }
 }
 
 export const settingsApi = {
   get: () => apiFetch<AppSettings>('/api/settings'),
-  update: (patch: Partial<AppSettings>) =>
+  update: (patch: AppSettingsPatch) =>
     apiFetch<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 }
 
@@ -233,6 +248,8 @@ export const runsApi = {
   },
   get: (id: string) => apiFetch<RunWithResults>(`/api/runs/${id}`),
   remove: (id: string) => fetch(`/api/runs/${id}`, { method: 'DELETE' }),
+  // skipped counts runs still streaming, which the server refuses to delete.
+  clearAll: () => apiFetch<{ deleted: number; skipped: number }>('/api/runs', { method: 'DELETE' }),
   fork: (id: string) => apiFetch<Run>(`/api/runs/${id}/fork`, { method: 'POST' }),
   save: (id: string, saved: boolean) =>
     apiFetch<Run>(`/api/runs/${id}`, { method: 'PATCH', body: JSON.stringify({ saved }) }),

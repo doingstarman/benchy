@@ -9,13 +9,19 @@ import { Library } from './pages/Library'
 import { Datasets } from './pages/Datasets'
 import { DatasetDetail } from './pages/DatasetDetail'
 import { Settings } from './pages/Settings'
+import { useStartView } from './prefs'
+
+// "/" is not a page — it forwards to whichever one the user chose to open on.
+function StartRedirect() {
+  return <Navigate to={useStartView()} replace />
+}
 
 export function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />}>
-          <Route index element={<Navigate to="/run" replace />} />
+          <Route index element={<StartRedirect />} />
           <Route path="run" element={<NewRun />} />
           <Route path="results" element={<ResultsDb />} />
           <Route path="results/:runId" element={<Results />} />

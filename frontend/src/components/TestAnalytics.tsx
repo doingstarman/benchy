@@ -4,7 +4,7 @@ import type { AnalyticsSummary } from '../api'
 import { useT } from '../i18n'
 
 const CSS = `
-  .ta { --p: #7F77DD; --p-bg: rgba(127,119,221,0.12); --p-bd: rgba(127,119,221,0.45); --ok: #5ab87a; --mid: #d8a24a; --bad: #e05c5c; }
+  .ta { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); --mid: var(--warning); --bad: var(--error); }
   .ta-sec { border: 0.5px solid var(--border); background: var(--bg-elevated); border-radius: var(--radius-md); padding: 14px; }
   .ta-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; }
   .ta-big { font-size: 22px; font-family: var(--font-mono); color: var(--text-bright); font-weight: 600; }

@@ -7,19 +7,13 @@ import { IconChevron, IconSliders } from '../components/icons'
 import { useT, t } from '../i18n'
 import type { ProviderDraft, ProviderUpsert } from '../api'
 import type { ProviderView, ProviderType, ProviderDefaults } from '../../../src/types'
+import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 
-const DEFAULT_DEFAULTS: Required<ProviderDefaults> = {
-  temperature: 0.7,
-  topP: 1.0,
-  topK: null,
-  maxOutputTokens: 2048,
-  contextBudget: null,
-  truncation: 'auto',
-  timeoutMs: 60000,
-  retries: 2,
-  streaming: true,
-  extendedThinking: false,
-}
+// Deliberately the FACTORY values, not the app defaults from Settings: this
+// seeds what gets PERSISTED onto a provider, and writing the app default in
+// here would bake it into config.json where it could never be inherited from
+// again.
+const DEFAULT_DEFAULTS: Required<ProviderDefaults> = FACTORY_RUN_DEFAULTS
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
