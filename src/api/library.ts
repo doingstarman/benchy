@@ -6,6 +6,7 @@ import {
   getMcpServers, upsertMcpServer, removeMcpServer,
 } from '../config.js'
 import { TOOL_IDS } from '../tools/index.js'
+import { isLocalRequest } from './csrf.js'
 import type { CustomTool, Skill, McpServer, ToolParams } from '../types.js'
 
 // The name a model calls the tool by — must be a valid function identifier for
@@ -25,10 +26,19 @@ function parseParams(x: unknown): ToolParams | null {
 }
 
 export async function registerLibraryRoutes(app: FastifyInstance): Promise<void> {
-  // ─── Custom tools ─────────────────────────────────────────────────────────
-  app.get('/api/tools', async () => ({ data: await getCustomTools() }))
+  // Library entries carry secrets (a custom tool's / MCP server's Bearer key), so
+  // the whole registry sits behind the same same-origin gate as the provider
+  // routes: a cross-site page can't read or write it, and a route added inside
+  // this scope is guarded by default.
+  await app.register(async scope => {
+    scope.addHook('onRequest', async (req, reply) => {
+      if (!isLocalRequest(req)) return reply.code(403).send({ error: 'cross-site request refused' })
+    })
 
-  app.post<{ Body: Partial<CustomTool> }>('/api/tools', async (req, reply) => {
+  // ─── Custom tools ─────────────────────────────────────────────────────────
+  scope.get('/api/tools', async () => ({ data: await getCustomTools() }))
+
+  scope.post<{ Body: Partial<CustomTool> }>('/api/tools', async (req, reply) => {
     const b = req.body
     if (!b || typeof b.name !== 'string' || !TOOL_NAME_RE.test(b.name.trim())) {
       return reply.code(400).send({ error: 'name is required, must match [a-z0-9_] and be at most 64 chars' })
@@ -62,15 +72,15 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     return reply.code(201).send({ data: tool })
   })
 
-  app.delete<{ Params: { id: string } }>('/api/tools/:id', async (req, reply) => {
+  scope.delete<{ Params: { id: string } }>('/api/tools/:id', async (req, reply) => {
     await removeCustomTool(req.params.id)
     return reply.code(204).send()
   })
 
   // ─── Skills ───────────────────────────────────────────────────────────────
-  app.get('/api/skills', async () => ({ data: await getSkills() }))
+  scope.get('/api/skills', async () => ({ data: await getSkills() }))
 
-  app.post<{ Body: Partial<Skill> }>('/api/skills', async (req, reply) => {
+  scope.post<{ Body: Partial<Skill> }>('/api/skills', async (req, reply) => {
     const b = req.body
     if (!b || typeof b.name !== 'string' || !b.name.trim()) {
       return reply.code(400).send({ error: 'name is required' })
@@ -86,15 +96,15 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     return reply.code(201).send({ data: skill })
   })
 
-  app.delete<{ Params: { id: string } }>('/api/skills/:id', async (req, reply) => {
+  scope.delete<{ Params: { id: string } }>('/api/skills/:id', async (req, reply) => {
     await removeSkill(req.params.id)
     return reply.code(204).send()
   })
 
   // ─── MCP servers (registry only) ──────────────────────────────────────────
-  app.get('/api/mcp', async () => ({ data: await getMcpServers() }))
+  scope.get('/api/mcp', async () => ({ data: await getMcpServers() }))
 
-  app.post<{ Body: Partial<McpServer> }>('/api/mcp', async (req, reply) => {
+  scope.post<{ Body: Partial<McpServer> }>('/api/mcp', async (req, reply) => {
     const b = req.body
     if (!b || typeof b.name !== 'string' || !b.name.trim()) {
       return reply.code(400).send({ error: 'name is required' })
@@ -116,8 +126,9 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     return reply.code(201).send({ data: server })
   })
 
-  app.delete<{ Params: { id: string } }>('/api/mcp/:id', async (req, reply) => {
+  scope.delete<{ Params: { id: string } }>('/api/mcp/:id', async (req, reply) => {
     await removeMcpServer(req.params.id)
     return reply.code(204).send()
+  })
   })
 }

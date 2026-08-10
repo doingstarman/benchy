@@ -171,3 +171,18 @@ describe('CRUD /api/mcp', () => {
     expect((await post('/api/mcp', { name: 'S', transport: 'stdio', command: 'my-server' })).status).toBe(201)
   })
 })
+
+describe('library — cross-site guard', () => {
+  // Library entries hold a tool's/MCP's Bearer secret; a page on another origin
+  // must not be able to read or write the registry over the localhost API.
+  const evil = { Origin: 'http://evil.example', 'Content-Type': 'application/json' }
+
+  it('refuses read and write from a cross-site origin, but allows same-origin', async () => {
+    for (const path of ['/api/tools', '/api/skills', '/api/mcp']) {
+      expect((await fetch(`${base}${path}`, { headers: { Origin: 'http://evil.example' } })).status).toBe(403)
+      expect((await fetch(`${base}${path}`, { method: 'POST', headers: evil, body: '{"name":"x"}' })).status).toBe(403)
+    }
+    // A same-origin app fetch (no Origin header) still passes.
+    expect((await fetch(`${base}/api/tools`)).status).toBe(200)
+  })
+})
