@@ -75,8 +75,9 @@ export function Datasets() {
         </div>
 
         {creating && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, maxWidth: 620, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20, maxWidth: 720, alignItems: 'center' }}>
             <input className="dsx-in" autoFocus value={name} placeholder={t('dataset.cName')}
+              style={{ flex: '1 1 200px', minWidth: 180 }}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} />
             <div style={{ display: 'flex', gap: 3, border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 2, flex: 'none' }}>
