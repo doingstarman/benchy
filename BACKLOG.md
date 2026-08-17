@@ -13,6 +13,9 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
   drops `apiKey` when it isn't re-sent, so editing a tool without re-typing the key
   wipes it. Mirror providers' tri-state (absent = keep, `''` = erase, value =
   replace).
+- [ ] **Per-provider price override** (M). Set per-model prices on the Providers
+  screen; a `resolvePricing` prefers them over the curated default table. The
+  other half of "cost per answer" — deferred with the provider work.
 - [x] **Triaged `codex/review-fixes`** (old, 30 commits behind main). Its security
   (`f7b4ede`) and docs (`124a0cd`) commits are superseded by shipped work
   (provider-key-exposure, docs-accuracy) — drop them. Do NOT merge the stale branch
@@ -21,17 +24,18 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
 
 ## P2 — datasets features
 
-- [ ] **Normalization rules — "это то же самое"** (M). Sibling of "use as truth":
-  from the disagreements review, declare a model's differently-written value
-  equivalent (`214.08` ≡ `214,08 руб.`), store a per-type rule, apply it in scoring
-  + rescore — no model calls. The design's 07 callout.
+- [x] **Normalization rules — "это то же самое"** — shipped (9ffd2df). One click
+  marks a field TYPE leniently scored for the dataset (a number ignores a currency
+  word, a date ignores prose, text ignores punctuation), then rescores. It strips,
+  never fabricates a match; lenient number takes only a single numeric run.
 - [ ] **Prompt variants as an axis** (M). Run one dataset against several prompt
-  variants; compare which prompt scores best per model.
-- [ ] **Trial run** (S). One-item dry run before spending the whole (possibly paid)
-  dataset — a cheaper cousin of subsampling.
-- [ ] **CODE per-test: error detail** (M). Persist each test's `err` text and
-  distinguish "code didn't compile / timed out" from "a test failed" in the
-  per-test results grid (today both read as blank/0).
+  variants; compare which prompt scores best per model. Needs a design pass:
+  separate runs vs a variant axis in one run.
+- [x] **Trial run** — shipped (9ffd2df). A "Trial (1)" button dry-runs the first
+  item; the results view's "run all N" promotes it to the full run.
+- [x] **CODE per-test: error detail** — shipped (9ffd2df). results.code_report
+  carries each case's err + the execution error; the grid shows the error on a
+  failed cell (tooltip) and a "⚠ did not run" badge for compile/timeout.
 - [ ] **Results: PDF report export** (M). Alongside the existing CSV/JSON.
 - [ ] **Results: compare two tests** (M). Side-by-side diff of two runs.
 - [ ] **Analytics: agreement card** (M–L). How often auto-scoring agrees with human
@@ -40,9 +44,10 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
 
 ### Eval engine (salvaged from `codex/review-fixes`, re-land fresh on main)
 
-- [ ] **Cost per answer / per run** (M). A per-model pricing table → cost columns
-  next to tokens; would let the datasets cards show cost, not just tokens
-  (`pricing.ts`, `stats.ts` on the reference branch).
+- [x] **Cost per answer / per run** — shipped (9ffd2df, partial). A curated pricing
+  table (`src/pricing.ts`) turns tokens into a USD cost in the dataset summary
+  cards; a model absent from the table shows no cost. Remaining: a per-provider
+  price override (edited on the Providers screen) — belongs with the provider work.
 - [ ] **Repeats → compare medians** (M). Run each cell N times and compare medians
   instead of single noisy samples.
 - [ ] **Headless run — eval engine without a browser** (L). `benchy run …` from the
