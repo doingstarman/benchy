@@ -442,6 +442,8 @@ export const DICT: Record<string, Entry> = {
   'datasetRun.needModels': { en: 'Pick models in the header above.', ru: 'Выбери модели в шапке сверху.' },
   'datasetRun.launch': { en: 'Start run', ru: 'Запустить прогон' },
   'datasetRun.launching': { en: 'Starting…', ru: 'Запуск…' },
+  'datasetRun.trial': { en: 'Trial (1)', ru: 'Пробный (1)' },
+  'datasetRun.trialHint': { en: 'Run just the first item to check the prompt, then "run all" from the results.', ru: 'Прогнать только первый элемент, чтобы проверить промпт — потом «прогнать на всех» из результатов.' },
   'run.ask': { en: 'Ask anything…', ru: 'Спросите что угодно…' },
   'run.followup': { en: 'Follow-up or new prompt…', ru: 'Продолжение или новый промпт…' },
   'run.promptForModel': { en: 'Prompt for {model}…', ru: 'Промпт для {model}…' },

@@ -63,11 +63,16 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
   const effMode: 'score' | 'arena' = isCode ? 'score' : scoreMode
   const canLaunch = !!sel && models > 0 && items > 0 && (isCode || prompt.trim().length > 0) && !launching
 
-  async function launch() {
+  // A trial run always covers just the first item — a cheap dry run to eyeball the
+  // prompt before spending the whole dataset; the results view then offers "run
+  // all N". Otherwise the subsample selection decides coverage.
+  async function launch(trial = false) {
     if (!sel || !canLaunch) return
     setLaunching(true); setError(null)
     try {
-      const sample = sampleMode === 'all' ? undefined : { strategy: sampleMode, n: effItems }
+      const sample = trial
+        ? { strategy: 'first' as const, n: 1 }
+        : (sampleMode === 'all' ? undefined : { strategy: sampleMode, n: effItems })
       await datasetsApi.run(sel.id, { models: selectedModels, prompt: prompt.trim(), mode: effMode, ...(sample ? { sample } : {}) })
       nav(`/datasets/${sel.id}`)
     } catch (e) {
@@ -194,9 +199,17 @@ export function DatasetRunPanel({ selectedModels }: { selectedModels: string[] }
             {error && <div style={{ fontSize: 11, color: 'var(--error)', lineHeight: 1.5 }}>{error}</div>}
             {models === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('datasetRun.needModels')}</div>}
 
-            <button className="drp-primary" disabled={!canLaunch} onClick={() => void launch()}>
-              {launching ? t('datasetRun.launching') : t('datasetRun.launch')}
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className="drp-primary" disabled={!canLaunch} onClick={() => void launch()} style={{ flex: 1 }}>
+                {launching ? t('datasetRun.launching') : t('datasetRun.launch')}
+              </button>
+              {items > 1 && (
+                <button className="drp-chip" disabled={!canLaunch} onClick={() => void launch(true)}
+                  title={t('datasetRun.trialHint')} style={{ flexShrink: 0, opacity: canLaunch ? 1 : 0.5, cursor: canLaunch ? 'pointer' : 'default' }}>
+                  {t('datasetRun.trial')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
