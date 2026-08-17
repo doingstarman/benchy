@@ -186,6 +186,12 @@ export async function initDb(path) {
         // The dataset run's base prompt (before each item's input was folded in), so a
         // subsampled run can be relaunched over the full dataset without guessing it.
         'ALTER TABLE runs ADD COLUMN base_prompt TEXT',
+        // Per-dataset "это то же самое" rules: variable types scored leniently (by
+        // core value, ignoring surrounding noise). JSON array of DatasetVarType.
+        'ALTER TABLE datasets ADD COLUMN norm_rules TEXT',
+        // Code runs: the per-test detail beyond match/miss — each case's error text
+        // and the execution error (compile/timeout) that score_detail can't express.
+        'ALTER TABLE results ADD COLUMN code_report TEXT',
     ]) {
         try {
             db.exec(sql);

@@ -78,7 +78,25 @@ function rowToResult(row) {
         createdAt: row.created_at,
         ...(row.score != null ? { score: row.score } : {}),
         ...(row.score_detail ? { scoreDetail: parseScoreDetail(row.score_detail) } : {}),
+        ...(row.code_report ? { codeReport: parseCodeReport(row.code_report) } : {}),
     };
+}
+function parseCodeReport(raw) {
+    try {
+        const o = JSON.parse(raw);
+        const cases = Array.isArray(o.cases)
+            ? o.cases.flatMap(c => {
+                const cc = c;
+                if (typeof cc?.name !== 'string' || typeof cc.ok !== 'boolean')
+                    return [];
+                return [{ name: cc.name, ok: cc.ok, ...(typeof cc.err === 'string' ? { err: cc.err } : {}) }];
+            })
+            : [];
+        return { cases, error: typeof o.error === 'string' ? o.error : null };
+    }
+    catch {
+        return { cases: [], error: null };
+    }
 }
 function parseScoreDetail(raw) {
     try {

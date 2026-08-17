@@ -114,6 +114,17 @@ function isLabeled(item, schema, type) {
         return t != null && String(t).trim() !== '';
     });
 }
+function parseNormRules(raw) {
+    if (!raw)
+        return [];
+    try {
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.filter((x) => VAR_TYPES.includes(x)) : [];
+    }
+    catch {
+        return [];
+    }
+}
 function rowToDataset(row, opts = {}) {
     const schema = parseSchema(row.schema);
     const items = opts.items ?? loadItems(row.id);
@@ -125,6 +136,7 @@ function rowToDataset(row, opts = {}) {
         language: row.language === 'javascript' ? 'javascript' : row.language === 'python' ? 'python' : null,
         schema,
         trustedModel: row.trusted_model,
+        normRules: parseNormRules(row.norm_rules),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         itemCount: items.length,
@@ -147,7 +159,7 @@ function buildRunPrompt(prompt, schema) {
 // Score every result of a finished dataset run against the item snapshot taken
 // when the run started (prompt_index === item position). Writes score columns so
 // the results endpoint carries them.
-function scoreDatasetRun(runId, schema, items) {
+function scoreDatasetRun(runId, schema, items, lenientTypes = []) {
     const db = getDb();
     const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
         .all(runId);
@@ -156,7 +168,7 @@ function scoreDatasetRun(runId, schema, items) {
         const item = items[r.prompt_index];
         if (!item)
             continue;
-        const { score, detail } = scoreResult(schema, item.groundTruth, r.text);
+        const { score, detail } = scoreResult(schema, item.groundTruth, r.text, lenientTypes);
         upd.run(score, JSON.stringify(detail), r.id);
     }
 }
@@ -171,7 +183,7 @@ async function scoreCodeRun(runId, language, items) {
     const timeoutMs = await getCodeExecTimeoutMs();
     const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
         .all(runId);
-    const upd = db.prepare('UPDATE results SET score = ?, score_detail = ? WHERE id = ?');
+    const upd = db.prepare('UPDATE results SET score = ?, score_detail = ?, code_report = ? WHERE id = ?');
     for (const r of results) {
         const item = items[r.prompt_index];
         if (!item || !item.tests || !item.tests.trim())
@@ -181,7 +193,11 @@ async function scoreCodeRun(runId, language, items) {
         const detail = {};
         for (const c of res.cases)
             detail[c.name] = c.ok ? 'match' : 'miss';
-        upd.run(score, JSON.stringify(detail), r.id);
+        // The full per-test report — case errors and the execution error (compile /
+        // timeout) — so the UI can show why a test failed and tell "didn't run" from
+        // "test failed", which the match/miss map alone can't.
+        const report = JSON.stringify({ cases: res.cases, error: res.error });
+        upd.run(score, JSON.stringify(detail), report, r.id);
     }
 }
 // Pick the items an actual run covers. `first` takes the head, `random` a
@@ -647,7 +663,7 @@ export async function registerDatasetsRoutes(app) {
             // results before they carry a score. Fold scoring into the finalize barrier.
             const scored = Promise.allSettled(tasks).then(() => {
                 try {
-                    scoreDatasetRun(runId, dataset.schema, items);
+                    scoreDatasetRun(runId, dataset.schema, items, dataset.normRules);
                 }
                 catch { /* leave rows unscored */ }
             });
@@ -686,8 +702,25 @@ export async function registerDatasetsRoutes(app) {
         // falls back to positional over CURRENT items — correct unless one was
         // deleted since, which there's no mapping to recover.
         const covered = itemIds ? itemIds.map(id => byId.get(id)) : all;
-        scoreDatasetRun(req.params.runId, dataset.schema, covered);
+        scoreDatasetRun(req.params.runId, dataset.schema, covered, dataset.normRules);
         return reply.code(200).send({ data: { rescored: true } });
+    });
+    // "это то же самое": mark a variable type as leniently scored for this dataset.
+    // Idempotent add; the caller then rescores to fold it into the finished run.
+    app.post('/api/datasets/:id/norm-rules', async (req, reply) => {
+        const db = getDb();
+        const row = getDatasetRow(req.params.id);
+        if (!row)
+            return reply.code(404).send({ error: 'Dataset not found' });
+        const type = req.body.type;
+        if (typeof type !== 'string' || !VAR_TYPES.includes(type)) {
+            return reply.code(400).send({ error: 'type must be one of text, date, number' });
+        }
+        const current = parseNormRules(row.norm_rules);
+        const next = current.includes(type) ? current : [...current, type];
+        db.prepare('UPDATE datasets SET norm_rules = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(next), Date.now(), req.params.id);
+        return reply.code(200).send({ data: rowToDataset(getDatasetRow(req.params.id), { withItems: true }) });
     });
     function loadVerdicts(runId) {
         const rows = getDb().prepare('SELECT prompt_index, best_model, worst_model, skipped FROM dataset_run_verdicts WHERE run_id = ? ORDER BY prompt_index').all(runId);
