@@ -230,6 +230,8 @@ export const DICT: Record<string, Entry> = {
   'dataset.runAll': { en: 'Run all {n}', ru: 'Прогнать на всех {n}' },
   'dataset.adoptTruth': { en: 'use as truth', ru: 'принять как эталон' },
   'dataset.adoptTruthHint': { en: 'Set the ground truth to this value and re-score the run — no model calls.', ru: 'Сделать это значение эталоном и пересчитать прогон — без вызовов моделей.' },
+  'dataset.markSame': { en: 'same value', ru: 'это то же самое' },
+  'dataset.markSameHint': { en: 'Score this field type leniently (ignore units/punctuation/prose) across the whole dataset, then re-score — no model calls.', ru: 'Сравнивать этот тип поля мягко (игнорируя единицы/пунктуацию/текст вокруг) во всём датасете и пересчитать — без вызовов моделей.' },
   'dataset.delete': { en: 'Delete', ru: 'Удалить' },
   'dataset.deleteConfirm': { en: 'Delete this dataset and all its files?', ru: 'Удалить датасет и все его файлы?' },
 

@@ -191,6 +191,9 @@ export async function initDb(path?: string): Promise<void> {
     // The dataset run's base prompt (before each item's input was folded in), so a
     // subsampled run can be relaunched over the full dataset without guessing it.
     'ALTER TABLE runs ADD COLUMN base_prompt TEXT',
+    // Per-dataset "это то же самое" rules: variable types scored leniently (by
+    // core value, ignoring surrounding noise). JSON array of DatasetVarType.
+    'ALTER TABLE datasets ADD COLUMN norm_rules TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

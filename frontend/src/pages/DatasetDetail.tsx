@@ -150,7 +150,7 @@ function parseField(text: string, key: string): string | null {
   return null
 }
 
-interface Disagreement { idx: number; item: DatasetItem; key: string; truth: string; results: Result[]; missCount: number }
+interface Disagreement { idx: number; item: DatasetItem; key: string; type: DatasetVarType; truth: string; results: Result[]; missCount: number }
 
 // The item×variable cells a run got wrong: at least one model's value missed the
 // ground truth. These are the candidates for fixing the truth or the prompt — the
@@ -166,7 +166,7 @@ function computeDisagreements(results: Result[], schema: DatasetVar[], resolveIt
       const truth = item.groundTruth[v.key]
       if (truth == null || String(truth).trim() === '') continue
       const missCount = rs.filter(r => r.scoreDetail?.[v.key] === 'miss').length
-      if (missCount > 0) out.push({ idx, item, key: v.key, truth, results: rs, missCount })
+      if (missCount > 0) out.push({ idx, item, key: v.key, type: v.type, truth, results: rs, missCount })
     }
   }
   return out
@@ -458,6 +458,18 @@ export function DatasetDetail() {
     setAdopting(true)
     try {
       await datasetsApi.updateItem(id, item.id, { groundTruth: { ...item.groundTruth, [key]: value } })
+      if (viewRunId) await datasetsApi.rescore(id, viewRunId)
+      await load()
+    } finally { setAdopting(false) }
+  }
+
+  // "это то же самое": the model's value is the truth written differently — mark
+  // the field's type leniently scored for the whole dataset, then rescore.
+  async function markSame(vType: DatasetVarType): Promise<void> {
+    if (adopting) return
+    setAdopting(true)
+    try {
+      await datasetsApi.addNormRule(id, vType)
       if (viewRunId) await datasetsApi.rescore(id, viewRunId)
       await load()
     } finally { setAdopting(false) }
@@ -1041,11 +1053,18 @@ export function DatasetDetail() {
                               {ok
                                 ? <span style={{ fontSize: 10.5, color: 'var(--ok)', flexShrink: 0 }}>{tt('dataset.matched')}</span>
                                 : val != null && (
-                                  <button disabled={adopting} onClick={() => void adoptTruth(d.item, d.key, val)}
-                                    title={tt('dataset.adoptTruthHint')}
-                                    style={{ border: '0.5px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', padding: '3px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: adopting ? 'default' : 'pointer', flexShrink: 0, opacity: adopting ? 0.5 : 1 }}>
-                                    {tt('dataset.adoptTruth')}
-                                  </button>
+                                  <>
+                                    <button disabled={adopting} onClick={() => void markSame(d.type)}
+                                      title={tt('dataset.markSameHint')}
+                                      style={{ border: '0.5px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', padding: '3px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: adopting ? 'default' : 'pointer', flexShrink: 0, opacity: adopting ? 0.5 : 1 }}>
+                                      {tt('dataset.markSame')}
+                                    </button>
+                                    <button disabled={adopting} onClick={() => void adoptTruth(d.item, d.key, val)}
+                                      title={tt('dataset.adoptTruthHint')}
+                                      style={{ border: '0.5px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', padding: '3px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: adopting ? 'default' : 'pointer', flexShrink: 0, opacity: adopting ? 0.5 : 1 }}>
+                                      {tt('dataset.adoptTruth')}
+                                    </button>
+                                  </>
                                 )}
                             </div>
                           )

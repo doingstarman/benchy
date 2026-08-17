@@ -24,6 +24,7 @@ interface DatasetRow {
   language: string | null
   schema: string
   trusted_model: string | null
+  norm_rules: string | null
   created_at: number
   updated_at: number
 }
@@ -137,6 +138,14 @@ function isLabeled(item: DatasetItem, schema: DatasetVar[], type: string): boole
   })
 }
 
+function parseNormRules(raw: string | null): DatasetVarType[] {
+  if (!raw) return []
+  try {
+    const arr = JSON.parse(raw) as unknown
+    return Array.isArray(arr) ? arr.filter((x): x is DatasetVarType => VAR_TYPES.includes(x as DatasetVarType)) : []
+  } catch { return [] }
+}
+
 function rowToDataset(row: DatasetRow, opts: { items?: DatasetItem[]; withItems?: boolean } = {}): Dataset {
   const schema = parseSchema(row.schema)
   const items = opts.items ?? loadItems(row.id)
@@ -148,6 +157,7 @@ function rowToDataset(row: DatasetRow, opts: { items?: DatasetItem[]; withItems?
     language: row.language === 'javascript' ? 'javascript' : row.language === 'python' ? 'python' : null,
     schema,
     trustedModel: row.trusted_model,
+    normRules: parseNormRules(row.norm_rules),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     itemCount: items.length,
@@ -172,7 +182,7 @@ function buildRunPrompt(prompt: string, schema: DatasetVar[]): string {
 // Score every result of a finished dataset run against the item snapshot taken
 // when the run started (prompt_index === item position). Writes score columns so
 // the results endpoint carries them.
-function scoreDatasetRun(runId: string, schema: DatasetVar[], items: (DatasetItem | undefined)[]): void {
+function scoreDatasetRun(runId: string, schema: DatasetVar[], items: (DatasetItem | undefined)[], lenientTypes: DatasetVarType[] = []): void {
   const db = getDb()
   const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
     .all(runId) as { id: string; prompt_index: number; text: string }[]
@@ -180,7 +190,7 @@ function scoreDatasetRun(runId: string, schema: DatasetVar[], items: (DatasetIte
   for (const r of results) {
     const item = items[r.prompt_index]
     if (!item) continue
-    const { score, detail } = scoreResult(schema, item.groundTruth, r.text)
+    const { score, detail } = scoreResult(schema, item.groundTruth, r.text, lenientTypes)
     upd.run(score, JSON.stringify(detail), r.id)
   }
 }
@@ -670,7 +680,7 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
         // run_done must not fire until scores are written, or the client refetches
         // results before they carry a score. Fold scoring into the finalize barrier.
         const scored = Promise.allSettled(tasks).then(() => {
-          try { scoreDatasetRun(runId, dataset.schema, items) } catch { /* leave rows unscored */ }
+          try { scoreDatasetRun(runId, dataset.schema, items, dataset.normRules) } catch { /* leave rows unscored */ }
         })
         finalizeRun(runId, [scored])
       }
@@ -709,8 +719,28 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       // deleted since, which there's no mapping to recover.
       const covered = itemIds ? itemIds.map(id => byId.get(id)) : all
 
-      scoreDatasetRun(req.params.runId, dataset.schema, covered)
+      scoreDatasetRun(req.params.runId, dataset.schema, covered, dataset.normRules)
       return reply.code(200).send({ data: { rescored: true } })
+    },
+  )
+
+  // "это то же самое": mark a variable type as leniently scored for this dataset.
+  // Idempotent add; the caller then rescores to fold it into the finished run.
+  app.post<{ Params: { id: string }; Body: { type?: string } }>(
+    '/api/datasets/:id/norm-rules',
+    async (req, reply) => {
+      const db = getDb()
+      const row = getDatasetRow(req.params.id)
+      if (!row) return reply.code(404).send({ error: 'Dataset not found' })
+      const type = req.body.type
+      if (typeof type !== 'string' || !VAR_TYPES.includes(type as DatasetVarType)) {
+        return reply.code(400).send({ error: 'type must be one of text, date, number' })
+      }
+      const current = parseNormRules(row.norm_rules)
+      const next = current.includes(type as DatasetVarType) ? current : [...current, type as DatasetVarType]
+      db.prepare('UPDATE datasets SET norm_rules = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(next), Date.now(), req.params.id)
+      return reply.code(200).send({ data: rowToDataset(getDatasetRow(req.params.id)!, { withItems: true }) })
     },
   )
 

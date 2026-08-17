@@ -123,14 +123,34 @@ function structuralMatch(truthStr: string, actual: unknown): boolean | null {
   return looseValueEqual(truthVal, actualVal)
 }
 
+// Lenient pre-clean, opted into per type via a dataset's norm rule ("это то же
+// самое" in the review). It keeps only the value's core so surrounding noise —
+// a currency word on a number, prose around a date, punctuation in a name —
+// stops being a mismatch. Deliberately conservative: it strips, never reshapes.
+function preclean(type: DatasetVarType, raw: string): string {
+  if (type === 'number') {
+    // The number itself, cut out of surrounding units/words ("214,08 руб." → the
+    // run "214,08"), so a trailing "." from an abbreviation can't derail it.
+    const m = /[-+]?\d[\d\s.,]*\d|[-+]?\d/.exec(raw)
+    return m ? m[0] : raw
+  }
+  if (type === 'date') {
+    const m = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}/.exec(raw)
+    return m ? m[0] : raw
+  }
+  return raw.replace(/[^\p{L}\p{N}\s]/gu, ' ')
+}
+
 // Do two values match, given the variable's type? A structured argument compares
 // by shape; otherwise ground truth and the model's value are coerced to strings
-// (the model may emit a number/null) and compared under the type's rules.
-export function valuesMatch(type: DatasetVarType, truth: unknown, actual: unknown): boolean {
-  const t = toStr(truth)
-  const structural = structuralMatch(t, actual)
+// (the model may emit a number/null) and compared under the type's rules. When
+// `lenient`, both sides are pre-cleaned to their core first.
+export function valuesMatch(type: DatasetVarType, truth: unknown, actual: unknown, lenient = false): boolean {
+  const t0 = toStr(truth)
+  const structural = structuralMatch(t0, actual)
   if (structural !== null) return structural
-  const a = toStr(actual)
+  const t = lenient ? preclean(type, t0) : t0
+  const a = lenient ? preclean(type, toStr(actual)) : toStr(actual)
   if (type === 'number') {
     const nt = normalizeNumber(t)
     const na = normalizeNumber(a)
@@ -142,11 +162,13 @@ export function valuesMatch(type: DatasetVarType, truth: unknown, actual: unknow
 
 // Score one result against one item's ground truth. Only fields with a non-empty
 // ground-truth value are scored (an unlabeled field can't be judged). score is
-// matched/scored, or null when nothing was labeled for this item.
+// matched/scored, or null when nothing was labeled for this item. `lenientTypes`
+// are the dataset's norm-rule types that score by core, not exact string.
 export function scoreResult(
   schema: DatasetVar[],
   groundTruth: Record<string, string>,
   modelText: string,
+  lenientTypes: DatasetVarType[] = [],
 ): { score: number | null; detail: Record<string, 'match' | 'miss'> } {
   const parsed = parseModelOutput(modelText)
   const detail: Record<string, 'match' | 'miss'> = {}
@@ -156,7 +178,7 @@ export function scoreResult(
     const truth = groundTruth[v.key]
     if (truth == null || String(truth).trim() === '') continue
     scored++
-    const ok = parsed !== null && valuesMatch(v.type, truth, parsed[v.key])
+    const ok = parsed !== null && valuesMatch(v.type, truth, parsed[v.key], lenientTypes.includes(v.type))
     detail[v.key] = ok ? 'match' : 'miss'
     if (ok) matched++
   }

@@ -148,6 +148,8 @@ export const datasetsApi = {
     apiFetch<{ runId: string }>(`/api/datasets/${id}/run`, { method: 'POST', body: JSON.stringify(body) }),
   rescore: (id: string, runId: string) =>
     apiFetch<{ rescored: boolean }>(`/api/datasets/${id}/runs/${runId}/rescore`, { method: 'POST' }),
+  addNormRule: (id: string, type: 'text' | 'date' | 'number') =>
+    apiFetch<Dataset>(`/api/datasets/${id}/norm-rules`, { method: 'POST', body: JSON.stringify({ type }) }),
   arena: (id: string, runId: string) => apiFetch<ArenaState>(`/api/datasets/${id}/runs/${runId}/arena`),
   putVerdict: (id: string, runId: string, promptIndex: number, body: { bestModel?: string; worstModel?: string; skipped?: boolean }) =>
     apiFetch<{ standings: ArenaStanding[]; nextIndex: number }>(`/api/datasets/${id}/runs/${runId}/verdicts/${promptIndex}`, { method: 'PUT', body: JSON.stringify(body) }),
