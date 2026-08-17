@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useT, t } from '../i18n'
 import { datasetsApi, providersApi, runsApi, uploadsApi, useSSE, type ArenaState } from '../api'
 import type { Dataset, DatasetItem, DatasetVar, DatasetVarType, ProviderView, Result } from '../../../src/types'
+import { computeCost, formatCost, pricingFor } from '../../../src/pricing'
 
 const VAR_TYPES: DatasetVarType[] = ['text', 'date', 'number']
 type Tab = 'schema' | 'markup' | 'run'
@@ -960,6 +961,10 @@ export function DatasetDetail() {
                     const times = rr.map(r => r.metrics.totalTime).filter((tm): tm is number => tm != null)
                     const avgSec = times.length ? times.reduce((a, b) => a + b, 0) / times.length / 1000 : null
                     const tokens = rr.reduce((s, r) => s + (r.metrics.inputTokens ?? 0) + (r.metrics.outputTokens ?? 0), 0)
+                    const cost = rr.reduce((acc, r) => {
+                      const c = computeCost(pricingFor(row.model), r.metrics.inputTokens ?? null, r.metrics.outputTokens ?? null)
+                      return c == null ? acc : { sum: acc.sum + c, known: true }
+                    }, { sum: 0, known: false })
                     const h = heat(row.overall)
                     return (
                       <div key={row.model} style={{ background: 'var(--bg-base)', border: `0.5px solid ${best ? 'var(--p-bd)' : 'var(--border)'}`, borderLeft: best ? '2px solid var(--p)' : undefined, borderRadius: 'var(--radius-sm)', padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -969,7 +974,7 @@ export function DatasetDetail() {
                         <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: h.color, lineHeight: 1.1 }}>{pct(row.overall)}</div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6 }}>
                           {tt('dataset.summaryAccuracy')}<br />
-                          {[tokens ? tt('dataset.tokensN', { n: fmtTokens(tokens) }) : null, avgSec != null ? tt('dataset.perItem', { s: avgSec.toFixed(1) }) : null].filter(Boolean).join(' · ') || '—'}
+                          {[tokens ? tt('dataset.tokensN', { n: fmtTokens(tokens) }) : null, cost.known ? formatCost(cost.sum) : null, avgSec != null ? tt('dataset.perItem', { s: avgSec.toFixed(1) }) : null].filter(Boolean).join(' · ') || '—'}
                         </div>
                       </div>
                     )
