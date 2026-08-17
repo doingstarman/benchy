@@ -38,12 +38,20 @@ export function Datasets() {
   const [newType, setNewType] = useState<'files' | 'text' | 'tools' | 'code'>('files')
   const [newLang, setNewLang] = useState<'python' | 'javascript'>('python')
   const [saving, setSaving] = useState(false)
+  const [query, setQuery] = useState('')
 
   useEffect(() => { void reload() }, [])
   async function reload() {
     setLoading(true)
     try { setItems(await datasetsApi.list()) } finally { setLoading(false) }
   }
+
+  // Client-side filter — the whole list is already loaded, so search is instant.
+  // Matches name, note, type, and schema keys (what people actually recall).
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? items.filter(ds => `${ds.name} ${ds.note ?? ''} ${ds.type} ${ds.schema.map(v => v.key).join(' ')}`.toLowerCase().includes(q))
+    : items
 
   async function create() {
     const trimmed = name.trim()
@@ -103,6 +111,13 @@ export function Datasets() {
           </div>
         )}
 
+        {!loading && items.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <input className="dsx-in" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('dataset.searchPlaceholder')} style={{ maxWidth: 360 }} />
+            {q && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{t('dataset.searchCount', { n: filtered.length, total: items.length })}</span>}
+          </div>
+        )}
+
         {loading ? (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</div>
         ) : items.length === 0 ? (
@@ -111,9 +126,11 @@ export function Datasets() {
             <div style={{ fontSize: 15, color: 'var(--text-bright)', marginBottom: 6 }}>{t('dataset.emptyTitle')}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 440, margin: '0 auto', lineHeight: 1.5 }}>{t('dataset.emptyBody')}</div>
           </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 2px' }}>{t('dataset.searchEmpty', { q: query.trim() })}</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-            {items.map(ds => {
+            {filtered.map(ds => {
               const total = ds.itemCount ?? 0
               const labeled = ds.labeledCount ?? 0
               const p = total > 0 ? Math.round((labeled / total) * 100) : 0
