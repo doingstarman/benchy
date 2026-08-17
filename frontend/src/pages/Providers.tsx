@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { providersApi } from '../api'
-import { ProviderTile } from '../components/ProviderTile'
 import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
 import { IconChevron, IconSliders } from '../components/icons'
@@ -85,6 +84,41 @@ function isProviderActive(provider: ProviderView): boolean {
   return provider.enabled && (!!provider.apiKeyMask || !!provider.baseUrl)
 }
 
+// Config-derived status for the board — a live health check (key error / server
+// offline) would need probing + persistence; that's a later stage. Here: ready =
+// connected with at least one model; nomodels = connected but empty; setup = not
+// yet connected.
+type ProvStatus = 'ready' | 'nomodels' | 'setup'
+function providerStatus(p: ProviderView): ProvStatus {
+  if (!isProviderActive(p)) return 'setup'
+  return p.models.length > 0 ? 'ready' : 'nomodels'
+}
+const STATUS_ORDER: ProvStatus[] = ['ready', 'nomodels', 'setup']
+const STATUS_TONE: Record<ProvStatus, { color: string; bg: string }> = {
+  ready: { color: 'var(--success)', bg: 'var(--success-bg)' },
+  nomodels: { color: 'var(--warning)', bg: 'var(--warning-bg)' },
+  setup: { color: 'var(--text-muted)', bg: 'var(--bg-base)' },
+}
+
+// Rail categories, by provider type. 'custom' catches http-json/script/webhook
+// and any user endpoint that isn't a known preset.
+type ProvCat = 'official' | 'compatible' | 'local' | 'custom'
+const CAT_ORDER: ProvCat[] = ['official', 'compatible', 'local', 'custom']
+function typeCategory(type: ProviderType): ProvCat {
+  if (type === 'openai' || type === 'anthropic' || type === 'google') return 'official'
+  if (type === 'openai-compatible') return 'compatible'
+  if (type === 'local') return 'local'
+  return 'custom'
+}
+
+// Two-letter mark for the logo placeholder — first letters of the first two
+// words, else the first two characters.
+function providerMark(name: string): string {
+  const words = name.replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean)
+  const s = words.length >= 2 ? words[0][0] + words[1][0] : name.trim().slice(0, 2)
+  return s.toUpperCase()
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface TestResult {
@@ -134,30 +168,23 @@ const MODAL_CSS = `
   @keyframes prov-spin { to { transform: rotate(360deg) } }
 `
 
+const BOARD_CSS = `
+  .pb-rail-cat { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 18px; font-size: 12px; color: var(--text-secondary); cursor: pointer; border: none; border-left: 2px solid transparent; background: none; width: 100%; text-align: left; font-family: inherit; }
+  .pb-rail-cat:hover { color: var(--text-primary); }
+  .pb-rail-cat.on { color: var(--text-bright); border-left-color: var(--accent); background: var(--accent-bg); }
+  .pb-rail-cat .cnt { font: 10.5px var(--font-mono); color: var(--text-muted); }
+  .pb-row { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border: none; border-bottom: 0.5px solid var(--border); background: none; width: 100%; text-align: left; cursor: pointer; }
+  .pb-row:last-child { border-bottom: none; }
+  .pb-row:hover { background: var(--bg-base); }
+  .pb-mark { width: 30px; height: 30px; border-radius: 7px; border: 1px dashed var(--border-hover); background: var(--bg-base); display: flex; align-items: center; justify-content: center; font: 500 11px var(--font-mono); color: var(--text-muted); flex-shrink: 0; }
+  .pb-seg { display: inline-flex; background: var(--bg-elevated); border: 0.5px solid var(--border); border-radius: 7px; padding: 3px; gap: 2px; flex-shrink: 0; }
+  .pb-seg > button { padding: 5px 12px; border-radius: 5px; border: none; background: none; font: 11px var(--font-mono); letter-spacing: 0.04em; color: var(--text-muted); cursor: pointer; }
+  .pb-seg > button.on { background: var(--bg-base); color: var(--text-bright); box-shadow: 0 0 0 0.5px var(--border-hover); }
+  .pb-search { flex: 1; min-width: 0; background: var(--bg-elevated); border: 0.5px solid var(--border); border-radius: 7px; padding: 8px 12px; color: var(--text-primary); font: 12px var(--font-mono); outline: none; }
+  .pb-search:focus { border-color: var(--accent-dim); }
+`
+
 // ─── Sub-components (module-level — must NOT be defined inside Providers) ─────
-
-interface Tile { key: string; provider: ProviderView; onClick: () => void }
-
-// Was declared inside Providers, against the rule right above: every render
-// produced a new component type, so React threw the whole grid away and rebuilt
-// it on each keystroke — remounting tiles and detaching anything holding onto
-// one of those nodes.
-function TileGrid({ title, tiles, trailingButton }: { title: string; tiles: Tile[]; trailingButton?: React.ReactNode }) {
-  if (tiles.length === 0 && !trailingButton) return null
-  return (
-    <div>
-      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8 }}>
-        {title}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
-        {tiles.map(tile => (
-          <ProviderTile key={tile.key} provider={tile.provider} onClick={tile.onClick} />
-        ))}
-        {trailingButton}
-      </div>
-    </div>
-  )
-}
 
 interface ProviderHeaderProps {
   name: string
@@ -607,6 +634,9 @@ export function Providers() {
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [modal, setModal] = useState<ModalState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
+  const [groupBy, setGroupBy] = useState<'status' | 'type'>('status')
+  const [cat, setCat] = useState<ProvCat | 'all'>('all')
 
   useEffect(() => {
     providersApi.list().then(setProviders).catch(() => {})
@@ -832,23 +862,7 @@ export function Providers() {
     return { id: '', name: preset.name, type: preset.type, apiKeyMask: null, models: [], enabled: false }
   }
 
-  const presetTiles = PRESET_PROVIDERS.map(preset => {
-    const connected = providerMap.get(preset.name)
-    return { preset, connected, active: !!connected && isProviderActive(connected) }
-  })
   const customProviders = providers.filter(p => !presetNames.has(p.name))
-
-  const activeTiles: Tile[] = [
-    ...presetTiles.filter(t => t.active).map(t => ({ key: t.preset.name, provider: t.connected!, onClick: () => openPreset(t.preset) })),
-    ...customProviders.filter(isProviderActive).map(p => ({ key: p.id, provider: p, onClick: () => openExistingCustom(p) })),
-  ]
-  const localTiles: Tile[] = presetTiles
-    .filter(t => !t.active && t.preset.type === 'local')
-    .map(t => ({ key: t.preset.name, provider: t.connected ?? stub(t.preset), onClick: () => openPreset(t.preset) }))
-  const otherTiles: Tile[] = presetTiles
-    .filter(t => !t.active && t.preset.type !== 'local')
-    .map(t => ({ key: t.preset.name, provider: t.connected ?? stub(t.preset), onClick: () => openPreset(t.preset) }))
-  const inactiveCustomProviders = customProviders.filter(p => !isProviderActive(p))
 
   const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
   const isLocal = modal?.provider.type === 'local'
@@ -872,25 +886,100 @@ export function Providers() {
     return 'https://api.example.com/v1'
   }
 
-  return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <h1 style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-bright)' }}>{t('providers.title')}</h1>
+  // ── Status board ──
+  interface BoardRow { key: string; name: string; type: ProviderType; provider: ProviderView; place: string; onClick: () => void }
+  const boardRows: BoardRow[] = [
+    ...PRESET_PROVIDERS.map(preset => {
+      const connected = providerMap.get(preset.name)
+      return { key: preset.name, name: preset.name, type: preset.type, provider: connected ?? stub(preset), place: preset.subtitle, onClick: () => openPreset(preset) }
+    }),
+    ...customProviders.map(p => ({ key: p.id, name: p.name, type: p.type, provider: p, place: t('providers.customProvider'), onClick: () => openExistingCustom(p) })),
+  ]
+  const sq = search.trim().toLowerCase()
+  const visibleRows = boardRows.filter(r =>
+    (cat === 'all' || typeCategory(r.type) === cat) &&
+    (!sq || `${r.name} ${r.provider.models.join(' ')}`.toLowerCase().includes(sq)))
+  const statusLabel: Record<ProvStatus, string> = { ready: t('providers.statusReady'), nomodels: t('providers.statusNoModels'), setup: t('providers.statusSetup') }
+  const catLabel: Record<ProvCat, string> = { official: t('providers.catOfficial'), compatible: t('providers.catCompatible'), local: t('providers.catLocal'), custom: t('providers.catCustom') }
+  const groups = groupBy === 'status'
+    ? STATUS_ORDER.map(s => ({ id: s, tone: STATUS_TONE[s].color, title: statusLabel[s], rows: visibleRows.filter(r => providerStatus(r.provider) === s) })).filter(g => g.rows.length > 0)
+    : CAT_ORDER.map(c => ({ id: c, tone: 'var(--text-muted)', title: catLabel[c], rows: visibleRows.filter(r => typeCategory(r.type) === c) })).filter(g => g.rows.length > 0)
 
-      <TileGrid title={t('providers.active')} tiles={activeTiles} />
-      <TileGrid title={t('providers.local')} tiles={localTiles} />
-      <TileGrid
-        title={t('providers.custom')}
-        tiles={inactiveCustomProviders.map(p => ({ key: p.id, provider: p, onClick: () => openExistingCustom(p) }))}
-        trailingButton={
-          <button
-            onClick={openCustom}
-            style={{ background: 'none', border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: 16, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}
-          >
-            {t('providers.customEndpoint')}
-          </button>
-        }
-      />
-      <TileGrid title={t('providers.other')} tiles={otherTiles} />
+  return (
+    <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
+      <style>{BOARD_CSS}</style>
+
+      <aside style={{ width: 212, minWidth: 212, flexShrink: 0, background: 'var(--bg-sidebar)', borderRight: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '22px 0', overflowY: 'auto' }}>
+        <div style={{ padding: '0 18px 14px', fontSize: 15, fontWeight: 600, color: 'var(--text-bright)', letterSpacing: '-0.2px' }}>{t('providers.title')}</div>
+        <button className={`pb-rail-cat${cat === 'all' ? ' on' : ''}`} onClick={() => setCat('all')}>
+          <span>{t('providers.catAll')}</span><span className="cnt">{boardRows.length}</span>
+        </button>
+        {CAT_ORDER.map(c => {
+          const n = boardRows.filter(r => typeCategory(r.type) === c).length
+          return n === 0 ? null : (
+            <button key={c} className={`pb-rail-cat${cat === c ? ' on' : ''}`} onClick={() => setCat(c)}>
+              <span>{catLabel[c]}</span><span className="cnt">{n}</span>
+            </button>
+          )
+        })}
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '14px 12px' }} />
+        <div style={{ padding: '0 18px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{t('providers.availability')}</div>
+          {STATUS_ORDER.map(s => (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: 'var(--font-mono)', color: STATUS_TONE[s].color }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: STATUS_TONE[s].color, flexShrink: 0 }} />
+              <span>{statusLabel[s]} · {boardRows.filter(r => providerStatus(r.provider) === s).length}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ margin: '0 14px', padding: '12px 14px', border: '0.5px solid var(--border)', borderRadius: 8, background: 'var(--bg-base)', fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('providers.keysLocal')}</div>
+      </aside>
+
+      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '18px 26px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          <input className="pb-search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('providers.searchPlaceholder')} />
+          <div className="pb-seg">
+            <button className={groupBy === 'status' ? 'on' : ''} onClick={() => setGroupBy('status')}>{t('providers.byStatus')}</button>
+            <button className={groupBy === 'type' ? 'on' : ''} onClick={() => setGroupBy('type')}>{t('providers.byType')}</button>
+          </div>
+          <button onClick={openCustom} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 7, padding: '8px 16px', fontSize: 12, fontFamily: 'var(--font-mono)', cursor: 'pointer', flexShrink: 0 }}>+ {t('providers.connect')}</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {groups.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('providers.searchEmpty')}</div>
+          ) : groups.map(g => (
+            <div key={g.id}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: g.tone, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>{g.title}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' }}>{g.rows.length}</span>
+                <span style={{ flex: 1, height: 1, background: 'linear-gradient(90deg,var(--border),transparent)' }} />
+              </div>
+              <div style={{ border: '0.5px solid var(--border)', borderRadius: 9, overflow: 'hidden', background: 'var(--bg-elevated)' }}>
+                {g.rows.map(r => {
+                  const st = providerStatus(r.provider)
+                  const tone = STATUS_TONE[st]
+                  const models = r.provider.models.length
+                  return (
+                    <button key={r.key} className="pb-row" onClick={r.onClick}>
+                      <span className="pb-mark">{providerMark(r.name)}</span>
+                      <span style={{ width: 150, flexShrink: 0, minWidth: 0, fontSize: 13, fontWeight: 500, color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                      <span style={{ width: 210, flexShrink: 0, fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.place}</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 20, background: tone.bg, flexShrink: 0 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: tone.color }} />
+                        <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: tone.color }}>{statusLabel[st]}</span>
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{models > 0 ? t('providers.modelsN', { n: models }) : (r.provider.apiKeyMask ?? t('providers.noModels'))}</span>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flexShrink: 0 }}>{t('providers.configure')} →</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
 
       {/* Modal */}
       {modal && (
