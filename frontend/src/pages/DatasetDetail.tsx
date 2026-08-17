@@ -1068,8 +1068,9 @@ export function DatasetDetail() {
                     if (!rs.length) return null
                     // Test names are the item's own — take them from the results that ran;
                     // a model whose code never ran contributes none and shows — across.
-                    const tests = [...new Set(rs.flatMap(r => Object.keys(r.scoreDetail ?? {})))]
+                    const tests = [...new Set(rs.flatMap(r => [...Object.keys(r.scoreDetail ?? {}), ...(r.codeReport?.cases ?? []).map(c => c.name)]))]
                     const rows = [...rs].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+                    const anyError = rows.some(r => r.codeReport?.error)
                     return (
                       <div key={item.id}>
                         <div className="dsx-label" style={{ marginBottom: 6 }}>
@@ -1077,7 +1078,18 @@ export function DatasetDetail() {
                           {item.input && <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>{item.input.length > 64 ? `${item.input.slice(0, 64)}…` : item.input}</span>}
                         </div>
                         {tests.length === 0 ? (
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{tt('dataset.codeNoTestData')}</div>
+                          anyError ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {rows.map(r => r.codeReport?.error ? (
+                                <div key={r.model} style={{ fontSize: 11, display: 'flex', gap: 8 }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flexShrink: 0 }}>{modelLabel(r.model)}</span>
+                                  <span style={{ color: 'var(--bad)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.codeReport.error}>{r.codeReport.error}</span>
+                                </div>
+                              ) : null)}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{tt('dataset.codeNoTestData')}</div>
+                          )
                         ) : (
                           <div style={{ overflowX: 'auto' }}>
                             <table className="dsx-table">
@@ -1087,16 +1099,24 @@ export function DatasetDetail() {
                                 <th style={{ textAlign: 'right' }}>{tt('dataset.overall')}</th>
                               </tr></thead>
                               <tbody>
-                                {rows.map(r => (
-                                  <tr key={r.model}>
-                                    <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{modelLabel(r.model)}</td>
-                                    {tests.map(n => {
-                                      const v = r.scoreDetail?.[n]
-                                      return <td key={n} style={{ textAlign: 'center', color: v === 'match' ? 'var(--ok)' : v === 'miss' ? 'var(--bad)' : 'var(--text-muted)' }}>{v === 'match' ? '✓' : v === 'miss' ? '✗' : '—'}</td>
-                                    })}
-                                    {(() => { const h = heat(r.score ?? null); return <td style={{ textAlign: 'right', fontWeight: 700, color: h.color, background: h.background }}>{pct(r.score ?? null)}</td> })()}
-                                  </tr>
-                                ))}
+                                {rows.map(r => {
+                                  const err = r.codeReport?.error
+                                  return (
+                                    <tr key={r.model}>
+                                      <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                        {modelLabel(r.model)}
+                                        {err && <span title={err} style={{ marginLeft: 6, color: 'var(--bad)', fontSize: 10, cursor: 'help' }}>⚠ {tt('dataset.codeErrored')}</span>}
+                                      </td>
+                                      {tests.map(n => {
+                                        const c = r.codeReport?.cases.find(cc => cc.name === n)
+                                        const ok = c ? c.ok : r.scoreDetail?.[n] === 'match' ? true : r.scoreDetail?.[n] === 'miss' ? false : null
+                                        const title = c && !c.ok ? c.err : undefined
+                                        return <td key={n} title={title} style={{ textAlign: 'center', cursor: title ? 'help' : undefined, color: ok === true ? 'var(--ok)' : ok === false ? 'var(--bad)' : 'var(--text-muted)' }}>{ok === true ? '✓' : ok === false ? '✗' : '—'}</td>
+                                      })}
+                                      {(() => { const h = heat(r.score ?? null); return <td style={{ textAlign: 'right', fontWeight: 700, color: h.color, background: h.background }}>{pct(r.score ?? null)}</td> })()}
+                                    </tr>
+                                  )
+                                })}
                               </tbody>
                             </table>
                           </div>

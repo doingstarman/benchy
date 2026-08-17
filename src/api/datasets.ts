@@ -196,7 +196,7 @@ async function scoreCodeRun(runId: string, language: CodeLanguage, items: Datase
   const timeoutMs = await getCodeExecTimeoutMs()
   const results = db.prepare('SELECT id, prompt_index, text FROM results WHERE run_id = ?')
     .all(runId) as { id: string; prompt_index: number; text: string }[]
-  const upd = db.prepare('UPDATE results SET score = ?, score_detail = ? WHERE id = ?')
+  const upd = db.prepare('UPDATE results SET score = ?, score_detail = ?, code_report = ? WHERE id = ?')
   for (const r of results) {
     const item = items[r.prompt_index]
     if (!item || !item.tests || !item.tests.trim()) continue
@@ -204,7 +204,11 @@ async function scoreCodeRun(runId: string, language: CodeLanguage, items: Datase
     const score = res.total > 0 ? res.passed / res.total : null
     const detail: Record<string, 'match' | 'miss'> = {}
     for (const c of res.cases) detail[c.name] = c.ok ? 'match' : 'miss'
-    upd.run(score, JSON.stringify(detail), r.id)
+    // The full per-test report — case errors and the execution error (compile /
+    // timeout) — so the UI can show why a test failed and tell "didn't run" from
+    // "test failed", which the match/miss map alone can't.
+    const report = JSON.stringify({ cases: res.cases, error: res.error })
+    upd.run(score, JSON.stringify(detail), report, r.id)
   }
 }
 

@@ -191,6 +191,9 @@ export async function initDb(path?: string): Promise<void> {
     // The dataset run's base prompt (before each item's input was folded in), so a
     // subsampled run can be relaunched over the full dataset without guessing it.
     'ALTER TABLE runs ADD COLUMN base_prompt TEXT',
+    // Code runs: the per-test detail beyond match/miss — each case's error text
+    // and the execution error (compile/timeout) that score_detail can't express.
+    'ALTER TABLE results ADD COLUMN code_report TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
