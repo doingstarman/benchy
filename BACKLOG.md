@@ -13,8 +13,11 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
   drops `apiKey` when it isn't re-sent, so editing a tool without re-typing the key
   wipes it. Mirror providers' tri-state (absent = keep, `''` = erase, value =
   replace).
-- [ ] **Investigate `codex/review-fixes`** (S). Local, unmerged, +5 commits, not
-  from the recent sessions — triage: land, drop, or document.
+- [x] **Triaged `codex/review-fixes`** (old, 30 commits behind main). Its security
+  (`f7b4ede`) and docs (`124a0cd`) commits are superseded by shipped work
+  (provider-key-exposure, docs-accuracy) — drop them. Do NOT merge the stale branch
+  (conflicts / would revert newer work); keep it only as reference for the three
+  features below, which are re-landed fresh on current `main`.
 
 ## P2 — datasets features
 
@@ -34,6 +37,16 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
 - [ ] **Analytics: agreement card** (M–L). How often auto-scoring agrees with human
   picks. Blocked: needs a run carrying BOTH auto scores AND human verdicts — arena
   skips auto-scoring, so a mixed mode must exist first.
+
+### Eval engine (salvaged from `codex/review-fixes`, re-land fresh on main)
+
+- [ ] **Cost per answer / per run** (M). A per-model pricing table → cost columns
+  next to tokens; would let the datasets cards show cost, not just tokens
+  (`pricing.ts`, `stats.ts` on the reference branch).
+- [ ] **Repeats → compare medians** (M). Run each cell N times and compare medians
+  instead of single noisy samples.
+- [ ] **Headless run — eval engine without a browser** (L). `benchy run …` from the
+  CLI, no UI (`headless.ts`, `cli.ts` on the reference branch).
 
 ## P3 — scoring robustness & nits
 
