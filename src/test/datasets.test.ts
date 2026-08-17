@@ -66,7 +66,7 @@ const data = <T>(r: ApiResult): T => r.body.data as T
 interface RunDetail {
   status: string
   models: string[]
-  results: { model: string; score: number | null; scoreDetail: Record<string, 'match' | 'miss'> | null }[]
+  results: { model: string; score: number | null; scoreDetail: Record<string, 'match' | 'miss'> | null; codeReport?: { cases: { name: string; ok: boolean; err?: string }[]; error: string | null } }[]
 }
 
 async function waitForRun(runId: string): Promise<RunDetail> {
@@ -423,6 +423,14 @@ describe('text datasets', () => {
     const done = await waitForRun(data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'solve it' })).runId)
     expect(done.results[0].score).toBe(0.5)
     expect(done.results[0].scoreDetail).toMatchObject({ a: 'match', b: 'miss' })
+    // The per-test report carries each case's pass/fail (and an execution error,
+    // null here since the code ran) so the UI can show why a test failed.
+    const rep = done.results[0].codeReport
+    expect(rep?.error).toBeNull()
+    expect(rep?.cases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'a', ok: true }),
+      expect.objectContaining({ name: 'b', ok: false }),
+    ]))
   }, 20000)
 
   it('kills a solution that outruns the configured execution timeout', async () => {

@@ -234,6 +234,9 @@ export interface Result {
   // and the per-key match map. NULL/absent for ordinary runs.
   score?: number | null
   scoreDetail?: Record<string, 'match' | 'miss'> | null
+  // Code runs only: per-test detail beyond match/miss — each case's error text,
+  // and the execution error (compile/timeout) when the code never ran.
+  codeReport?: { cases: { name: string; ok: boolean; err?: string }[]; error: string | null }
 }
 
 export interface Run {

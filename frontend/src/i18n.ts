@@ -216,6 +216,7 @@ export const DICT: Record<string, Entry> = {
   'dataset.codePerTest': { en: 'Per-test results', ru: 'Результаты по тестам' },
   'dataset.codePerTestSub': { en: 'Which hidden test each model passed, task by task.', ru: 'Какой скрытый тест прошла каждая модель — по каждой задаче.' },
   'dataset.codeNoTestData': { en: 'no test results — the code did not run', ru: 'нет результатов тестов — код не запустился' },
+  'dataset.codeErrored': { en: 'did not run', ru: 'не запустился' },
   'dataset.summaryAccuracy': { en: 'accuracy vs truth', ru: 'точность по эталону' },
   'dataset.tokensN': { en: '{n} tokens', ru: '{n} токенов' },
   'dataset.perItem': { en: '{s}s / item', ru: '{s} с/элемент' },

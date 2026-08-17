@@ -46,6 +46,7 @@ interface ResultRow {
   created_at: number
   score: number | null
   score_detail: string | null
+  code_report: string | null
 }
 
 // Backslash-escape LIKE's own metacharacters so the query means what it says.
@@ -124,7 +125,19 @@ function rowToResult(row: ResultRow): Result {
     createdAt: row.created_at,
     ...(row.score != null ? { score: row.score } : {}),
     ...(row.score_detail ? { scoreDetail: parseScoreDetail(row.score_detail) } : {}),
+    ...(row.code_report ? { codeReport: parseCodeReport(row.code_report) } : {}),
   }
+}
+
+function parseCodeReport(raw: string): Result['codeReport'] {
+  try {
+    const o = JSON.parse(raw) as { cases?: unknown; error?: unknown }
+    const cases = Array.isArray(o.cases)
+      ? o.cases.filter((c): c is { name: string; ok: boolean; err?: string } =>
+          !!c && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { ok?: unknown }).ok === 'boolean')
+      : []
+    return { cases, error: typeof o.error === 'string' ? o.error : null }
+  } catch { return { cases: [], error: null } }
 }
 
 function parseScoreDetail(raw: string): Record<string, 'match' | 'miss'> {

@@ -194,6 +194,9 @@ export async function initDb(path?: string): Promise<void> {
     // Per-dataset "это то же самое" rules: variable types scored leniently (by
     // core value, ignoring surrounding noise). JSON array of DatasetVarType.
     'ALTER TABLE datasets ADD COLUMN norm_rules TEXT',
+    // Code runs: the per-test detail beyond match/miss — each case's error text
+    // and the execution error (compile/timeout) that score_detail can't express.
+    'ALTER TABLE results ADD COLUMN code_report TEXT',
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
