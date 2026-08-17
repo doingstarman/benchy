@@ -129,10 +129,12 @@ function structuralMatch(truthStr: string, actual: unknown): boolean | null {
 // stops being a mismatch. Deliberately conservative: it strips, never reshapes.
 function preclean(type: DatasetVarType, raw: string): string {
   if (type === 'number') {
-    // The number itself, cut out of surrounding units/words ("214,08 руб." → the
-    // run "214,08"), so a trailing "." from an abbreviation can't derail it.
-    const m = /[-+]?\d[\d\s.,]*\d|[-+]?\d/.exec(raw)
-    return m ? m[0] : raw
+    // The number cut out of surrounding units/words ("214,08 руб." → "214,08").
+    // Only when there is EXACTLY ONE numeric run: a multi-number answer ("214.08
+    // but actually 300") is ambiguous, so we don't hand it the truth just because
+    // the truth appears somewhere in it — fall back to raw, which then misses.
+    const runs = raw.match(/[-+]?\d[\d\s.,]*\d|[-+]?\d/g)
+    return runs && runs.length === 1 ? runs[0] : raw
   }
   if (type === 'date') {
     const m = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}/.exec(raw)

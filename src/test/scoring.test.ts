@@ -39,6 +39,12 @@ describe('valuesMatch — lenient (это то же самое)', () => {
     expect(valuesMatch('number', '214.08', '999 руб.', true)).toBe(false)
     expect(valuesMatch('text', 'Магнит', 'Пятёрочка!', true)).toBe(false)
   })
+
+  it('lenient number refuses a multi-number answer even if the truth appears in it', () => {
+    // The stated answer is 300; 214.08 just appears earlier. Not a match.
+    expect(valuesMatch('number', '214.08', 'I think 214.08 but actually 300', true)).toBe(false)
+    expect(valuesMatch('number', '300', 'I think 214.08 but actually 300', true)).toBe(false)
+  })
 })
 
 // A tool call's arguments arrive as decoded JSON — an object/array, not a string.

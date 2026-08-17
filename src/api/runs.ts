@@ -133,8 +133,11 @@ function parseCodeReport(raw: string): Result['codeReport'] {
   try {
     const o = JSON.parse(raw) as { cases?: unknown; error?: unknown }
     const cases = Array.isArray(o.cases)
-      ? o.cases.filter((c): c is { name: string; ok: boolean; err?: string } =>
-          !!c && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { ok?: unknown }).ok === 'boolean')
+      ? o.cases.flatMap(c => {
+          const cc = c as { name?: unknown; ok?: unknown; err?: unknown }
+          if (typeof cc?.name !== 'string' || typeof cc.ok !== 'boolean') return []
+          return [{ name: cc.name, ok: cc.ok, ...(typeof cc.err === 'string' ? { err: cc.err } : {}) }]
+        })
       : []
     return { cases, error: typeof o.error === 'string' ? o.error : null }
   } catch { return { cases: [], error: null } }
