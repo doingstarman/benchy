@@ -21,6 +21,26 @@ describe('valuesMatch', () => {
   })
 })
 
+// "это то же самое": opting a type into lenient scoring keeps only the value's
+// core, so surrounding noise stops being a miss — but a real difference still is.
+describe('valuesMatch — lenient (это то же самое)', () => {
+  it('number ignores a currency word only when lenient', () => {
+    expect(valuesMatch('number', '214.08', '214,08 руб.')).toBe(false)
+    expect(valuesMatch('number', '214.08', '214,08 руб.', true)).toBe(true)
+    expect(valuesMatch('number', '1105.90', '1 105,90 ₽', true)).toBe(true)
+  })
+  it('date pulls the date out of prose when lenient', () => {
+    expect(valuesMatch('date', '2024-03-12', 'выдан 12.03.2024 г.', true)).toBe(true)
+  })
+  it('text drops punctuation when lenient', () => {
+    expect(valuesMatch('text', 'ООО Ромашка', '«ООО Ромашка».', true)).toBe(true)
+  })
+  it('lenient is not blindness — a real difference still misses', () => {
+    expect(valuesMatch('number', '214.08', '999 руб.', true)).toBe(false)
+    expect(valuesMatch('text', 'Магнит', 'Пятёрочка!', true)).toBe(false)
+  })
+})
+
 // A tool call's arguments arrive as decoded JSON — an object/array, not a string.
 // String-comparing them reads the model's object as "[object Object]" and always
 // misses; these compare by shape so a differently-written-but-equal call scores.

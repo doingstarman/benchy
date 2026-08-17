@@ -185,6 +185,26 @@ describe('dataset run + scoring', () => {
     await waitForRun(runId)
     expect((await req('POST', `/api/datasets/${ds.id}/runs/${runId}/rescore`)).status).toBe(400)
   })
+
+  it('a norm rule ("это то же самое") makes a type lenient and rescores to a match', async () => {
+    const ds = data<{ id: string }>(await req('POST', '/api/datasets', { name: 'N', schema: [{ key: 'total', type: 'number' }] }))
+    await req('POST', `/api/datasets/${ds.id}/items`, { groundTruth: { total: '214.08' } })
+
+    // The model answers with a currency word — a miss under strict number scoring.
+    mockOutput = '{"total": "214,08 руб."}'
+    const runId = data<{ runId: string }>(await req('POST', `/api/datasets/${ds.id}/run`, { models: ['p:A'], prompt: 'read' })).runId
+    expect((await waitForRun(runId)).results[0].score).toBe(0)
+
+    // Mark number lenient, rescore (no model calls) — the same answer now matches.
+    const upd = await req('POST', `/api/datasets/${ds.id}/norm-rules`, { type: 'number' })
+    expect(upd.status).toBe(200)
+    expect(data<{ normRules: string[] }>(upd).normRules).toEqual(['number'])
+    await req('POST', `/api/datasets/${ds.id}/runs/${runId}/rescore`)
+    expect(data<{ results: { score: number | null }[] }>(await req('GET', `/api/runs/${runId}`)).results[0].score).toBe(1)
+
+    // An unknown type is rejected.
+    expect((await req('POST', `/api/datasets/${ds.id}/norm-rules`, { type: 'bogus' })).status).toBe(400)
+  })
 })
 
 describe('trusted model', () => {

@@ -143,6 +143,9 @@ export interface Dataset {
   language: 'python' | 'javascript' | null
   schema: DatasetVar[]
   trustedModel: string | null
+  // Variable types scored leniently ("это то же самое" in the review): a number
+  // ignores a currency word, a date ignores prose, text ignores punctuation.
+  normRules: DatasetVarType[]
   createdAt: number
   updatedAt: number
   itemCount?: number
