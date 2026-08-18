@@ -14,6 +14,7 @@ import { DatasetRunPanel } from '../components/DatasetRunPanel'
 import { ActivityTrace, ActivityTraceStyles, ToolTrace } from '../components/ActivityTrace'
 import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } from '../prefs'
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
+import { resolvePricing, formatCost } from '../../../src/pricing'
 import { useT, t } from '../i18n'
 import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
 
@@ -190,7 +191,9 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMet
 // deliberately still means "time to first ANSWER token" — a thinking model's
 // TTFS therefore includes its think time, and THINK TIME is what splits that
 // number apart.
-function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: boolean }) {
+interface CostBreakdown { total: number | null; input: number | null; output: number | null }
+
+function MetricsStrip({ result: r, isFastest, cost }: { result: UIResult; isFastest: boolean; cost: CostBreakdown }) {
   const [open, setOpen] = useState(false)
   const { t } = useT()
 
@@ -198,8 +201,11 @@ function MetricsStrip({ result: r, isFastest }: { result: UIResult; isFastest: b
     { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
     { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
     { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
+    { l: 'COST', v: formatCost(cost.total), best: false },
   ]
   const extra = [
+    { l: 'COST IN', v: formatCost(cost.input) },
+    { l: 'COST OUT', v: formatCost(cost.output) },
     { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
     { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
     { l: 'TOOLS', v: r.toolCalls.length > 0 ? `${r.toolCalls.length}` : '—' },
@@ -1992,6 +1998,17 @@ export function NewRun() {
     const minTtfs = turnTtfs.length > 1 ? Math.min(...turnTtfs) : null
     const isFastest = isDone && r.ttfs !== null && minTtfs !== null && r.ttfs === minTtfs
 
+    // key is "providerId:model" — resolve the provider's price override (falling
+    // back to the built-in table), then split cost into input and output.
+    const pid = key.includes(':') ? key.slice(0, key.indexOf(':')) : ''
+    const pricing = resolvePricing(key, providers.find(p => p.id === pid)?.pricing)
+    const costIn = pricing && r.inputTokens != null ? (r.inputTokens / 1e6) * pricing.inputPer1M : null
+    const costOut = pricing && r.outputTokens != null ? (r.outputTokens / 1e6) * pricing.outputPer1M : null
+    const cost: CostBreakdown = {
+      input: costIn, output: costOut,
+      total: costIn == null && costOut == null ? null : (costIn ?? 0) + (costOut ?? 0),
+    }
+
     const dotBg = isDone ? 'var(--success)' : isError ? 'var(--error)' : isStreaming ? 'var(--accent)' : 'var(--border-hover)'
 
     return (
@@ -2034,7 +2051,7 @@ export function NewRun() {
           )}
         </div>
 
-        <MetricsStrip result={r} isFastest={isFastest} />
+        <MetricsStrip result={r} isFastest={isFastest} cost={cost} />
 
         {isError ? (
           <div style={{ flex: 1, padding: 12, overflowY: 'auto' }}>

@@ -29,6 +29,8 @@ if (configDir) {
 const port = Number.parseInt(getArg('port') ?? '4243', 10)
 const mockBaseUrl = `http://localhost:${port}/api/mock`
 
+// Approximate real-world list prices (USD per 1M tokens, input / output) so the
+// offline demo shows a plausible cost per answer. Not authoritative — mock data.
 const MOCK_PROVIDERS: Provider[] = [
   {
     id: 'mock-openai',
@@ -37,6 +39,10 @@ const MOCK_PROVIDERS: Provider[] = [
     baseUrl: mockBaseUrl,
     apiKey: 'mock-key',
     models: ['gpt-4o', 'gpt-4o-mini'],
+    pricing: {
+      'gpt-4o': { inputPer1M: 2.5, outputPer1M: 10 },
+      'gpt-4o-mini': { inputPer1M: 0.15, outputPer1M: 0.6 },
+    },
     enabled: true,
   },
   {
@@ -46,6 +52,10 @@ const MOCK_PROVIDERS: Provider[] = [
     baseUrl: mockBaseUrl,
     apiKey: 'mock-key',
     models: ['claude-3-5-sonnet', 'claude-3-haiku'],
+    pricing: {
+      'claude-3-5-sonnet': { inputPer1M: 3, outputPer1M: 15 },
+      'claude-3-haiku': { inputPer1M: 0.25, outputPer1M: 1.25 },
+    },
     enabled: true,
   },
   {
@@ -55,6 +65,10 @@ const MOCK_PROVIDERS: Provider[] = [
     baseUrl: mockBaseUrl,
     apiKey: 'mock-key',
     models: ['llama-3.3-70b', 'llama-3.1-8b'],
+    pricing: {
+      'llama-3.3-70b': { inputPer1M: 0.59, outputPer1M: 0.79 },
+      'llama-3.1-8b': { inputPer1M: 0.05, outputPer1M: 0.08 },
+    },
     enabled: true,
   },
   {
@@ -64,6 +78,10 @@ const MOCK_PROVIDERS: Provider[] = [
     baseUrl: mockBaseUrl,
     apiKey: 'mock-key',
     models: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    pricing: {
+      'gemini-2.5-flash': { inputPer1M: 0.3, outputPer1M: 2.5 },
+      'gemini-2.5-pro': { inputPer1M: 1.25, outputPer1M: 10 },
+    },
     enabled: true,
   },
   {
@@ -73,6 +91,9 @@ const MOCK_PROVIDERS: Provider[] = [
     baseUrl: mockBaseUrl,
     apiKey: 'mock-key',
     models: ['deepseek-chat'],
+    pricing: {
+      'deepseek-chat': { inputPer1M: 0.27, outputPer1M: 1.1 },
+    },
     enabled: true,
   },
   {
@@ -85,6 +106,11 @@ const MOCK_PROVIDERS: Provider[] = [
     // exercised offline instead of against a paid provider: a reasoning field,
     // inline <think> tags, and a token count with no text.
     models: ['r1-think', 'qwen-tagged', 'o3-quiet'],
+    pricing: {
+      'r1-think': { inputPer1M: 0.55, outputPer1M: 2.19 },
+      'qwen-tagged': { inputPer1M: 0.4, outputPer1M: 1.2 },
+      'o3-quiet': { inputPer1M: 2, outputPer1M: 8 },
+    },
     enabled: true,
   },
 ]
