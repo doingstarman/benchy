@@ -5,14 +5,14 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
 
 ## P1 — security & correctness
 
-- [ ] **library.ts: mask the stored key in responses** (S). The Origin gate is in;
-  parity with providers still missing — `GET /api/tools` and `GET /api/mcp` return
-  the custom-tool / MCP Bearer secret in the clear. Add a `toView` that drops
-  `apiKey`/adds a mask, mirror `ProviderView` on the frontend (Library page).
-- [ ] **library.ts: preserve the key on edit** (S). `POST /api/tools|/api/mcp`
-  drops `apiKey` when it isn't re-sent, so editing a tool without re-typing the key
-  wipes it. Mirror providers' tri-state (absent = keep, `''` = erase, value =
-  replace).
+- [x] **library.ts: mask the stored key in responses** — shipped (1c981d4).
+  `GET/POST /api/tools` and `/api/mcp` return `toCustomToolView`/`toMcpServerView`
+  (masked `apiKeyMask`, last-4), mirroring `ProviderView`; the Library modal shows
+  the mask + a "Replace key" affordance. Raw key stays on the backend for the tool
+  call; masking is strictly at the API boundary.
+- [x] **library.ts: preserve the key on edit** — shipped (1c981d4). `resolveKey`
+  applies the provider tri-state (absent = keep, `''` = erase, value = replace), so
+  a rename/toggle no longer wipes the Bearer secret.
 - [ ] **Per-provider price override** (M). Set per-model prices on the Providers
   screen; a `resolvePricing` prefers them over the curated default table. The
   other half of "cost per answer" — deferred with the provider work.
