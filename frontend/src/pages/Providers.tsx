@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { providersApi } from '../api'
 import { Button, PillToggle } from '../components/ui'
 import { SliderField } from '../components/SliderField'
@@ -131,6 +131,9 @@ interface TestResult {
 interface ModalState {
   provider: ProviderView
   preset?: PresetProvider
+  // Connection wizard step for a NEW provider (1 key · 2 models · 3 test). Ignored
+  // when editing an already-connected provider (that uses the flat modal).
+  step?: 1 | 2 | 3
   selectedModels: Set<string>
   availableModels: string[]
   manualMode: boolean
@@ -627,6 +630,36 @@ function DangerZone({ onDisconnect }: DangerZoneProps) {
   )
 }
 
+// The connection wizard's progress: 1 Key · 2 Models · 3 Test. Done steps show a
+// check, the current one the accent, upcoming ones are dimmed.
+function Stepper({ step }: { step: 1 | 2 | 3 }) {
+  const labels = [t('providers.stepKey'), t('providers.stepModels'), t('providers.stepTest')]
+  return (
+    <div style={{ padding: '14px 24px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+      {labels.map((label, i) => {
+        const n = (i + 1) as 1 | 2 | 3
+        const done = n < step
+        const cur = n === step
+        return (
+          <Fragment key={n}>
+            {i > 0 && <span style={{ flex: 1, height: 1, background: n <= step ? 'var(--accent-dim)' : 'var(--border)' }} />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: cur || done ? 1 : 0.55 }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontFamily: 'var(--font-mono)',
+                background: done ? 'var(--success-bg)' : cur ? 'var(--accent)' : 'transparent',
+                border: done ? '0.5px solid var(--success)' : cur ? 'none' : '0.5px solid var(--border-hover)',
+                color: done ? 'var(--success)' : cur ? 'var(--on-accent)' : 'var(--text-muted)',
+              }}>{done ? '✓' : n}</span>
+              <span style={{ fontSize: 12, color: cur ? 'var(--text-bright)' : done ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{label}</span>
+            </div>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function Providers() {
@@ -865,6 +898,7 @@ export function Providers() {
   const customProviders = providers.filter(p => !presetNames.has(p.name))
 
   const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
+  const wizardStep: 1 | 2 | 3 = modal?.step ?? 1
   const isLocal = modal?.provider.type === 'local'
   const isScript = modal?.provider.type === 'script'
   const isCustom = !modal?.preset
@@ -995,81 +1029,124 @@ export function Providers() {
           }}>
             <style>{MODAL_CSS}</style>
 
-            {/* Scrollable content */}
-            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <ProviderHeader
-                name={modal.provider.name || t('providers.customProvider')}
-                subtitle={modal.preset?.subtitle ?? 'Custom endpoint · OpenAI-style API'}
-                connected={isConnected}
-                docsUrl={modal.preset?.docsUrl}
-              />
-
-              {!isLocal && !isScript && (
-                <ApiKeySection
-                  apiKeyMask={modal.provider.apiKeyMask}
-                  replacingKey={modal.replacingKey}
-                  newKey={modal.newKey}
-                  placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
-                  onStartReplace={() => updateModal({ replacingKey: true })}
-                  onNewKeyChange={v => updateModal({ newKey: v })}
-                />
-              )}
-
-              {isCustom && (
-                <div>
-                  <SectionLabel>{t('providers.providerName')}</SectionLabel>
-                  <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
+            {isConnected ? (
+              <>
+                {/* Edit an already-connected provider — flat modal (tabs land in stage 3) */}
+                <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  <ProviderHeader
+                    name={modal.provider.name || t('providers.customProvider')}
+                    subtitle={modal.preset?.subtitle ?? 'Custom endpoint · OpenAI-style API'}
+                    connected={isConnected}
+                    docsUrl={modal.preset?.docsUrl}
+                  />
+                  {!isLocal && !isScript && (
+                    <ApiKeySection apiKeyMask={modal.provider.apiKeyMask} replacingKey={modal.replacingKey} newKey={modal.newKey}
+                      placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
+                      onStartReplace={() => updateModal({ replacingKey: true })} onNewKeyChange={v => updateModal({ newKey: v })} />
+                  )}
+                  {isCustom && (
+                    <div>
+                      <SectionLabel>{t('providers.providerName')}</SectionLabel>
+                      <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
+                    </div>
+                  )}
+                  {showBaseUrlAbove && (
+                    <BaseUrlSection baseUrl={modal.provider.baseUrl ?? ''} onChange={v => updateProvider({ baseUrl: v })} label={baseUrlLabel(modal.provider.type)} placeholder={baseUrlPlaceholder(modal.provider.type)} />
+                  )}
+                  <ModelsSection available={modal.availableModels} selected={modal.selectedModels} search={modal.modelSearch}
+                    manualMode={modal.manualMode} manualText={modal.manualText} fetchingModels={modal.fetchingModels}
+                    onToggle={toggleModelSelection} onSearchChange={v => updateModal({ modelSearch: v })}
+                    onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })} onManualTextChange={v => updateModal({ manualText: v })} onFetchModels={handleFetchModels} />
+                  <TestSection models={currentSelectedList} testModelId={modal.testModelId} testing={modal.testing} result={modal.testResult}
+                    onModelChange={v => updateModal({ testModelId: v })} onTest={handleTest} />
+                  <AdvancedDefaultsSection open={modal.advancedOpen} onToggle={() => updateModal({ advancedOpen: !modal.advancedOpen })}
+                    baseUrl={modal.provider.baseUrl ?? ''} onBaseUrlChange={v => updateProvider({ baseUrl: v })} showBaseUrl={!showBaseUrlAbove}
+                    defaults={modal.defaults} onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })} />
                 </div>
-              )}
+                <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <ModalFooter onCancel={() => setModal(null)} onSave={handleSave} saving={saving} />
+                  <DangerZone onDisconnect={handleDisconnect} />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Connection wizard — key → models → test */}
+                <div style={{ padding: '20px 24px 16px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  <span className="pb-mark" style={{ width: 42, height: 42, borderRadius: 10, fontSize: 13 }}>{providerMark(modal.provider.name || '?')}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-bright)', letterSpacing: '-0.3px' }}>{modal.provider.name || t('providers.customProvider')}</div>
+                    <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{modal.preset?.subtitle ?? t('providers.customEndpointSub')}</span>
+                      {modal.preset?.docsUrl && <a href={modal.preset.docsUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>docs ↗</a>}
+                    </div>
+                  </div>
+                  <button onClick={() => setModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 16, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>✕</button>
+                </div>
 
-              {showBaseUrlAbove && (
-                <BaseUrlSection
-                  baseUrl={modal.provider.baseUrl ?? ''}
-                  onChange={v => updateProvider({ baseUrl: v })}
-                  label={baseUrlLabel(modal.provider.type)}
-                  placeholder={baseUrlPlaceholder(modal.provider.type)}
-                />
-              )}
+                <Stepper step={wizardStep} />
 
-              <ModelsSection
-                available={modal.availableModels}
-                selected={modal.selectedModels}
-                search={modal.modelSearch}
-                manualMode={modal.manualMode}
-                manualText={modal.manualText}
-                fetchingModels={modal.fetchingModels}
-                onToggle={toggleModelSelection}
-                onSearchChange={v => updateModal({ modelSearch: v })}
-                onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })}
-                onManualTextChange={v => updateModal({ manualText: v })}
-                onFetchModels={handleFetchModels}
-              />
+                <div style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {wizardStep === 1 && (
+                    <>
+                      {isCustom && (
+                        <div>
+                          <SectionLabel>{t('providers.providerName')}</SectionLabel>
+                          <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
+                        </div>
+                      )}
+                      {showBaseUrlAbove && (
+                        <BaseUrlSection baseUrl={modal.provider.baseUrl ?? ''} onChange={v => updateProvider({ baseUrl: v })} label={baseUrlLabel(modal.provider.type)} placeholder={baseUrlPlaceholder(modal.provider.type)} />
+                      )}
+                      {!isLocal && !isScript && (
+                        <ApiKeySection apiKeyMask={modal.provider.apiKeyMask} replacingKey={modal.replacingKey} newKey={modal.newKey}
+                          placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
+                          onStartReplace={() => updateModal({ replacingKey: true })} onNewKeyChange={v => updateModal({ newKey: v })} />
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderRadius: 6, background: 'var(--info-bg)', border: '0.5px solid var(--border)' }}>
+                        <span style={{ color: 'var(--info)', flexShrink: 0, marginTop: 1 }}>ⓘ</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('providers.wizardKeyNote')}</span>
+                      </div>
+                    </>
+                  )}
+                  {wizardStep === 2 && (
+                    <ModelsSection available={modal.availableModels} selected={modal.selectedModels} search={modal.modelSearch}
+                      manualMode={modal.manualMode} manualText={modal.manualText} fetchingModels={modal.fetchingModels}
+                      onToggle={toggleModelSelection} onSearchChange={v => updateModal({ modelSearch: v })}
+                      onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })} onManualTextChange={v => updateModal({ manualText: v })} onFetchModels={handleFetchModels} />
+                  )}
+                  {wizardStep === 3 && (
+                    <>
+                      <TestSection models={currentSelectedList} testModelId={modal.testModelId} testing={modal.testing} result={modal.testResult}
+                        onModelChange={v => updateModal({ testModelId: v })} onTest={handleTest} />
+                      <div style={{ border: '0.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                        <div style={{ padding: '10px 14px', borderBottom: '0.5px solid var(--border)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{t('providers.wizardSummary')}</div>
+                        {[
+                          { k: t('providers.providerName'), v: modal.provider.name || t('providers.customProvider') },
+                          { k: t('providers.sumType'), v: modal.preset?.subtitle ?? t('providers.customEndpointSub') },
+                          { k: t('providers.sumModels'), v: String(currentSelectedList.length) },
+                          { k: t('providers.apiKey'), v: modal.newKey ? '••••' + modal.newKey.slice(-4) : (modal.provider.apiKeyMask ?? '—') },
+                        ].map(s => (
+                          <div key={s.k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '9px 14px', borderBottom: '0.5px solid var(--border)' }}>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.k}</span>
+                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{t('providers.wizardTuneLater')}</div>
+                    </>
+                  )}
+                </div>
 
-              <TestSection
-                models={currentSelectedList}
-                testModelId={modal.testModelId}
-                testing={modal.testing}
-                result={modal.testResult}
-                onModelChange={v => updateModal({ testModelId: v })}
-                onTest={handleTest}
-              />
-
-              <AdvancedDefaultsSection
-                open={modal.advancedOpen}
-                onToggle={() => updateModal({ advancedOpen: !modal.advancedOpen })}
-                baseUrl={modal.provider.baseUrl ?? ''}
-                onBaseUrlChange={v => updateProvider({ baseUrl: v })}
-                showBaseUrl={!showBaseUrlAbove}
-                defaults={modal.defaults}
-                onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })}
-              />
-            </div>
-
-            {/* Sticky footer */}
-            <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <ModalFooter onCancel={() => setModal(null)} onSave={handleSave} saving={saving} />
-              {isConnected && <DangerZone onDisconnect={handleDisconnect} />}
-            </div>
+                <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {wizardStep === 1
+                    ? <Button onClick={() => setModal(null)}>{t('common.cancel')}</Button>
+                    : <Button onClick={() => updateModal({ step: (wizardStep - 1) as 1 | 2 | 3 })}>{t('providers.back')}</Button>}
+                  {wizardStep < 3
+                    ? <Button variant="primary" onClick={() => updateModal({ step: (wizardStep + 1) as 1 | 2 | 3 })}>{wizardStep === 1 ? t('providers.nextModels') : t('providers.nextTest')}</Button>
+                    : <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? t('providers.saving') : t('providers.connectProvider')}</Button>}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
