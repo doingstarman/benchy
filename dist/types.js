@@ -8,3 +8,9 @@ function maskApiKey(key) {
         return null;
     return key.length <= 4 ? '•'.repeat(key.length) : '•'.repeat(16) + key.slice(-4);
 }
+export function toCustomToolView({ apiKey, ...rest }) {
+    return { ...rest, apiKeyMask: maskApiKey(apiKey) };
+}
+export function toMcpServerView({ apiKey, ...rest }) {
+    return { ...rest, apiKeyMask: maskApiKey(apiKey) };
+}
