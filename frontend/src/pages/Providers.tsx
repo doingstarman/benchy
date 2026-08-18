@@ -132,8 +132,10 @@ interface ModalState {
   provider: ProviderView
   preset?: PresetProvider
   // Connection wizard step for a NEW provider (1 key · 2 models · 3 test). Ignored
-  // when editing an already-connected provider (that uses the flat modal).
+  // when editing an already-connected provider (that uses the tabbed modal).
   step?: 1 | 2 | 3
+  // Which tab the edit modal shows for a connected provider.
+  tab?: 'main' | 'advanced'
   selectedModels: Set<string>
   availableModels: string[]
   manualMode: boolean
@@ -899,6 +901,7 @@ export function Providers() {
 
   const isConnected = modal ? !!providers.find(p => p.id === modal.provider.id) : false
   const wizardStep: 1 | 2 | 3 = modal?.step ?? 1
+  const settingsTab: 'main' | 'advanced' = modal?.tab ?? 'main'
   const isLocal = modal?.provider.type === 'local'
   const isScript = modal?.provider.type === 'script'
   const isCustom = !modal?.preset
@@ -1031,7 +1034,7 @@ export function Providers() {
 
             {isConnected ? (
               <>
-                {/* Edit an already-connected provider — flat modal (tabs land in stage 3) */}
+                {/* Edit a connected provider — tabbed: Main (key/models/test) · Advanced (defaults) */}
                 <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
                   <ProviderHeader
                     name={modal.provider.name || t('providers.customProvider')}
@@ -1039,29 +1042,53 @@ export function Providers() {
                     connected={isConnected}
                     docsUrl={modal.preset?.docsUrl}
                   />
-                  {!isLocal && !isScript && (
-                    <ApiKeySection apiKeyMask={modal.provider.apiKeyMask} replacingKey={modal.replacingKey} newKey={modal.newKey}
-                      placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
-                      onStartReplace={() => updateModal({ replacingKey: true })} onNewKeyChange={v => updateModal({ newKey: v })} />
+                  <div style={{ display: 'flex', gap: 20, borderBottom: '0.5px solid var(--border)' }}>
+                    {(['main', 'advanced'] as const).map(tb => (
+                      <button key={tb} onClick={() => updateModal({ tab: tb })}
+                        style={{ background: 'none', border: 'none', paddingBottom: 10, fontSize: 12.5, cursor: 'pointer',
+                          color: settingsTab === tb ? 'var(--text-bright)' : 'var(--text-muted)',
+                          borderBottom: settingsTab === tb ? '2px solid var(--accent)' : '2px solid transparent' }}>
+                        {tb === 'main' ? t('providers.tabMain') : t('providers.tabAdvanced')}
+                      </button>
+                    ))}
+                  </div>
+
+                  {settingsTab === 'main' ? (
+                    <>
+                      {!isLocal && !isScript && (
+                        <ApiKeySection apiKeyMask={modal.provider.apiKeyMask} replacingKey={modal.replacingKey} newKey={modal.newKey}
+                          placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
+                          onStartReplace={() => updateModal({ replacingKey: true })} onNewKeyChange={v => updateModal({ newKey: v })} />
+                      )}
+                      {isCustom && (
+                        <div>
+                          <SectionLabel>{t('providers.providerName')}</SectionLabel>
+                          <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
+                        </div>
+                      )}
+                      {showBaseUrlAbove && (
+                        <BaseUrlSection baseUrl={modal.provider.baseUrl ?? ''} onChange={v => updateProvider({ baseUrl: v })} label={baseUrlLabel(modal.provider.type)} placeholder={baseUrlPlaceholder(modal.provider.type)} />
+                      )}
+                      <ModelsSection available={modal.availableModels} selected={modal.selectedModels} search={modal.modelSearch}
+                        manualMode={modal.manualMode} manualText={modal.manualText} fetchingModels={modal.fetchingModels}
+                        onToggle={toggleModelSelection} onSearchChange={v => updateModal({ modelSearch: v })}
+                        onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })} onManualTextChange={v => updateModal({ manualText: v })} onFetchModels={handleFetchModels} />
+                      <TestSection models={currentSelectedList} testModelId={modal.testModelId} testing={modal.testing} result={modal.testResult}
+                        onModelChange={v => updateModal({ testModelId: v })} onTest={handleTest} />
+                      <button onClick={() => updateModal({ tab: 'advanced' })}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '12px 14px', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'none', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          <span style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{t('providers.tabAdvanced')}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.advancedHint')}</span>
+                        </span>
+                        <span style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--accent)', flexShrink: 0 }}>{t('providers.open')} →</span>
+                      </button>
+                    </>
+                  ) : (
+                    <AdvancedDefaultsSection open onToggle={() => {}}
+                      baseUrl={modal.provider.baseUrl ?? ''} onBaseUrlChange={v => updateProvider({ baseUrl: v })} showBaseUrl={!showBaseUrlAbove}
+                      defaults={modal.defaults} onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })} />
                   )}
-                  {isCustom && (
-                    <div>
-                      <SectionLabel>{t('providers.providerName')}</SectionLabel>
-                      <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
-                    </div>
-                  )}
-                  {showBaseUrlAbove && (
-                    <BaseUrlSection baseUrl={modal.provider.baseUrl ?? ''} onChange={v => updateProvider({ baseUrl: v })} label={baseUrlLabel(modal.provider.type)} placeholder={baseUrlPlaceholder(modal.provider.type)} />
-                  )}
-                  <ModelsSection available={modal.availableModels} selected={modal.selectedModels} search={modal.modelSearch}
-                    manualMode={modal.manualMode} manualText={modal.manualText} fetchingModels={modal.fetchingModels}
-                    onToggle={toggleModelSelection} onSearchChange={v => updateModal({ modelSearch: v })}
-                    onManualModeToggle={() => updateModal({ manualMode: !modal.manualMode })} onManualTextChange={v => updateModal({ manualText: v })} onFetchModels={handleFetchModels} />
-                  <TestSection models={currentSelectedList} testModelId={modal.testModelId} testing={modal.testing} result={modal.testResult}
-                    onModelChange={v => updateModal({ testModelId: v })} onTest={handleTest} />
-                  <AdvancedDefaultsSection open={modal.advancedOpen} onToggle={() => updateModal({ advancedOpen: !modal.advancedOpen })}
-                    baseUrl={modal.provider.baseUrl ?? ''} onBaseUrlChange={v => updateProvider({ baseUrl: v })} showBaseUrl={!showBaseUrlAbove}
-                    defaults={modal.defaults} onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })} />
                 </div>
                 <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <ModalFooter onCancel={() => setModal(null)} onSave={handleSave} saving={saving} />
