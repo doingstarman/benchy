@@ -97,6 +97,8 @@ const ICONS: Record<string, React.ReactNode> = {
   results: <Icon><path d="M2 13.5h12" /><rect x="3" y="8" width="2.6" height="5.5" rx="0.5" /><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5" /><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5" /></Icon>,
   history: <Icon><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 2" /></Icon>,
   models: <Icon><path d="M8 2l6 3-6 3-6-3 6-3z" /><path d="M2 8l6 3 6-3" /><path d="M2 11l6 3 6-3" /></Icon>,
+  agents: <Icon><rect x="3.5" y="6" width="9" height="7" rx="1.5" /><path d="M8 3v3" /><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none" /><path d="M6 9h0.01M10 9h0.01" /></Icon>,
+  pipelines: <Icon><circle cx="3.5" cy="8" r="1.6" /><circle cx="12.5" cy="4" r="1.6" /><circle cx="12.5" cy="12" r="1.6" /><path d="M5 7.2l6-2.4M5 8.8l6 2.4" /></Icon>,
   library: <Icon><path d="M3 3.5A1.5 1.5 0 014.5 2H7v12H4.5A1.5 1.5 0 013 12.5v-9z" /><path d="M9 2h2.5A1.5 1.5 0 0113 3.5v9a1.5 1.5 0 01-1.5 1.5H9V2z" /></Icon>,
   providers: <Icon><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 01-4 4 4 4 0 01-4-4V6z" /><path d="M8 13v2" /></Icon>,
   datasets: <Icon><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></Icon>,
@@ -263,6 +265,8 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
       <Divider />
 
       <DisabledItem label={t('nav.models')} icon="models" collapsed={collapsed} soon />
+      <DisabledItem label={t('nav.agents')} icon="agents" collapsed={collapsed} soon />
+      <DisabledItem label={t('nav.pipelines')} icon="pipelines" collapsed={collapsed} soon />
       <Item to="/library" label={t('nav.library')} icon="library" collapsed={collapsed} />
       <Item to="/providers" label={t('nav.providers')} icon="providers" collapsed={collapsed} />
 

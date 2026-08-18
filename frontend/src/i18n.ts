@@ -66,6 +66,8 @@ export const DICT: Record<string, Entry> = {
   'nav.dashboard': { en: 'Dashboard', ru: 'Дашборд' },
   'nav.results': { en: 'Results', ru: 'Результаты' },
   'nav.models': { en: 'Models', ru: 'Модели' },
+  'nav.agents': { en: 'Agents', ru: 'Агенты' },
+  'nav.pipelines': { en: 'Pipelines', ru: 'Пайплайны' },
   'nav.library': { en: 'Library', ru: 'Библиотека' },
   'nav.providers': { en: 'Providers', ru: 'Провайдеры' },
   'nav.datasets': { en: 'Datasets', ru: 'Датасеты' },
