@@ -49,6 +49,13 @@ describe('Providers — status board (providers 2.0)', () => {
     expect(screen.getByText('Connect provider')).toBeTruthy()    // step 3 CTA
   })
 
+  it('gives a new custom endpoint (+ Connect) a base-URL field in the wizard', async () => {
+    view()
+    await screen.findByText('OpenAI')                            // page loaded
+    fireEvent.click(screen.getByRole('button', { name: /Connect/ })) // + Connect → custom wizard
+    expect(screen.getByText('BASE URL')).toBeTruthy()            // must be able to set the endpoint URL
+  })
+
   it('opens tabbed settings for a connected provider and switches Main → Advanced', async () => {
     view()
     // Wait for the list to resolve — OpenAI is a preset, so it renders as a stub

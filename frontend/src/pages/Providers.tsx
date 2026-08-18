@@ -1121,7 +1121,7 @@ export function Providers() {
                           <input className="prov-input" type="text" value={modal.provider.name} onChange={e => updateProvider({ name: e.target.value })} placeholder={t('providers.myProvider')} />
                         </div>
                       )}
-                      {showBaseUrlAbove && (
+                      {(showBaseUrlAbove || isCustom) && (
                         <BaseUrlSection baseUrl={modal.provider.baseUrl ?? ''} onChange={v => updateProvider({ baseUrl: v })} label={baseUrlLabel(modal.provider.type)} placeholder={baseUrlPlaceholder(modal.provider.type)} />
                       )}
                       {!isLocal && !isScript && (
@@ -1129,10 +1129,12 @@ export function Providers() {
                           placeholder={modal.preset?.placeholderKey ?? 'sk-…'}
                           onStartReplace={() => updateModal({ replacingKey: true })} onNewKeyChange={v => updateModal({ newKey: v })} />
                       )}
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderRadius: 6, background: 'var(--info-bg)', border: '0.5px solid var(--border)' }}>
-                        <span style={{ color: 'var(--info)', flexShrink: 0, marginTop: 1 }}>ⓘ</span>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('providers.wizardKeyNote')}</span>
-                      </div>
+                      {!isLocal && !isScript && (
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderRadius: 6, background: 'var(--info-bg)', border: '0.5px solid var(--border)' }}>
+                          <span style={{ color: 'var(--info)', flexShrink: 0, marginTop: 1 }}>ⓘ</span>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t('providers.wizardKeyNote')}</span>
+                        </div>
+                      )}
                     </>
                   )}
                   {wizardStep === 2 && (
