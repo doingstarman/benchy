@@ -1,7 +1,8 @@
 // Per-1M-token USD prices — a convenience table, not an authority. Vendors change
 // rates, so a model absent here shows "—" rather than a confidently-wrong number
 // (a wrong cost reads as fact and is worse than no cost). A per-provider override
-// is a planned follow-up; until then this table is the only source.
+// (set on the Providers screen) wins over this table when present — see
+// resolvePricing.
 //
 // Pure data + math, no node imports — the frontend bundles it directly.
 
@@ -16,9 +17,20 @@ export const DEFAULT_PRICING: Record<string, ModelPricing> = {
 }
 
 // A run's model id is "providerId:model"; price by the model part.
+export function modelName(model: string): string {
+  return model.includes(':') ? model.slice(model.indexOf(':') + 1) : model
+}
+
 export function pricingFor(model: string): ModelPricing | null {
-  const name = model.includes(':') ? model.slice(model.indexOf(':') + 1) : model
-  return DEFAULT_PRICING[name] ?? null
+  return DEFAULT_PRICING[modelName(model)] ?? null
+}
+
+// The provider's own price for a model wins over the curated table; the table is
+// the fallback, and null when neither has it. `overrides` is the provider's
+// pricing map (model name → prices).
+export function resolvePricing(model: string, overrides?: Record<string, ModelPricing>): ModelPricing | null {
+  const name = modelName(model)
+  return overrides?.[name] ?? DEFAULT_PRICING[name] ?? null
 }
 
 // null when either token count is missing: a cost from half the usage reads as

@@ -6,6 +6,7 @@ import { IconChevron, IconSliders } from '../components/icons'
 import { useT, t } from '../i18n'
 import type { ProviderDraft, ProviderUpsert } from '../api'
 import type { ProviderView, ProviderType, ProviderDefaults } from '../../../src/types'
+import type { ModelPricing } from '../../../src/pricing'
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 
 // Deliberately the FACTORY values, not the app defaults from Settings: this
@@ -599,6 +600,75 @@ function AdvancedDefaultsSection({ open, onToggle, baseUrl, onBaseUrlChange, sho
   )
 }
 
+interface PricingSectionProps {
+  models: string[]
+  pricing: Record<string, ModelPricing> | undefined
+  onChange: (pricing: Record<string, ModelPricing> | undefined) => void
+}
+
+// Per-model price override. Inputs are kept as local strings so a half-typed
+// price (one field filled) doesn't have to satisfy ModelPricing; only complete
+// non-negative pairs are lifted up into the provider (the rest are "no override",
+// so the curated DEFAULT_PRICING table is used and cost still shows).
+function PricingSection({ models, pricing, onChange }: PricingSectionProps) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<Record<string, { i: string; o: string }>>(() => {
+    const d: Record<string, { i: string; o: string }> = {}
+    for (const m of models) {
+      const p = pricing?.[m]
+      d[m] = { i: p ? String(p.inputPer1M) : '', o: p ? String(p.outputPer1M) : '' }
+    }
+    return d
+  })
+  if (models.length === 0) return null
+
+  function edit(model: string, field: 'i' | 'o', raw: string) {
+    const next = { ...draft, [model]: { ...(draft[model] ?? { i: '', o: '' }), [field]: raw } }
+    setDraft(next)
+    const out: Record<string, ModelPricing> = {}
+    for (const [m, { i, o }] of Object.entries(next)) {
+      const inN = Number(i), outN = Number(o)
+      if (i.trim() === '' || o.trim() === '') continue
+      if (!Number.isFinite(inN) || !Number.isFinite(outN) || inN < 0 || outN < 0) continue
+      out[m] = { inputPer1M: inN, outputPer1M: outN }
+    }
+    onChange(Object.keys(out).length ? out : undefined)
+  }
+
+  const headCell = { fontSize: 10, fontWeight: 600 as const, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: '0.06em', textAlign: 'right' as const }
+  return (
+    <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{t('providers.pricingTitle')}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('providers.pricingHint')}</span>
+        </div>
+        <span style={{ color: 'var(--text-muted)', display: 'flex', flexShrink: 0 }}><IconChevron open={open} size={13} /></span>
+      </button>
+      {open && (
+        <div style={{ padding: '12px 14px 14px', borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 92px 92px', columnGap: 10, rowGap: 8, alignItems: 'center' }}>
+            <span />
+            <span style={headCell}>{t('providers.pricingIn')}</span>
+            <span style={headCell}>{t('providers.pricingOut')}</span>
+            {models.map(m => (
+              <Fragment key={m}>
+                <span style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m}>{m}</span>
+                <input className="prov-input" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—"
+                  value={draft[m]?.i ?? ''} onChange={e => edit(m, 'i', e.target.value)} style={{ textAlign: 'right' }} />
+                <input className="prov-input" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—"
+                  value={draft[m]?.o ?? ''} onChange={e => edit(m, 'o', e.target.value)} style={{ textAlign: 'right' }} />
+              </Fragment>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 10 }}>{t('providers.pricingPer1M')}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface ModalFooterProps {
   onCancel: () => void
   onSave: () => void
@@ -1085,9 +1155,13 @@ export function Providers() {
                       </button>
                     </>
                   ) : (
-                    <AdvancedDefaultsSection open onToggle={() => {}}
-                      baseUrl={modal.provider.baseUrl ?? ''} onBaseUrlChange={v => updateProvider({ baseUrl: v })} showBaseUrl={!showBaseUrlAbove}
-                      defaults={modal.defaults} onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })} />
+                    <>
+                      <AdvancedDefaultsSection open onToggle={() => {}}
+                        baseUrl={modal.provider.baseUrl ?? ''} onBaseUrlChange={v => updateProvider({ baseUrl: v })} showBaseUrl={!showBaseUrlAbove}
+                        defaults={modal.defaults} onChange={patch => updateModal({ defaults: { ...modal.defaults, ...patch } })} />
+                      <PricingSection models={currentSelectedList} pricing={modal.provider.pricing}
+                        onChange={pricing => updateProvider({ pricing })} />
+                    </>
                   )}
                 </div>
                 <div style={{ padding: '16px 24px', borderTop: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -1,3 +1,5 @@
+import type { ModelPricing } from './pricing.js'
+
 export type ProviderType =
   | 'openai'
   | 'anthropic'
@@ -44,6 +46,9 @@ export interface Provider {
   timeout?: number
   retries?: number
   defaults?: ProviderDefaults
+  // Per-model USD price overrides (model name → per-1M prices), preferred over the
+  // curated DEFAULT_PRICING table. Not a secret, so it rides along in ProviderView.
+  pricing?: Record<string, ModelPricing>
 }
 
 // What the API hands back for a provider. `apiKey` is absent by construction,

@@ -68,5 +68,19 @@ describe('Providers — status board (providers 2.0)', () => {
     fireEvent.click(screen.getAllByText('Advanced')[0])          // the tab
     // Advanced tab drops the key/models sections.
     expect(screen.queryByText('Replace key')).toBeNull()
+    // …and offers a per-model price override.
+    expect(screen.getByText('Pricing')).toBeTruthy()
+  })
+
+  it('exposes a per-model price input in the Advanced tab', async () => {
+    view()
+    await screen.findByText('2 models')
+    fireEvent.click(screen.getByText('OpenAI'))
+    await screen.findByText('Main')
+    fireEvent.click(screen.getAllByText('Advanced')[0])
+    fireEvent.click(screen.getByText('Pricing'))                 // expand the section
+    // One row per connected model, each addressable for a price.
+    expect(screen.getByTitle('gpt-4o')).toBeTruthy()
+    expect(screen.getByTitle('gpt-4o-mini')).toBeTruthy()
   })
 })

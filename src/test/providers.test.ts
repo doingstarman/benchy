@@ -204,6 +204,33 @@ describe('provider validation at the boundary', () => {
   })
 })
 
+describe('per-model price override', () => {
+  it('round-trips valid prices and drops malformed / negative entries', async () => {
+    const { status, body } = await post<{ data: Provider }>('/api/providers', {
+      name: 'Priced', type: 'openai-compatible', baseUrl: UPSTREAM, models: ['a', 'b', 'c'],
+      pricing: {
+        a: { inputPer1M: 3, outputPer1M: 12 },   // kept
+        b: { inputPer1M: -1, outputPer1M: 5 },    // dropped: negative
+        c: { inputPer1M: 'x', outputPer1M: 2 },   // dropped: not a number
+      },
+    })
+    expect(status).toBe(201)
+    expect(body.data.pricing).toEqual({ a: { inputPer1M: 3, outputPer1M: 12 } })
+
+    // Persists and comes back through the masked view (pricing is not a secret).
+    const listed = await get<{ data: Provider[] }>('/api/providers')
+    expect(listed.body.data[0].pricing).toEqual({ a: { inputPer1M: 3, outputPer1M: 12 } })
+  })
+
+  it('stores nothing when no entry is valid', async () => {
+    const { body } = await post<{ data: Provider }>('/api/providers', {
+      name: 'NoPrice', type: 'openai-compatible', baseUrl: UPSTREAM, models: ['a'],
+      pricing: { a: { inputPer1M: 'nope' } },
+    })
+    expect(body.data.pricing).toBeUndefined()
+  })
+})
+
 describe('probing a draft', () => {
   it('lists and tests what the form holds, without saving it', async () => {
     const before = await get<{ data: Provider[] }>('/api/providers')

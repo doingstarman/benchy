@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useT, t } from '../i18n'
 import { datasetsApi, providersApi, runsApi, uploadsApi, useSSE, type ArenaState } from '../api'
 import type { Dataset, DatasetItem, DatasetVar, DatasetVarType, ProviderView, Result } from '../../../src/types'
-import { computeCost, formatCost, pricingFor } from '../../../src/pricing'
+import { computeCost, formatCost, resolvePricing } from '../../../src/pricing'
 
 const VAR_TYPES: DatasetVarType[] = ['text', 'date', 'number']
 type Tab = 'schema' | 'markup' | 'run'
@@ -973,8 +973,10 @@ export function DatasetDetail() {
                     const times = rr.map(r => r.metrics.totalTime).filter((tm): tm is number => tm != null)
                     const avgSec = times.length ? times.reduce((a, b) => a + b, 0) / times.length / 1000 : null
                     const tokens = rr.reduce((s, r) => s + (r.metrics.inputTokens ?? 0) + (r.metrics.outputTokens ?? 0), 0)
+                    const pid = row.model.includes(':') ? row.model.slice(0, row.model.indexOf(':')) : ''
+                    const overrides = providers.find(p => p.id === pid)?.pricing
                     const cost = rr.reduce((acc, r) => {
-                      const c = computeCost(pricingFor(row.model), r.metrics.inputTokens ?? null, r.metrics.outputTokens ?? null)
+                      const c = computeCost(resolvePricing(row.model, overrides), r.metrics.inputTokens ?? null, r.metrics.outputTokens ?? null)
                       return c == null ? acc : { sum: acc.sum + c, known: true }
                     }, { sum: 0, known: false })
                     const h = heat(row.overall)
