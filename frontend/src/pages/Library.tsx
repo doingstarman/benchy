@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useT, t } from '../i18n'
 import { toolsApi, skillsApi, mcpApi } from '../api'
-import type { CustomTool, Skill, McpServer } from '../../../src/types'
+import type { Skill, CustomToolView, McpServerView } from '../../../src/types'
 
 type Tab = 'tools' | 'skills' | 'mcp'
+
+// The list returns a masked view (no raw key), so a draft carries the mask for
+// display plus a write-only `apiKey` that is set only while replacing.
+type ToolDraft = CustomToolView & { apiKey?: string }
+type McpDraft = McpServerView & { apiKey?: string }
 
 // Built-in tools, shown read-only in the Tools tab and selectable by a skill.
 const BUILTIN_TOOLS = [
@@ -38,6 +43,28 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       </div>
       {children}
     </div>
+  )
+}
+
+// Write-only key field mirroring the provider modal: while a key is stored we
+// show its mask and a "replace" affordance (leaving apiKey undefined → keep it);
+// starting a replace switches to an input where '' erases and a value replaces.
+function KeyField({ mask, value, onChange }: { mask: string | null; value: string | undefined; onChange: (v: string | undefined) => void }) {
+  const replacing = value !== undefined
+  return (
+    <Field label={t('library.apiKey')} hint={t('library.apiKeyOpt')}>
+      {mask && !replacing ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="lib-in" style={{ flex: 1, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{mask}</span>
+          <button onClick={() => onChange('')} style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, padding: '6px 10px', whiteSpace: 'nowrap' }}>
+            {t('library.replaceKey')}
+          </button>
+        </div>
+      ) : (
+        <input className="lib-in" type="password" autoFocus={replacing && !!mask} value={value ?? ''}
+          onChange={e => onChange(e.target.value)} />
+      )}
+    </Field>
   )
 }
 
@@ -91,16 +118,16 @@ function Modal({ title, onClose, onSave, onDelete, saving, children }: {
 export function Library() {
   const { t } = useT()
   const [tab, setTab] = useState<Tab>('tools')
-  const [tools, setTools] = useState<CustomTool[]>([])
+  const [tools, setTools] = useState<CustomToolView[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
-  const [mcp, setMcp] = useState<McpServer[]>([])
+  const [mcp, setMcp] = useState<McpServerView[]>([])
   const [saving, setSaving] = useState(false)
 
-  const [toolDraft, setToolDraft] = useState<CustomTool | null>(null)
+  const [toolDraft, setToolDraft] = useState<ToolDraft | null>(null)
   const [paramsText, setParamsText] = useState('{}')
   const [paramsErr, setParamsErr] = useState(false)
   const [skillDraft, setSkillDraft] = useState<Skill | null>(null)
-  const [mcpDraft, setMcpDraft] = useState<McpServer | null>(null)
+  const [mcpDraft, setMcpDraft] = useState<McpDraft | null>(null)
 
   useEffect(() => { void reload() }, [])
   async function reload() {
@@ -109,8 +136,8 @@ export function Library() {
   }
 
   // ── tool editor ──
-  function openTool(existing?: CustomTool) {
-    const d = existing ?? { id: uid(), name: '', description: '', url: '', parameters: { type: 'object' as const, properties: {} }, enabled: true }
+  function openTool(existing?: CustomToolView) {
+    const d: ToolDraft = existing ?? { id: uid(), name: '', description: '', url: '', parameters: { type: 'object' as const, properties: {} }, apiKeyMask: null, enabled: true }
     setToolDraft(d)
     setParamsText(JSON.stringify(d.parameters, null, 2))
     setParamsErr(false)
@@ -154,8 +181,8 @@ export function Library() {
   }
 
   // ── mcp editor ──
-  function openMcp(existing?: McpServer) {
-    setMcpDraft(existing ?? { id: uid(), name: '', transport: 'http', url: '', enabled: true })
+  function openMcp(existing?: McpServerView) {
+    setMcpDraft(existing ?? { id: uid(), name: '', transport: 'http', url: '', apiKeyMask: null, enabled: true })
   }
   async function saveMcp() {
     if (!mcpDraft) return
@@ -236,9 +263,7 @@ export function Library() {
           <Field label={t('library.url')} hint={t('library.urlHint')}>
             <input className="lib-in" value={toolDraft.url} onChange={e => setToolDraft({ ...toolDraft, url: e.target.value })} placeholder="http://127.0.0.1:8080/tool" />
           </Field>
-          <Field label={t('library.apiKey')} hint={t('library.apiKeyOpt')}>
-            <input className="lib-in" type="password" value={toolDraft.apiKey ?? ''} onChange={e => setToolDraft({ ...toolDraft, apiKey: e.target.value })} />
-          </Field>
+          <KeyField mask={toolDraft.apiKeyMask} value={toolDraft.apiKey} onChange={v => setToolDraft({ ...toolDraft, apiKey: v })} />
           <Field label={t('library.params')} hint={paramsErr ? t('library.paramsInvalid') : t('library.paramsHint')}>
             <textarea className="lib-in" style={{ minHeight: 110, resize: 'vertical', ...(paramsErr ? { borderColor: 'var(--error)' } : {}) }}
               value={paramsText} onChange={e => { setParamsText(e.target.value); setParamsErr(false) }} spellCheck={false} />
@@ -299,9 +324,7 @@ export function Library() {
               <input className="lib-in" value={mcpDraft.url ?? ''} onChange={e => setMcpDraft({ ...mcpDraft, url: e.target.value })} placeholder="https://mcp.example.com" />
             </Field>
           )}
-          <Field label={t('library.apiKey')} hint={t('library.apiKeyOpt')}>
-            <input className="lib-in" type="password" value={mcpDraft.apiKey ?? ''} onChange={e => setMcpDraft({ ...mcpDraft, apiKey: e.target.value })} />
-          </Field>
+          <KeyField mask={mcpDraft.apiKeyMask} value={mcpDraft.apiKey} onChange={v => setMcpDraft({ ...mcpDraft, apiKey: v })} />
         </Modal>
       )}
     </div>

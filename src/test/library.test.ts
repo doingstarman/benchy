@@ -146,6 +146,62 @@ describe('CRUD /api/tools', () => {
   })
 })
 
+describe('library — key masking + tri-state edit', () => {
+  // The raw Bearer secret must never leave the backend; edits must not wipe it.
+  async function rawToolKey(id: string): Promise<string | undefined> {
+    const { getCustomTools } = await import('../config.js')
+    return (await getCustomTools()).find(t => t.id === id)?.apiKey
+  }
+
+  it('masks the key on create and list — the raw secret never travels', async () => {
+    const created = await post('/api/tools', { name: 'keyed', url: TOOL_URL, apiKey: 'secret-key-1234', parameters: { type: 'object', properties: {} } })
+    expect(created.status).toBe(201)
+    expect(created.body.data!.apiKey).toBeUndefined()
+    expect(created.body.data!.apiKeyMask).toBe('•'.repeat(16) + '1234')
+
+    const [row] = await list('/api/tools') as Array<Record<string, unknown>>
+    expect(row.apiKey).toBeUndefined()
+    expect(row.apiKeyMask).toBe('•'.repeat(16) + '1234')
+    // …but the real key is on disk, unmasked, for the actual tool call.
+    expect(await rawToolKey(row.id as string)).toBe('secret-key-1234')
+  })
+
+  it('keeps the key when an edit omits it (absent → keep)', async () => {
+    const created = await post('/api/tools', { name: 'keeper', url: TOOL_URL, apiKey: 'orig-key-9999', parameters: { type: 'object', properties: {} } })
+    const id = created.body.data!.id as string
+    // Rename without resending the key — the stored secret must survive.
+    const edited = await post('/api/tools', { id, name: 'keeper', url: TOOL_URL, description: 'renamed', parameters: { type: 'object', properties: {} } })
+    expect(edited.status).toBe(201)
+    expect(edited.body.data!.apiKeyMask).toBe('•'.repeat(16) + '9999')
+    expect(await rawToolKey(id)).toBe('orig-key-9999')
+  })
+
+  it('erases the key on empty-string and replaces it on a new value', async () => {
+    const created = await post('/api/tools', { name: 'swap', url: TOOL_URL, apiKey: 'first-key-1111', parameters: { type: 'object', properties: {} } })
+    const id = created.body.data!.id as string
+
+    const replaced = await post('/api/tools', { id, name: 'swap', url: TOOL_URL, apiKey: 'second-key-2222', parameters: { type: 'object', properties: {} } })
+    expect(replaced.body.data!.apiKeyMask).toBe('•'.repeat(16) + '2222')
+    expect(await rawToolKey(id)).toBe('second-key-2222')
+
+    const erased = await post('/api/tools', { id, name: 'swap', url: TOOL_URL, apiKey: '', parameters: { type: 'object', properties: {} } })
+    expect(erased.body.data!.apiKeyMask).toBeNull()
+    expect(await rawToolKey(id)).toBeUndefined()
+  })
+
+  it('masks and preserves the MCP key the same way', async () => {
+    const { getMcpServers } = await import('../config.js')
+    const created = await post('/api/mcp', { name: 'SecureMCP', transport: 'http', url: 'https://mcp.example.com', apiKey: 'mcp-key-7777' })
+    const id = created.body.data!.id as string
+    expect(created.body.data!.apiKey).toBeUndefined()
+    expect(created.body.data!.apiKeyMask).toBe('•'.repeat(16) + '7777')
+
+    // Edit the URL without the key → key preserved.
+    await post('/api/mcp', { id, name: 'SecureMCP', transport: 'http', url: 'https://mcp2.example.com' })
+    expect((await getMcpServers()).find(m => m.id === id)?.apiKey).toBe('mcp-key-7777')
+  })
+})
+
 describe('CRUD /api/skills', () => {
   it('creates and lists a skill with instruction + tool refs', async () => {
     const res = await post('/api/skills', { name: 'Reviewer', instruction: 'Be terse', toolIds: ['calc'] })

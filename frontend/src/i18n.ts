@@ -91,6 +91,7 @@ export const DICT: Record<string, Entry> = {
   'library.urlHint': { en: 'benchy POSTs the arguments here; localhost is allowed', ru: 'benchy POSTит сюда аргументы; localhost можно' },
   'library.apiKey': { en: 'API key', ru: 'API-ключ' },
   'library.apiKeyOpt': { en: 'optional — sent as Bearer', ru: 'опционально — уходит как Bearer' },
+  'library.replaceKey': { en: 'Replace key', ru: 'Заменить ключ' },
   'library.params': { en: 'Arguments (JSON Schema)', ru: 'Аргументы (JSON Schema)' },
   'library.paramsHint': { en: 'a JSON-Schema object; leave as {} for no arguments', ru: 'объект JSON-Schema; оставь {} если аргументов нет' },
   'library.paramsInvalid': { en: 'Not valid JSON', ru: 'Невалидный JSON' },

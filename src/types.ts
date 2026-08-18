@@ -182,6 +182,19 @@ export interface McpServer {
   enabled: boolean
 }
 
+// Library entries carry a Bearer secret, so — exactly like ProviderView — the API
+// hands back a masked view: the raw key never leaves the backend, only its mask
+// travels, and a frontend that reaches for `apiKey` stops compiling.
+export type CustomToolView = Omit<CustomTool, 'apiKey'> & { apiKeyMask: string | null }
+export function toCustomToolView({ apiKey, ...rest }: CustomTool): CustomToolView {
+  return { ...rest, apiKeyMask: maskApiKey(apiKey) }
+}
+
+export type McpServerView = Omit<McpServer, 'apiKey'> & { apiKeyMask: string | null }
+export function toMcpServerView({ apiKey, ...rest }: McpServer): McpServerView {
+  return { ...rest, apiKeyMask: maskApiKey(apiKey) }
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string

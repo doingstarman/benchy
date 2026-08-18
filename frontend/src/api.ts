@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, Skill, McpServer, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -62,10 +62,16 @@ export interface ProviderDraft {
 
 // ─── library (tools / skills / mcp) ──────────────────────────────────────────
 
+// Same write-only tri-state key as providers: the list returns a masked View, so
+// the key field is omitted (keep) unless the user starts a replace ('' erases, a
+// value replaces).
+export type CustomToolUpsert = Omit<CustomToolView, 'apiKeyMask'> & { apiKey?: string }
+export type McpServerUpsert = Omit<McpServerView, 'apiKeyMask'> & { apiKey?: string }
+
 export const toolsApi = {
-  list: () => apiFetch<CustomTool[]>('/api/tools'),
-  upsert: (t: Omit<CustomTool, 'id'> & { id?: string }) =>
-    apiFetch<CustomTool>('/api/tools', { method: 'POST', body: JSON.stringify(t) }),
+  list: () => apiFetch<CustomToolView[]>('/api/tools'),
+  upsert: (t: CustomToolUpsert) =>
+    apiFetch<CustomToolView>('/api/tools', { method: 'POST', body: JSON.stringify(t) }),
   remove: (id: string) => fetch(`/api/tools/${id}`, { method: 'DELETE' }),
 }
 export const skillsApi = {
@@ -75,9 +81,9 @@ export const skillsApi = {
   remove: (id: string) => fetch(`/api/skills/${id}`, { method: 'DELETE' }),
 }
 export const mcpApi = {
-  list: () => apiFetch<McpServer[]>('/api/mcp'),
-  upsert: (m: Omit<McpServer, 'id'> & { id?: string }) =>
-    apiFetch<McpServer>('/api/mcp', { method: 'POST', body: JSON.stringify(m) }),
+  list: () => apiFetch<McpServerView[]>('/api/mcp'),
+  upsert: (m: McpServerUpsert) =>
+    apiFetch<McpServerView>('/api/mcp', { method: 'POST', body: JSON.stringify(m) }),
   remove: (id: string) => fetch(`/api/mcp/${id}`, { method: 'DELETE' }),
 }
 

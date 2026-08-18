@@ -7,7 +7,17 @@ import {
 } from '../config.js'
 import { TOOL_IDS } from '../tools/index.js'
 import { isLocalRequest } from './csrf.js'
+import { toCustomToolView, toMcpServerView } from '../types.js'
 import type { CustomTool, Skill, McpServer, ToolParams } from '../types.js'
+
+// The client no longer holds the key, so it can't resend it unchanged on an
+// unrelated edit. Three cases, mirroring the provider routes:
+//   absent  → keep what is stored (renaming a tool must not wipe its key)
+//   ''      → erase it
+//   a value → replace it
+function resolveKey(sent: string | undefined, stored: string | undefined): string | undefined {
+  return sent === undefined ? stored : (sent || undefined)
+}
 
 // The name a model calls the tool by — must be a valid function identifier for
 // every provider's tool-calling schema. Capped at 64: OpenAI/Anthropic reject
@@ -36,7 +46,7 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     })
 
   // ─── Custom tools ─────────────────────────────────────────────────────────
-  scope.get('/api/tools', async () => ({ data: await getCustomTools() }))
+  scope.get('/api/tools', async () => ({ data: (await getCustomTools()).map(toCustomToolView) }))
 
   scope.post<{ Body: Partial<CustomTool> }>('/api/tools', async (req, reply) => {
     const b = req.body
@@ -59,17 +69,19 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'url must be an http(s) endpoint' })
     }
     const params = parseParams(b.parameters) ?? { type: 'object' as const, properties: {} }
+    const stored = b.id ? existing.find(t => t.id === b.id) : undefined
+    const apiKey = resolveKey(b.apiKey, stored?.apiKey)
     const tool: CustomTool = {
       id: b.id ?? randomUUID(),
       name,
       description: typeof b.description === 'string' ? b.description.slice(0, 1024) : '',
       parameters: params,
       url: b.url.trim(),
-      ...(b.apiKey ? { apiKey: b.apiKey } : {}),
+      ...(apiKey ? { apiKey } : {}),
       enabled: b.enabled ?? true,
     }
     await upsertCustomTool(tool)
-    return reply.code(201).send({ data: tool })
+    return reply.code(201).send({ data: toCustomToolView(tool) })
   })
 
   scope.delete<{ Params: { id: string } }>('/api/tools/:id', async (req, reply) => {
@@ -102,7 +114,7 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
   })
 
   // ─── MCP servers (registry only) ──────────────────────────────────────────
-  scope.get('/api/mcp', async () => ({ data: await getMcpServers() }))
+  scope.get('/api/mcp', async () => ({ data: (await getMcpServers()).map(toMcpServerView) }))
 
   scope.post<{ Body: Partial<McpServer> }>('/api/mcp', async (req, reply) => {
     const b = req.body
@@ -113,17 +125,19 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
     if (transport === 'stdio' ? !b.command?.trim() : !b.url?.trim()) {
       return reply.code(400).send({ error: transport === 'stdio' ? 'command is required for stdio' : 'url is required for sse/http' })
     }
+    const stored = b.id ? (await getMcpServers()).find(m => m.id === b.id) : undefined
+    const apiKey = resolveKey(b.apiKey, stored?.apiKey)
     const server: McpServer = {
       id: b.id ?? randomUUID(),
       name: b.name.trim(),
       transport,
       ...(b.url ? { url: b.url.trim() } : {}),
       ...(b.command ? { command: b.command.trim() } : {}),
-      ...(b.apiKey ? { apiKey: b.apiKey } : {}),
+      ...(apiKey ? { apiKey } : {}),
       enabled: b.enabled ?? true,
     }
     await upsertMcpServer(server)
-    return reply.code(201).send({ data: server })
+    return reply.code(201).send({ data: toMcpServerView(server) })
   })
 
   scope.delete<{ Params: { id: string } }>('/api/mcp/:id', async (req, reply) => {
