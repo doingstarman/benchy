@@ -76,6 +76,131 @@ const RESPONSES: Record<string, string> = {
 
 const DEFAULT_RESPONSE = `The transformer architecture processes sequences using self-attention, allowing each token to attend to all others in parallel. Attention(Q,K,V) = softmax(QK^T/√d_k)V. This parallelism over the sequence — unlike the sequential computation in RNNs — made transformers the foundation of modern large language models.`
 
+// A self-contained, dependency-free HTML game — streamed by every mock model when
+// the prompt mentions "game". Long enough to exercise the answer scroll, and it
+// runs in the sandboxed artifact preview (no network, no external assets).
+const GAME_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Snake</title>
+<style>
+  :root { --bg:#0b0f17; --grid:#141b2a; --snake:#39ff14; --head:#00e5ff; --food:#ff2d95; --text:#e6edf3; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body { background: radial-gradient(circle at 50% 0%, #16233b, var(--bg)); color: var(--text);
+         font-family: system-ui, -apple-system, sans-serif; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; gap:14px; min-height:100vh; user-select:none; }
+  h1 { margin:0; font-size:20px; letter-spacing:3px; text-transform:uppercase;
+       color: var(--snake); text-shadow:0 0 12px rgba(57,255,20,.6); }
+  .hud { display:flex; gap:24px; font-size:14px; color:#9fb0c3; font-variant-numeric: tabular-nums; }
+  .hud b { color: var(--text); }
+  .wrap { position: relative; }
+  canvas { background: var(--grid); border-radius:12px;
+           box-shadow: 0 0 40px rgba(0,229,255,.15), inset 0 0 0 1px rgba(255,255,255,.05); }
+  .over { position:absolute; inset:0; display:none; flex-direction:column; align-items:center;
+          justify-content:center; gap:10px; background: rgba(11,15,23,.82); border-radius:12px; }
+  .over.show { display:flex; }
+  .over h2 { margin:0; color: var(--food); text-shadow:0 0 12px rgba(255,45,149,.6); font-size:26px; }
+  .btn { border:1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color:var(--text);
+         padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .btn:hover { background: rgba(255,255,255,.12); }
+  .hint { font-size:12px; color:#7c8ba1; }
+</style>
+</head>
+<body>
+  <h1>Neon Snake</h1>
+  <div class="hud"><span>Score <b id="score">0</b></span><span>Best <b id="best">0</b></span></div>
+  <div class="wrap">
+    <canvas id="c" width="400" height="400"></canvas>
+    <div class="over" id="over">
+      <h2>Game Over</h2>
+      <div id="overscore" class="hint"></div>
+      <button class="btn" id="again">Play again</button>
+    </div>
+  </div>
+  <div class="hint">Arrow keys or WASD &middot; Space to restart</div>
+<script>
+  var CELL = 20, N = 20;
+  var ctx = document.getElementById('c').getContext('2d');
+  var scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
+  var over = document.getElementById('over'), overScore = document.getElementById('overscore');
+  var snake, dir, nextDir, food, score, best = 0, speed, timer;
+
+  function reset() {
+    snake = [{x:8,y:10},{x:7,y:10},{x:6,y:10}];
+    dir = {x:1,y:0}; nextDir = dir;
+    score = 0; speed = 130;
+    scoreEl.textContent = '0';
+    over.classList.remove('show');
+    placeFood();
+    clearInterval(timer);
+    timer = setInterval(tick, speed);
+    draw();
+  }
+  function placeFood() {
+    do { food = { x: (Math.random()*N)|0, y: (Math.random()*N)|0 }; }
+    while (snake.some(function(s){ return s.x===food.x && s.y===food.y; }));
+  }
+  function tick() {
+    dir = nextDir;
+    var head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+    var hit = head.x<0 || head.y<0 || head.x>=N || head.y>=N ||
+              snake.some(function(s){ return s.x===head.x && s.y===head.y; });
+    if (hit) { return gameOver(); }
+    snake.unshift(head);
+    if (head.x===food.x && head.y===food.y) {
+      score += 10; scoreEl.textContent = score;
+      if (score > best) { best = score; bestEl.textContent = best; }
+      placeFood();
+      if (speed > 60) { speed -= 4; clearInterval(timer); timer = setInterval(tick, speed); }
+    } else {
+      snake.pop();
+    }
+    draw();
+  }
+  function draw() {
+    ctx.clearRect(0,0,400,400);
+    ctx.shadowColor = '#ff2d95'; ctx.shadowBlur = 16; ctx.fillStyle = '#ff2d95';
+    ctx.fillRect(food.x*CELL+3, food.y*CELL+3, CELL-6, CELL-6);
+    for (var i=0;i<snake.length;i++) {
+      var s = snake[i];
+      ctx.fillStyle = i===0 ? '#00e5ff' : '#39ff14';
+      ctx.shadowColor = i===0 ? '#00e5ff' : '#39ff14'; ctx.shadowBlur = 8;
+      ctx.fillRect(s.x*CELL+1, s.y*CELL+1, CELL-2, CELL-2);
+    }
+    ctx.shadowBlur = 0;
+  }
+  function gameOver() {
+    clearInterval(timer);
+    overScore.textContent = 'You scored ' + score;
+    over.classList.add('show');
+  }
+  function turn(x,y) { if (dir.x + x !== 0 || dir.y + y !== 0) nextDir = {x:x,y:y}; }
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    if (k==='arrowup'||k==='w') turn(0,-1);
+    else if (k==='arrowdown'||k==='s') turn(0,1);
+    else if (k==='arrowleft'||k==='a') turn(-1,0);
+    else if (k==='arrowright'||k==='d') turn(1,0);
+    else if (k===' ') { reset(); }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.getElementById('again').addEventListener('click', reset);
+  reset();
+</script>
+</body>
+</html>`
+
+const GAME_RESPONSE = `Here's a small self-contained game — **Neon Snake**, a single HTML file with no dependencies. Hit ▶ Run to play it right here in the sandbox, or copy it into an \`.html\` file. Controls: arrow keys or WASD, Space to restart.
+
+\`\`\`html
+${GAME_HTML}
+\`\`\`
+
+How it works: the board is a 20×20 grid drawn on a \`<canvas>\`. The snake is just an array of cells; every tick advances the head one step in the current direction, and the body follows by popping the tail — unless the head lands on food, in which case the tail stays (the snake grows) and the loop speeds up a little. Hitting a wall or your own body ends the round. It's a tiny state machine: \`reset\` seeds three segments, \`tick\` moves and checks collisions, \`draw\` paints food and snake with a neon glow, and keyboard input only queues a turn that isn't a direct reversal.`
+
 // Simulate realistic latency: first token delay varies per "provider"
 const TTFS_MS: Record<string, number> = {
   'gpt-4o': 420,
@@ -90,6 +215,9 @@ const TTFS_MS: Record<string, number> = {
 }
 
 function getResponse(model: string, lastUserMessage?: string): string {
+  // "game" anywhere in the prompt → every mock model ships a playable HTML game
+  // (a long, runnable answer for exercising the artifact preview + scroll).
+  if (lastUserMessage && /\bgame\b/i.test(lastUserMessage)) return GAME_RESPONSE
   if (lastUserMessage) {
     const entry = DATASET.find(d => d.match.test(lastUserMessage.trim()))
     if (entry) {
