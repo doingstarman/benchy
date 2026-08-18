@@ -123,6 +123,8 @@ export const DICT: Record<string, Entry> = {
   'common.on': { en: 'On', ru: 'Вкл' },
   'common.off': { en: 'Off', ru: 'Выкл' },
   'common.error': { en: 'Error', ru: 'Ошибка' },
+  'scroll.top': { en: 'Scroll to top', ru: 'В начало' },
+  'scroll.bottom': { en: 'Scroll to bottom', ru: 'В конец' },
 
   // ── datasets ──
   'dataset.title': { en: 'Datasets', ru: 'Датасеты' },

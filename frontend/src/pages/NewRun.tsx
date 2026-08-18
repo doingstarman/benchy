@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi, settingsApi } from '../api'
-import { splitFencedSegments } from '../lib/artifact'
+import { splitFencedSegments, wholeAnswerHtml, type Segment } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
 import { Button, IconButton, PillToggle } from '../components/ui'
@@ -238,6 +238,65 @@ function MetricsStrip({ result: r, isFastest, cost }: { result: UIResult; isFast
         <div style={{ height: 38, display: 'flex', borderTop: '0.5px solid var(--border)' }}>
           {extra.map(({ l, v }, i) => cell(l, v, false, i === extra.length - 1))}
           <div style={{ width: 28, flexShrink: 0 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Scrollable answer viewport. Floating jump-to-top / jump-to-bottom controls
+// appear once the content overflows; while a response streams the view sticks to
+// the bottom until the reader scrolls up, then it stays where they put it.
+function AnswerBody({ streaming, expanded, mono, children }: {
+  streaming: boolean; expanded: boolean; mono: boolean; children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
+  const [overflow, setOverflow] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (streaming && stick.current) el.scrollTop = el.scrollHeight
+    const over = el.scrollHeight > el.clientHeight + 8
+    setOverflow(prev => (prev === over ? prev : over))
+  })
+
+  function onScroll() {
+    const el = ref.current
+    if (!el) return
+    // "Near the bottom" re-arms auto-follow; scrolling up releases it.
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+  }
+  const toTop = () => { const el = ref.current; if (el) { el.scrollTop = 0; stick.current = false } }
+  const toBottom = () => { const el = ref.current; if (el) { el.scrollTop = el.scrollHeight; stick.current = true } }
+
+  const jump = (onClick: () => void, up: boolean, title: string) => (
+    <button onClick={onClick} title={title}
+      style={{ width: 26, height: 26, borderRadius: 6, border: '0.5px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 5px rgba(0,0,0,0.3)' }}>
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        {up ? <path d="M4 10l4-4 4 4" /> : <path d="M4 6l4 4 4-4" />}
+      </svg>
+    </button>
+  )
+
+  return (
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
+      <div ref={ref} onScroll={onScroll} className="col-body"
+        style={{
+          flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
+          color: 'var(--text-primary)', lineHeight: 1.7, wordBreak: 'break-word',
+          fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+          // Fullscreen: become a flex column so a lone code artifact can stretch
+          // to the whole cell instead of sitting in a fixed window.
+          ...(expanded ? { display: 'flex', flexDirection: 'column' } : {}),
+        }}>
+        {children}
+      </div>
+      {overflow && (
+        <div style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', flexDirection: 'column', gap: 5, zIndex: 2 }}>
+          {jump(toTop, true, t('scroll.top'))}
+          {jump(toBottom, false, t('scroll.bottom'))}
         </div>
       )}
     </div>
@@ -2009,6 +2068,12 @@ export function NewRun() {
       total: costIn == null && costOut == null ? null : (costIn ?? 0) + (costOut ?? 0),
     }
 
+    // Split into prose + fenced code. An answer that is one bare HTML/SVG blob
+    // with no fence is promoted to a runnable code segment so it previews too.
+    const segs = splitFencedSegments(r.text)
+    const rawHtml = segs.length === 1 && segs[0].type === 'text' ? wholeAnswerHtml(segs[0].content) : null
+    const renderSegs: Segment[] = rawHtml ? [{ type: 'code', content: rawHtml, lang: 'html', open: r.status !== 'done' }] : segs
+
     const dotBg = isDone ? 'var(--success)' : isError ? 'var(--error)' : isStreaming ? 'var(--accent)' : 'var(--border-hover)'
 
     return (
@@ -2063,18 +2128,7 @@ export function NewRun() {
             </div>
           </div>
         ) : (
-          <div
-            className="col-body"
-            style={{
-              flex: 1, overflowY: 'auto', padding: 12, fontSize: 13,
-              color: 'var(--text-primary)', lineHeight: 1.7, wordBreak: 'break-word',
-              fontFamily: monoAnswers ? 'var(--font-mono)' : 'var(--font-sans)',
-              // Fullscreen: become a flex column so a lone code artifact can
-              // stretch to the whole cell instead of sitting in a 280px window
-              // with dead space beneath it.
-              ...(isExpanded ? { display: 'flex', flexDirection: 'column' } : {}),
-            }}
-          >
+          <AnswerBody streaming={isStreaming} expanded={isExpanded} mono={monoAnswers}>
             {showReasoning && (
               <ActivityTrace
                 reasoning={r.reasoning}
@@ -2086,14 +2140,14 @@ export function NewRun() {
             )}
             <ToolTrace calls={r.toolCalls} />
             {r.text
-              ? splitFencedSegments(r.text).map((seg, si) =>
+              ? renderSegs.map((seg, si) =>
                   seg.type === 'code'
                     ? <CodeBlock key={`${cellKey}:${si}`} segment={seg} fill={isExpanded} />
                     : <span key={`${cellKey}:${si}`} style={{ whiteSpace: 'pre-wrap' }}>{seg.content}</span>
                 )
               : (r.status === 'pending' && <span style={{ color: 'var(--border-hover)' }}>{t('run.waiting')}</span>)}
             {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
-          </div>
+          </AnswerBody>
         )}
       </div>
     )

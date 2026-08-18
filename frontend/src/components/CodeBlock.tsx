@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { ArtifactPreview } from './ArtifactPreview'
 import { IconButton } from './ui'
 import { IconCopy, IconCheck, IconPlay, IconRefresh, IconText, IconExpand, IconCollapse, IconClose } from './icons'
-import { isRunnableCode, type CodeSegment } from '../lib/artifact'
+import { isRunnableCode, toPreviewDoc, type CodeSegment } from '../lib/artifact'
 import { useT } from '../i18n'
 
 interface CodeBlockProps {
@@ -68,7 +68,7 @@ export function CodeBlock({ segment, fill }: CodeBlockProps) {
           {/* While maximized the iframe lives in the overlay below — an iframe
               can't be mounted in two places, and remounting would restart the
               program. Keep the inline slot sized but empty. */}
-          {!maximized && <ArtifactPreview html={segment.content} reloadKey={nonce} />}
+          {!maximized && <ArtifactPreview html={toPreviewDoc(segment.content)} reloadKey={nonce} />}
         </div>
       ) : (
         <pre style={{
@@ -109,7 +109,7 @@ export function CodeBlock({ segment, fill }: CodeBlockProps) {
               <IconButton onClick={() => setMaximized(false)} title={t('common.close')}><IconClose /></IconButton>
             </div>
             <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-              <ArtifactPreview html={segment.content} reloadKey={nonce} />
+              <ArtifactPreview html={toPreviewDoc(segment.content)} reloadKey={nonce} />
             </div>
           </div>
         </div>
