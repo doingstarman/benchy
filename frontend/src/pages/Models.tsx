@@ -195,12 +195,13 @@ export function Models() {
   )
 }
 
-function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
+function CenterModal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--overlay, rgba(0,0,0,0.5))', display: 'flex', justifyContent: 'flex-end' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, padding: 24, background: 'var(--overlay, rgba(0,0,0,0.5))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: 460, maxWidth: '90vw', height: '100%', background: 'var(--bg-elevated)',
-        borderLeft: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column',
+        width: 520, maxWidth: '92vw', maxHeight: '88vh', background: 'var(--bg-elevated)',
+        border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '0.5px solid var(--border)' }}>
           <span style={{ flex: 1, fontSize: 'var(--fs-lg)', color: 'var(--text-bright)' }}>{title}</span>
@@ -249,7 +250,7 @@ function TargetEditor({ target, provider, onClose, onSave, onDuplicate, onDelete
   }
 
   return (
-    <Drawer
+    <CenterModal
       title={t('models.edit')}
       onClose={onClose}
       footer={
@@ -329,7 +330,7 @@ function TargetEditor({ target, provider, onClose, onSave, onDuplicate, onDelete
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <PillToggle on={enabled} onToggle={() => setEnabled(v => !v)} labelOn={t('models.enabled')} labelOff={t('models.disabled')} />
       </div>
-    </Drawer>
+    </CenterModal>
   )
 }
 
@@ -365,7 +366,7 @@ function CreateParticipant({ providers, onClose, onCreated }: {
   }
 
   return (
-    <Drawer
+    <CenterModal
       title={t('models.new')}
       onClose={onClose}
       footer={<Button variant="primary" small onClick={() => void create()}>{t('models.create')}</Button>}
@@ -389,6 +390,6 @@ function CreateParticipant({ providers, onClose, onCreated }: {
           <Field label={t('models.name')}><Input value={name} onChange={e => setName(e.target.value)} /></Field>
         </>
       )}
-    </Drawer>
+    </CenterModal>
   )
 }
