@@ -28,6 +28,14 @@ export function IconRefresh(p: IconProps) {
   return <Svg {...p}><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" /><path d="M13.5 2.5v3h-3" /></Svg>
 }
 
+export function IconTrash(p: IconProps) {
+  return <Svg {...p}><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.5" /></Svg>
+}
+
+export function IconPlus(p: IconProps) {
+  return <Svg {...p}><path d="M8 3v10M3 8h10" /></Svg>
+}
+
 export function IconCopy(p: IconProps) {
   return <Svg {...p}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" /></Svg>
 }

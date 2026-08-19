@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, ModelTargetConfig } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -48,6 +48,22 @@ export const providersApi = {
     ),
   fetchModels: (draft: ProviderDraft) =>
     apiFetch<string[]>('/api/providers/models', { method: 'POST', body: JSON.stringify(draft) }),
+}
+
+// ─── targets (participants registry) ──────────────────────────────────────────
+
+export type TargetUpsert = { name: string; config: ModelTargetConfig; tags?: string[]; enabled?: boolean; kind?: TargetKind }
+
+export const targetsApi = {
+  list: (kind: TargetKind = 'model') => apiFetch<Target[]>(`/api/targets?kind=${kind}`),
+  get: (id: string) => apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`),
+  create: (body: TargetUpsert) =>
+    apiFetch<Target>('/api/targets', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: Partial<{ name: string; tags: string[]; enabled: boolean; config: ModelTargetConfig }>) =>
+    apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  duplicate: (id: string) =>
+    apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
+  remove: (id: string) => fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 export interface ProviderDraft {
