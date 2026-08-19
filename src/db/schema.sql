@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS runs (
   dataset_id TEXT,            -- set when this run scored a dataset
   mode TEXT,                  -- dataset run judging: NULL/'score' = auto, 'arena' = human
   dataset_item_ids TEXT,      -- JSON array of covered item ids, in prompt_index order
-  base_prompt TEXT            -- dataset run's base prompt before per-item input was folded in
+  base_prompt TEXT,           -- dataset run's base prompt before per-item input was folded in
+  target_ids TEXT             -- JSON array of target ids this run ran against (mirrors models)
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS results (
   score REAL,                 -- dataset run: per-field accuracy for this result
   score_detail TEXT,          -- dataset run: JSON per-key match map
   code_report TEXT,           -- code dataset: per-test error text + execution error
+  target_id TEXT,             -- the target that produced this result (denormalized alongside model)
   FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
@@ -130,3 +132,20 @@ CREATE TABLE IF NOT EXISTS dataset_run_verdicts (
   PRIMARY KEY (run_id, prompt_index),
   FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
+
+-- A benchmark participant (a "target"): a named, configurable entity a run executes
+-- against. kind='model' for now (config = { providerId, model, defaults?, pricing? }).
+-- Deliberately NOT FK-linked to results — a deleted target leaves its id string on
+-- historical results (shown as an orphan), so history is never rewritten.
+CREATE TABLE IF NOT EXISTS targets (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,                 -- 'model' now; 'agent' | 'pipeline' later
+  name TEXT NOT NULL,                 -- display name, user editable
+  config TEXT NOT NULL,               -- JSON, shape depends on kind
+  tags TEXT NOT NULL DEFAULT '[]',    -- JSON array
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_targets_kind ON targets(kind, enabled);

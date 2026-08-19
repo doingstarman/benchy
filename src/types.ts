@@ -51,6 +51,29 @@ export interface Provider {
   pricing?: Record<string, ModelPricing>
 }
 
+// A target: a benchmark participant. 'model' is the only kind this stage ships;
+// 'agent'/'pipeline' are future kinds with their own config shapes.
+export type TargetKind = 'model' | 'agent' | 'pipeline'
+
+// config for kind='model'. defaults/pricing override the provider connection's own.
+export interface ModelTargetConfig {
+  providerId: string
+  model: string
+  defaults?: ProviderDefaults
+  pricing?: ModelPricing
+}
+
+export interface Target {
+  id: string
+  kind: TargetKind
+  name: string
+  config: ModelTargetConfig
+  tags: string[]
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 // What the API hands back for a provider. `apiKey` is absent by construction,
 // not by convention: the key stays on the backend and only its mask travels, so
 // a frontend that tries to read one stops compiling rather than shipping it.
