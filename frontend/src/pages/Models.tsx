@@ -5,6 +5,7 @@ import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../c
 import { SliderField } from '../components/SliderField'
 import { TargetRow } from '../components/TargetRow'
 import { InheritedField } from '../components/InheritedField'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { IconPlus, IconClose } from '../components/icons'
 import { useT, t as tt } from '../i18n'
 
@@ -30,6 +31,7 @@ export function Models() {
   const [grouped, setGrouped] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Target | null>(null)
 
   const load = useCallback(async () => {
     const [ts, ps] = await Promise.all([targetsApi.list('model'), providersApi.list()])
@@ -80,10 +82,13 @@ export function Models() {
     await load()
     setEditingId(created.id)
   }
-  async function remove(id: string) {
-    if (!window.confirm(t('models.deleteConfirm'))) return
-    await targetsApi.remove(id)
-    if (editingId === id) setEditingId(null)
+  const requestDelete = (tgt: Target) => setPendingDelete(tgt)
+  async function confirmDelete() {
+    const tgt = pendingDelete
+    if (!tgt) return
+    setPendingDelete(null)
+    await targetsApi.remove(tgt.id)
+    if (editingId === tgt.id) setEditingId(null)
     await load()
   }
 
@@ -97,7 +102,7 @@ export function Models() {
       onEdit={() => setEditingId(tgt.id)}
       onToggle={() => void patch(tgt.id, { enabled: !tgt.enabled })}
       onDuplicate={() => void duplicate(tgt.id)}
-      onDelete={() => void remove(tgt.id)}
+      onDelete={() => requestDelete(tgt)}
     />
   )
 
@@ -161,7 +166,18 @@ export function Models() {
           onClose={() => setEditingId(null)}
           onSave={async body => { await patch(editing.id, body); setEditingId(null) }}
           onDuplicate={() => void duplicate(editing.id)}
-          onDelete={() => void remove(editing.id)}
+          onDelete={() => requestDelete(editing)}
+        />
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t('models.delete')}
+          message={t('models.deleteConfirm')}
+          confirmLabel={t('models.delete')}
+          danger
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setPendingDelete(null)}
         />
       )}
 

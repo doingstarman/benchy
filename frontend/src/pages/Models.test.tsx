@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Models } from './Models'
 import { targetsApi, providersApi } from '../api'
@@ -64,5 +64,18 @@ describe('Models page', () => {
 
     await waitFor(() => expect(screen.getByText(/0 of 4 differ/)).toBeInTheDocument())
     expect(screen.queryByText('overridden')).not.toBeInTheDocument()
+  })
+
+  it('deletes via an in-app confirm dialog, not window.confirm', async () => {
+    renderPage()
+    await screen.findByText('gpt-4o strict')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/History keeps its results/)).toBeInTheDocument()
+    expect(targetsApi.remove).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(targetsApi.remove).toHaveBeenCalledWith('openai:gpt-4o'))
   })
 })
