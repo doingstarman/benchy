@@ -13,9 +13,10 @@ by priority within each theme; sizes are rough (S ≈ hours, M ≈ a day, L ≈ 
 - [x] **library.ts: preserve the key on edit** — shipped (1c981d4). `resolveKey`
   applies the provider tri-state (absent = keep, `''` = erase, value = replace), so
   a rename/toggle no longer wipes the Bearer secret.
-- [ ] **Per-provider price override** (M). Set per-model prices on the Providers
-  screen; a `resolvePricing` prefers them over the curated default table. The
-  other half of "cost per answer" — deferred with the provider work.
+- [x] **Per-provider price override** — shipped (ebc0870). Per-model prices set on
+  the Providers screen (Advanced tab); `resolvePricing` prefers them over the
+  curated table, then falls back. Drives the dataset cost cards and a new COST
+  metric in the run strip; mock providers seeded with approximate prices.
 - [x] **Triaged `codex/review-fixes`** (old, 30 commits behind main). Its security
   (`f7b4ede`) and docs (`124a0cd`) commits are superseded by shipped work
   (provider-key-exposure, docs-accuracy) — drop them. Do NOT merge the stale branch
