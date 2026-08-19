@@ -3,6 +3,25 @@ import { getProviders, upsertProvider, removeProvider } from '../config.js';
 import { humanizeNetworkError, describeHttpError } from '../errors.js';
 import { isLocalRequest } from './csrf.js';
 import { toProviderView } from '../types.js';
+// A cleared or half-filled price field means "no override", not an error: keep
+// only entries with two finite non-negative prices, and store nothing if none
+// survive. So editing a price to blank simply removes the override.
+function parsePricing(x) {
+    if (!x || typeof x !== 'object' || Array.isArray(x))
+        return undefined;
+    const out = {};
+    for (const [model, v] of Object.entries(x)) {
+        if (!v || typeof v !== 'object')
+            continue;
+        const { inputPer1M, outputPer1M } = v;
+        if (typeof inputPer1M !== 'number' || typeof outputPer1M !== 'number')
+            continue;
+        if (!Number.isFinite(inputPer1M) || !Number.isFinite(outputPer1M) || inputPer1M < 0 || outputPer1M < 0)
+            continue;
+        out[model] = { inputPer1M, outputPer1M };
+    }
+    return Object.keys(out).length ? out : undefined;
+}
 // The key for a probe: whatever the draft carries, else the stored provider's.
 async function probeKey(body) {
     if (body?.apiKey)
@@ -88,6 +107,7 @@ export async function registerProvidersRoutes(app) {
                 timeout: body.timeout,
                 retries: body.retries,
                 defaults: body.defaults,
+                pricing: parsePricing(body.pricing),
             };
             await upsertProvider(provider);
             return reply.code(201).send({ data: toProviderView(provider) });
