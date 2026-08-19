@@ -15,6 +15,7 @@ import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../ty
 import { resolveTools, type Tool } from '../tools/index.js'
 import { connectMcpServer } from '../tools/mcp.js'
 import { getCustomTools, getSkills, getMcpServers } from '../config.js'
+import { materializeRunMetrics } from './metrics.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -330,6 +331,10 @@ export function finalizeRun(runId: string, tasks: Promise<void>[]): void {
       // Always terminal, including on the error path: a client that never hears
       // this sits open in "running" forever.
       broadcast(runId, 'run_done', { runId })
+      // Evaluate + store custom metric values for the finished run (built-ins are
+      // resolved at read time, never here). Fire-and-forget: a metrics failure must
+      // never wedge a run in "running".
+      void materializeRunMetrics(runId).catch(() => { /* metrics are best-effort */ })
       // Connections are NOT dropped here — the sockets are still alive and the
       // close handler owns their lifetime. Deleting the map entry unsubscribed
       // live clients, so a later turn broadcast into nothing.

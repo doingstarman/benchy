@@ -57,7 +57,7 @@ async function get(): Promise<AppSettings> {
 
 describe('GET /api/settings', () => {
   it('answers with the defaults on a fresh install, and writes nothing to do it', async () => {
-    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {} })
+    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {}, disabledMetrics: ['reasoning_ms'] })
     // A read that creates config.json would turn "never configured" into
     // "configured with today's defaults", freezing them for that install.
     expect(existsSync(configPath())).toBe(false)
@@ -68,7 +68,7 @@ describe('PUT /api/settings — patch semantics', () => {
   it('leaves the keys it was not given alone, and echoes the whole blob', async () => {
     await req('PUT', '/api/settings', { codeExecTimeoutMs: 30_000 })
     const after = settings(await req('PUT', '/api/settings', { codeExecution: true }))
-    expect(after).toEqual({ codeExecution: true, codeExecTimeoutMs: 30_000, runDefaults: {} })
+    expect(after).toEqual({ codeExecution: true, codeExecTimeoutMs: 30_000, runDefaults: {}, disabledMetrics: ['reasoning_ms'] })
   })
 
   it('stores run defaults and hands them back', async () => {
@@ -125,7 +125,7 @@ describe('PUT /api/settings — rejection', () => {
       body: JSON.stringify({ codeExecTimeoutMs: 60_000, runDefaults: { temperature: 1.5 } }),
     })
     expect(res.status).toBe(403)
-    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {} })
+    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {}, disabledMetrics: ['reasoning_ms'] })
   })
 })
 
@@ -179,6 +179,6 @@ describe('config.json is a boundary too', () => {
       codeExecTimeoutMs: Number.NaN,
       runDefaults: { temperature: Number.NaN },
     })
-    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {} })
+    expect(await get()).toEqual({ codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {}, disabledMetrics: ['reasoning_ms'] })
   })
 })

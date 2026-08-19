@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Provider, ProviderDefaults, CustomTool, Skill, McpServer } from './types.js'
+import { BUILTIN_KEYS, DEFAULT_DISABLED_METRICS } from './metrics/builtins.js'
 
 export const DEFAULT_PROVIDER_SETTINGS: Required<ProviderDefaults> = {
   temperature: 0.7,
@@ -36,6 +37,9 @@ interface Config {
   codeExecution?: boolean
   // Wall clock one dataset item's solution gets before it is killed.
   codeExecTimeoutMs?: number
+  // Built-in metric keys the user has turned off in the registry. Absent = the
+  // code default (reasoning_ms off); once present, the user's list wins verbatim.
+  disabledMetrics?: string[]
   // App-wide generation defaults, layered under every run. Sparse on purpose: an
   // absent key means "not set", which is what keeps an install that never opened
   // Settings sending exactly what it sent before.
@@ -51,6 +55,7 @@ export interface AppSettings {
   codeExecution: boolean
   codeExecTimeoutMs: number
   runDefaults: AppRunDefaults
+  disabledMetrics: string[]
 }
 
 // Matches DEFAULT_TIMEOUT_MS in codeRun.ts, so upgrading an install that never
@@ -90,6 +95,13 @@ function readCodeExecTimeout(raw: number | undefined): number {
   return clamp(Math.round(raw), CODE_EXEC_TIMEOUT_MIN_MS, CODE_EXEC_TIMEOUT_MAX_MS)
 }
 
+// Absent → the code default (reasoning_ms off). Present → the user's explicit list,
+// filtered to real built-in keys (a stale key from a removed built-in is dropped).
+function readDisabledMetrics(raw: string[] | undefined): string[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_DISABLED_METRICS]
+  return raw.filter(k => typeof k === 'string' && BUILTIN_KEYS.includes(k))
+}
+
 // One read for the whole blob — the route would otherwise parse config.json
 // three times to answer one GET.
 export async function getAppSettings(): Promise<AppSettings> {
@@ -98,7 +110,23 @@ export async function getAppSettings(): Promise<AppSettings> {
     codeExecution: config.codeExecution === true,
     codeExecTimeoutMs: readCodeExecTimeout(config.codeExecTimeoutMs),
     runDefaults: readRunDefaults(config.runDefaults),
+    disabledMetrics: readDisabledMetrics(config.disabledMetrics),
   }
+}
+
+export async function getDisabledMetrics(): Promise<string[]> {
+  return readDisabledMetrics((await readConfig()).disabledMetrics)
+}
+
+export async function setBuiltinMetricEnabled(key: string, enabled: boolean): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const disabled = new Set(readDisabledMetrics(config.disabledMetrics))
+    if (enabled) disabled.delete(key)
+    else disabled.add(key)
+    config.disabledMetrics = [...disabled]
+    await writeConfig(config)
+  })
 }
 
 export async function getCodeExecTimeoutMs(): Promise<number> {

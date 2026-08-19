@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { getDb } from '../db/index.js'
 import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled, getAppRunDefaults, getCodeExecTimeoutMs } from '../config.js'
 import { runCell, finalizeRun, getAdapter } from './benchmark.js'
+import { materializeRunMetrics } from './metrics.js'
 import { runTests, interpreterCommand, type CodeLanguage } from '../codeRun.js'
 import { isLocalRequest } from './csrf.js'
 import {
@@ -724,6 +725,8 @@ export async function registerDatasetsRoutes(app: FastifyInstance): Promise<void
       const covered = itemIds ? itemIds.map(id => byId.get(id)) : all
 
       scoreDatasetRun(req.params.runId, dataset.schema, covered, dataset.normRules)
+      // Scores changed → score-dependent custom metrics need recomputing.
+      void materializeRunMetrics(req.params.runId).catch(() => { /* metrics best-effort */ })
       return reply.code(200).send({ data: { rescored: true } })
     },
   )

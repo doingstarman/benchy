@@ -280,6 +280,48 @@ export interface Result {
   codeReport?: { cases: { name: string; ok: boolean; err?: string }[]; error: string | null }
 }
 
+// ── metrics registry ──
+// A metric is a named, formatted, comparable value. Built-ins resolve over existing
+// `results` columns / functions at read time (never stored); only custom metrics —
+// expressions over other metric keys — materialize into metric_values.
+export type MetricKind = 'builtin' | 'custom'
+export type MetricFormat = 'raw' | 'ms' | 's' | 'tokens' | 'usd' | 'pct'
+export type MetricDirection = 'lower' | 'higher' | 'neutral'
+export type MetricScope = 'answer' | 'run'
+export type MetricAggregate = 'mean' | 'median' | 'p50' | 'p95' | 'min' | 'max' | 'sum'
+
+// The uniform registry view the API returns (built-ins ∪ customs).
+export interface MetricDef {
+  key: string
+  name: string
+  kind: MetricKind
+  expression: string | null       // custom only
+  unit: string | null
+  format: MetricFormat
+  direction: MetricDirection
+  scope: MetricScope
+  aggregate: MetricAggregate | null
+  nullable: boolean
+  enabled: boolean
+}
+
+// A user-defined metric row.
+export interface CustomMetric {
+  key: string
+  name: string
+  expression: string
+  unit: string | null
+  format: MetricFormat
+  direction: MetricDirection
+  scope: MetricScope
+  aggregate: MetricAggregate | null
+  nullable: boolean
+  enabled: boolean
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+}
+
 export interface Run {
   id: string
   prompts: string[]

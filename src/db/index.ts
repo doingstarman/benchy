@@ -142,6 +142,40 @@ CREATE TABLE IF NOT EXISTS targets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_kind ON targets(kind, enabled);
+
+-- Metrics registry: USER-DEFINED metrics only. Built-in metrics live in code
+-- (src/metrics/builtins.ts) and resolve over existing columns/functions at read
+-- time — they are never stored here. A custom metric is an expression over other
+-- metric keys, evaluated after every run.
+CREATE TABLE IF NOT EXISTS metrics (
+  key TEXT PRIMARY KEY,               -- slug ^[a-z][a-z0-9_]*$, unique vs built-ins
+  name TEXT NOT NULL,
+  expression TEXT NOT NULL,
+  unit TEXT,
+  format TEXT NOT NULL DEFAULT 'raw', -- raw|ms|s|tokens|usd|pct
+  direction TEXT NOT NULL DEFAULT 'neutral', -- lower|higher|neutral
+  scope TEXT NOT NULL DEFAULT 'answer',       -- answer|run
+  aggregate TEXT,                     -- per-run: mean|median|p50|p95|min|max|sum
+  nullable INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Materialized values for CUSTOM metrics only (the "only user-defined metrics
+-- materialize" rule). result_id set for per-answer scope, run_id for per-run.
+-- value NULL = "no value produced" (never 0). Built-ins never write here.
+CREATE TABLE IF NOT EXISTS metric_values (
+  metric_key TEXT NOT NULL,
+  result_id TEXT,
+  run_id TEXT,
+  value REAL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_values_result ON metric_values(result_id);
+CREATE INDEX IF NOT EXISTS idx_metric_values_run ON metric_values(run_id, metric_key);
 `
 
 let db: Database.Database | null = null
