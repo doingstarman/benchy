@@ -44,7 +44,15 @@ afterAll(async () => {
 })
 ```
 
-Ports used: `14300` (providers), `14310` (runs), `14320` (benchmark). Never `4242`.
+Each suite picks its own port in the `143xx`/`144xx` range (e.g. `14300` providers,
+`14310` runs, `14320` benchmark, `14360`/`14361` mock-dev-only) — there are many
+suites now, so just claim an unused one. Never `4242`.
+
+**Mock is dev-only.** The `/api/mock` route registers only when `BENCHY_DIR` ends in
+`.benchy-dev` (`isDevEnvironment()`). A suite that needs the mock endpoint must set
+`BENCHY_DIR` to a `…/.benchy-dev` path before `createServer` (see
+`src/test/mock-dev-only.test.ts`); most suites mock the adapter module directly and
+don't need it.
 
 ## What to Mock
 

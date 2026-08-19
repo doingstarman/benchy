@@ -94,7 +94,7 @@ No arbitrary values like `px`, `10px`, `15px`, `20px`.
 
 | Type | Style |
 |---|---|
-| Primary | `background: var(--accent)`, white text |
+| Primary | `background: var(--accent)`, `color: var(--on-accent)` (never hardcode `#fff`) |
 | Secondary | `background: none`, `border: 0.5px solid var(--border-hover)`, `var(--text-secondary)` |
 | Ghost | No border, `var(--text-muted)`, use for nav/inline actions |
 | Danger | `border: 0.5px solid var(--border)`, `color: var(--error)` |

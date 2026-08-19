@@ -26,6 +26,21 @@ HTTP status codes:
 Routes are registered in `src/api/*.ts` files as `async function register*(app: FastifyInstance)`.  
 All are mounted in `src/server.ts`. No route logic lives in `server.ts`.
 
+Current route modules: `providers`, `runs`, `benchmark`, `results`, `datasets`,
+`library` (tools/skills/MCP), `uploads` (attachments), `settings`, `version`, and
+`mock`. The `mock` routes are **dev-only** — `server.ts` registers them only under
+`~/.benchy-dev` (`isDevEnvironment()`), so a production install has no `/api/mock`.
+
+## CSRF / Local-only Guard
+
+benchy's API is unauthenticated on localhost, so any website the user visits could
+script requests to it. That's harmless for most routes, but routes that **arrange
+local code execution** (the `settings` code-execution toggle, code-dataset runs)
+gate on `isLocalRequest(req)` from `src/api/csrf.ts`: a request with an absent or
+localhost `Origin` is trusted (benchy's own UI, incl. the dev server on another
+localhost port); anything else is a cross-site attempt and is refused. A browser can
+never forge `Origin` to localhost.
+
 ## Validation
 
 Validate only at the API boundary — the entry point of each route handler.  

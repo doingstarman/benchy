@@ -82,6 +82,32 @@ Rules:
 - Keep Node engine requirements aligned with the project runtime (`>=22` unless the stack changes).
 - Do not document `npm install -g benchy` until this project owns and publishes the `benchy` package on the public npm registry.
 
+## Release Stamp Ritual
+
+`benchy update` decides "is there a new build?" by comparing the running install's
+`dist/version.json` against the same file fetched from GitHub raw `main`. So the
+`dist/version.json` **inside the tarball** must be byte-identical to the one
+**committed to `main`** — any rebuild between packing and committing re-stamps
+`builtAt` and silently desyncs them. Release order, without rebuilding in between:
+
+```bash
+npm run build        # (prepack also builds — this just makes the state explicit)
+npm pack             # → benchy-0.1.0.tgz
+npm run check:release   # asserts tarball stamp == on-disk dist/version.json stamp
+git add dist frontend/dist benchy-0.1.0.tgz
+git commit -m "build: … (stamp <sha>)"
+git push origin main
+```
+
+`src/test/pack-integrity.test.ts` guards that the committed tarball is fresh (it
+fails whenever `main` has source commits the tarball predates — which is why even a
+test/schema-only change needs a rebuilt tarball). Never `git checkout -- dist` away
+`version.json` when discarding line-ending churn, and never rename the `.tgz` (its
+URL is hardcoded in every installed `benchy update`).
+
+CLI lifecycle on this machine: `benchy` / `benchy start` (prod on 4242),
+`benchy stop`, `benchy update` (reinstall from the `main` tarball — see [local.md](local.md)).
+
 ## Required Checks
 
 For code changes, run both before pushing:
