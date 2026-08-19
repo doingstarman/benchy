@@ -106,6 +106,12 @@ describe('targets validation', () => {
     expect((await req('POST', '/api/targets', modelBody({ kind: 'bogus' }))).status).toBe(400)
     expect((await req('POST', '/api/targets', { name: 'x', config: { providerId: 'openai' } })).status).toBe(400)
   })
+
+  it('a body-less POST is a 400, not a 500 (release-gate finding)', async () => {
+    const res = await fetch(`${base}/api/targets`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect((await res.json() as { error?: string }).error).toBeTruthy()
+  })
 })
 
 describe('targets delete leaves results orphaned (no cascade)', () => {

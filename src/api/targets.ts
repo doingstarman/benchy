@@ -63,7 +63,7 @@ export async function registerTargetsRoutes(app: FastifyInstance): Promise<void>
   })
 
   app.post('/api/targets', async (req, reply) => {
-    const body = req.body as Partial<{ kind: string; name: string; config: ModelTargetConfig; tags: string[]; enabled: boolean }>
+    const body = (req.body ?? {}) as Partial<{ kind: string; name: string; config: ModelTargetConfig; tags: string[]; enabled: boolean }>
     const kind = body.kind ?? 'model'
     if (!KINDS.includes(kind as TargetKind)) return reply.code(400).send({ error: 'invalid kind' })
     if (kind !== 'model') return reply.code(400).send({ error: 'only kind=model is supported' })
@@ -98,7 +98,7 @@ export async function registerTargetsRoutes(app: FastifyInstance): Promise<void>
     if (!db.prepare('SELECT 1 FROM targets WHERE id = ?').get(id)) {
       return reply.code(404).send({ error: 'Target not found' })
     }
-    const body = req.body as Partial<{ name: string; tags: string[]; enabled: boolean; config: ModelTargetConfig }>
+    const body = (req.body ?? {}) as Partial<{ name: string; tags: string[]; enabled: boolean; config: ModelTargetConfig }>
     if (body.name !== undefined) {
       if (typeof body.name !== 'string' || !body.name.trim()) return reply.code(400).send({ error: 'name must be a non-empty string' })
       db.prepare('UPDATE targets SET name = ? WHERE id = ?').run(body.name.trim(), id)
