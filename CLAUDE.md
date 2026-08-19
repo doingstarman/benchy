@@ -24,14 +24,14 @@ Self-hosted AI model benchmarking tool. One command starts a local server on por
 | Port | Dev backend: **4243**. Production/start default: **4242** |
 | Config | Dev: `~/.benchy-dev/config.json`. Production: `~/.benchy/config.json`. Never read from frontend, always via `/api/providers` |
 | Database | SQLite only via better-sqlite3. Dev file: `~/.benchy-dev/benchy.db`; production file: `~/.benchy/benchy.db` |
-| Adapters | Exactly 3: `openai` (OpenAI-compatible), `anthropic`, `google` |
+| Adapters | Six, one per **transport** (not per vendor). `getAdapter(type)` in `benchmark.ts` dispatches: `anthropic`, `google`, `http-json`, `script`, `webhook`; everything else (`openai`/`openai-compatible`/`local`/`custom`) → the `openai` adapter |
 | Parallelism | All provider calls via `Promise.all` — never sequential |
 | Streaming | All adapters must stream — required for accurate TTFS |
 | Frontend | Built by Vite into `frontend/dist/`, served as static by Fastify |
 
 ## What NOT to do
 
-- Don't add a 4th adapter — the openai adapter already covers all OpenAI-compatible endpoints
+- Don't add a per-vendor adapter — the `openai` adapter already covers every OpenAI-compatible endpoint (Groq, Together, OpenRouter, Ollama, LM Studio, DeepSeek, …). A new hosted LLM that speaks OpenAI's API is a provider config, not code. Only add an adapter for a genuinely new transport (as `http-json`/`script`/`webhook` are), and gate it through `getAdapter`
 - Don't add `any` types or `as unknown as X` casts
 - Don't add default exports — named exports only
 - Don't write comments explaining what code does — only why, when non-obvious
