@@ -175,7 +175,7 @@ function getConfigPath(): string {
   return join(getBenchyDir(), 'config.json')
 }
 
-function isDevEnvironment(): boolean {
+export function isDevEnvironment(): boolean {
   return getBenchyDir().endsWith('.benchy-dev')
 }
 
