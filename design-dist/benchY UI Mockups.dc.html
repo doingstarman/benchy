@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #08080a; color: #d6d6de; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: #7F77DD; text-decoration: none; }
+  a:hover { color: #9b93ea; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2e2e36; border-radius: 3px; }
+</style>
+</helmet>
+
+<section style="display: flex; flex-direction: column; gap: 32px; padding: 32px;">
+
+  <div style="display: flex; align-items: baseline; gap: 16px;">
+    <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 500; color: #f2f2f6; letter-spacing: -0.02em;">bench<span style="color: #7F77DD;">Y</span></div>
+    <div style="font-size: 12px; color: #71717c;">UI mockups &middot; primitives, participants, participant editor &mdash; dark theme, purple accent</div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start;">
+
+    <!-- ───────── 1a · PRIMITIVES ───────── -->
+    <div id="1a" style="width: 620px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #7F77DD; background: #1e1a3a; border: 0.5px solid #4a4390; border-radius: 4px; padding: 2px 7px;">1a</span>
+        <span style="font-size: 12px; color: #9b9ba6;">primitives</span>
+      </div>
+
+      <div style="background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 10px; padding: 24px; display: flex; flex-direction: column; gap: 24px;">
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Buttons</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid transparent; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="filter: brightness(1.08);">Run test</button>
+            <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid #1e1e22; background: none; color: #9b9ba6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="border-color: #2e2e36; color: #d6d6de; background: #111113;">Cancel</button>
+            <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid #e05c5c; background: none; color: #e05c5c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="background: #271515;">Disconnect</button>
+            <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid transparent; background: #1e1a3a; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; cursor: not-allowed;">Run test</button>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <button style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 7px; border: 0.5px solid transparent; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">Save</button>
+            <button style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 7px; border: 0.5px solid #1e1e22; background: none; color: #9b9ba6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;" style-hover="border-color: #2e2e36; color: #d6d6de; background: #111113;">Duplicate</button>
+            <button style="display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 7px; border: 0.5px solid #1e1e22; background: none; color: #9b9ba6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+              <span style="display: inline-block; width: 10px; height: 10px; border: 1.5px solid #1e1e22; border-top-color: #7F77DD; border-radius: 50%; animation: spin .6s linear infinite;"></span>Testing
+            </button>
+            <div style="display: flex; gap: 6px; margin-left: 4px;">
+              <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #9b9ba6;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #111113;">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+              </button>
+              <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #9b9ba6;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #111113;">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+              </button>
+              <button title="Tuning" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: #1e1a3a; border: 0.5px solid #4a4390; border-radius: 6px; color: #7F77DD;">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5h8M13 4.5h1M2 11.5h3M8 11.5h6"></path><circle cx="11.5" cy="4.5" r="1.8"></circle><circle cx="6.5" cy="11.5" r="1.8"></circle></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <hr style="height: 1px; border: none; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent);">
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Type badge &mdash; shape carries the meaning, not colour</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 0.5px solid #2e2e36; border-radius: 4px; background: #111113; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6;">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODEL
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px dashed #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6;">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="9" height="7" rx="1.5"></rect><path d="M8 3v3"></path><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none"></circle><path d="M6 9h0.01M10 9h0.01"></path></svg>AGENT
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 5px; border: 0.5px solid #2e2e36; border-left: 2px solid #2e2e36; border-radius: 4px; background: #111113; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6;">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.5" cy="8" r="1.6"></circle><circle cx="12.5" cy="4" r="1.6"></circle><circle cx="12.5" cy="12" r="1.6"></circle><path d="M5 7.2l6-2.4M5 8.8l6 2.4"></path></svg>PIPELINE
+            </span>
+            <span style="font-size: 11px; color: #71717c;">solid &middot; dashed &middot; barred</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Status &amp; tags</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center;">
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #9b9ba6;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #5ab87a;"></span>connected</span>
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #9b9ba6;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #7F77DD;"></span>running</span>
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #9b9ba6;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #d4944a;"></span>no models</span>
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #9b9ba6;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #e05c5c;"></span>error</span>
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #9b9ba6;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #71717c;"></span>setup</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center;">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">chat</span>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">vision</span>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">reasoning</span>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">open weights</span>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #7F77DD; padding: 1px 5px; border-radius: 3px; background: #1e1a3a; border: 0.5px solid #4a4390;">fastest</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Controls</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <div style="display: inline-flex; background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 7px; padding: 3px; gap: 2px;">
+              <button style="padding: 5px 14px; border: 0.5px solid #2e2e36; border-radius: 5px; background: #111113; color: #f2f2f6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;">MODEL</button>
+              <button style="padding: 5px 14px; border: 0.5px solid transparent; border-radius: 5px; background: transparent; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">AGENT</button>
+              <button style="padding: 5px 14px; border: 0.5px solid transparent; border-radius: 5px; background: transparent; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">PIPELINE</button>
+            </div>
+            <button style="display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid #7F77DD; border-radius: 20px; padding: 5px 12px; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #ffffff;"></span>on
+            </button>
+            <button style="display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid #1e1e22; border-radius: 20px; padding: 5px 12px; background: #0a0a0b; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: #71717c;"></span>off
+            </button>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: center;">
+            <input value="gpt-4o &middot; strict json" style="background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 8px 10px; width: 100%; color: #d6d6de; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+            <input value="participant name" style="background: #0a0a0b; border: 0.5px solid transparent; outline: 1.5px solid #7F77DD; border-radius: 6px; padding: 8px 10px; width: 100%; color: #d6d6de; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #71717c; width: 88px; flex-shrink: 0;">Temperature</span>
+              <div style="flex: 1; height: 3px; background: #1e1e22; border-radius: 2px; position: relative;">
+                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 22%; background: #7F77DD; border-radius: 2px;"></div>
+                <div style="position: absolute; left: 22%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #d6d6de;"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #d6d6de; width: 30px; text-align: right;">0.4</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #71717c; width: 88px; flex-shrink: 0;">Max tokens</span>
+              <div style="flex: 1; height: 3px; background: #1e1e22; border-radius: 2px; position: relative;">
+                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 55%; background: #7F77DD; border-radius: 2px;"></div>
+                <div style="position: absolute; left: 55%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #d6d6de;"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #d6d6de; width: 30px; text-align: right;">4096</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Metric cell &amp; latency bar</div>
+          <div style="display: flex; gap: 24px; align-items: flex-end; border: 0.5px solid #1e1e22; border-radius: 8px; padding: 14px 16px; background: #111113;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">ttfs</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #f2f2f6;">312<span style="color: #71717c;">ms</span></span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">total</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">4.28<span style="color: #71717c;">s</span></span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">$/1m</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">2.50<span style="color: #71717c;">/</span>10.00</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">latency</span>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <div style="height: 5px; width: 42%; background: #7F77DD; border-radius: 2px;"></div>
+                <div style="height: 5px; width: 68%; background: #2e2e36; border-radius: 2px;"></div>
+                <div style="height: 5px; width: 91%; background: #2e2e36; border-radius: 2px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ───────── 1b · PARTICIPANTS ───────── -->
+    <div id="1b" style="width: 1180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #7F77DD; background: #1e1a3a; border: 0.5px solid #4a4390; border-radius: 4px; padding: 2px 7px;">1b</span>
+        <span style="font-size: 12px; color: #9b9ba6;">participants &mdash; grouped by connection</span>
+      </div>
+
+      <div style="display: flex; height: 720px; border: 0.5px solid #1e1e22; border-radius: 10px; overflow: hidden; background: #0a0a0b;">
+
+        <nav style="width: 160px; flex-shrink: 0; background: #060608; border-right: 0.5px solid #1e1e22; display: flex; flex-direction: column;">
+          <div style="padding: 16px 14px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 500; color: #f2f2f6; letter-spacing: -0.02em;">bench<span style="color: #7F77DD;">Y</span></div>
+            <span style="display: inline-flex; align-items: center; justify-content: center; padding: 3px; border: 0.5px solid #1e1e22; border-radius: 5px; color: #71717c;">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"></path></svg>
+            </span>
+          </div>
+          <div style="height: 1px; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent); margin: 6px 10px;"></div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor" stroke="none"></path></svg>TEST
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"></circle><path d="M8 5v3l2 2"></path></svg>HISTORY
+          </div>
+          <div style="height: 1px; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent); margin: 6px 10px;"></div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #2e2e36; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="5" height="5" rx="1"></rect><rect x="9" y="2" width="5" height="5" rx="1"></rect><rect x="2" y="9" width="5" height="5" rx="1"></rect><rect x="9" y="9" width="5" height="5" rx="1"></rect></svg>DASHBOARD
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.5h12"></path><rect x="3" y="8" width="2.6" height="5.5" rx="0.5"></rect><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5"></rect><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5"></rect></svg>RESULTS
+          </div>
+          <div style="height: 1px; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent); margin: 6px 10px;"></div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #f2f2f6; border-left: 2px solid #7F77DD; background: #0a0a0b;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODELS
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="9" height="7" rx="1.5"></rect><path d="M8 3v3"></path><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none"></circle><path d="M6 9h0.01M10 9h0.01"></path></svg>AGENTS
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.5" cy="8" r="1.6"></circle><circle cx="12.5" cy="4" r="1.6"></circle><circle cx="12.5" cy="12" r="1.6"></circle><path d="M5 7.2l6-2.4M5 8.8l6 2.4"></path></svg>PIPELINES
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 7px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 01-4 4 4 4 0 01-4-4V6z"></path><path d="M8 13v2"></path></svg>PROVIDERS
+          </div>
+          <div style="flex: 1;"></div>
+          <div style="height: 1px; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent); margin: 6px 10px;"></div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 14px 14px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #71717c; border-left: 2px solid transparent;">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"></circle><path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4M12.5 12.5l-1.4-1.4M4.9 4.9L3.5 3.5"></path></svg>SETTINGS
+          </div>
+        </nav>
+
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;">
+
+          <div style="padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 16px; border-bottom: 0.5px solid #1e1e22;">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;">
+              <div>
+                <div style="font-size: 20px; font-weight: 600; color: #f2f2f6; letter-spacing: -0.3px;">Participants</div>
+                <div style="margin-top: 3px; font-size: 12px; color: #71717c;">A participant is one configured thing you can test &mdash; a base model plus its overrides. Connections live in <span style="color: #9b9ba6;">Providers</span>.</div>
+              </div>
+              <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid #1e1e22; background: none; color: #9b9ba6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="border-color: #2e2e36; color: #d6d6de; background: #111113;">Import</button>
+                <button style="display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 7px; border: 0.5px solid transparent; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; white-space: nowrap;" style-hover="filter: brightness(1.08);">New participant</button>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <input placeholder="filter participants, base models, tags…" style="flex: 1; min-width: 0; background: #111113; border: 0.5px solid #1e1e22; border-radius: 7px; padding: 8px 12px; color: #d6d6de; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+              <div style="display: inline-flex; background: #111113; border: 0.5px solid #1e1e22; border-radius: 7px; padding: 3px; gap: 2px; flex-shrink: 0;">
+                <button style="padding: 5px 12px; border-radius: 5px; border: 0.5px solid #2e2e36; background: #0a0a0b; color: #f2f2f6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;">CONNECTION</button>
+                <button style="padding: 5px 12px; border-radius: 5px; border: 0.5px solid transparent; background: none; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">BASE MODEL</button>
+                <button style="padding: 5px 12px; border-radius: 5px; border: 0.5px solid transparent; background: none; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">FLAT</button>
+              </div>
+              <div style="display: flex; gap: 5px; flex-shrink: 0;">
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7F77DD; padding: 4px 10px; border-radius: 20px; background: #1e1a3a; border: 0.5px solid #4a4390;">model 9</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c; padding: 4px 10px; border-radius: 20px; background: #0a0a0b; border: 0.5px solid #1e1e22;">agent 2</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c; padding: 4px 10px; border-radius: 20px; background: #0a0a0b; border: 0.5px solid #1e1e22;">pipeline 1</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; padding: 9px 24px; border-bottom: 0.5px solid #1e1e22; background: #060608;">
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">participant</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">type</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c; text-align: right;">ttfs</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c; text-align: right;">total</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c; text-align: right;">$/1m in&nbsp;/&nbsp;out</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c; text-align: right;">runs</span>
+            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c; text-align: right;">last run</span>
+            <span></span>
+          </div>
+
+          <div style="flex: 1; overflow-y: auto;">
+
+            <!-- group: OpenAI -->
+            <div style="display: flex; align-items: center; gap: 10px; padding: 12px 24px 10px; background: #0a0a0b;">
+              <span style="width: 7px; height: 7px; border-radius: 50%; background: #5ab87a; flex-shrink: 0;"></span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #f2f2f6;">OpenAI</span>
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">connection</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">sk-&hellip;4f2a &middot; 4 participants from 3 base models</span>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #1e1e22, transparent);"></div>
+              <a href="#1b" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;">manage connection</a>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22; background: #111113;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #2e2e36; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #f2f2f6;">gpt-4o &middot; strict json</span>
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">variant 1 of 3</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">OpenAI <span style="color: #2e2e36;">&rarr;</span> gpt-4o <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">temp 0.2 &middot; max 4096 &middot; json_object</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 0.5px solid #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODEL
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #7F77DD; text-align: right;">312ms</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">4.28s</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">2.50 / 10.00</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">142</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">2h ago</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #1e1e22; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">gpt-4o &middot; creative</span>
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">variant 2 of 3</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">OpenAI <span style="color: #2e2e36;">&rarr;</span> gpt-4o <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">temp 1.1 &middot; top_p 0.95</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 0.5px solid #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODEL
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">401ms</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">6.10s</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">2.50 / 10.00</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">88</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">2h ago</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end; opacity: 0.5;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #1e1e22; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">support triage</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">OpenAI <span style="color: #2e2e36;">&rarr;</span> gpt-4o-mini <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">system prompt &middot; 3 tools &middot; max 6 steps</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px dashed #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="9" height="7" rx="1.5"></rect><path d="M8 3v3"></path><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none"></circle><path d="M6 9h0.01M10 9h0.01"></path></svg>AGENT
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">288ms</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">12.4s</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">0.15 / 0.60</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">37</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">yesterday</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end; opacity: 0.5;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- group: Anthropic -->
+            <div style="display: flex; align-items: center; gap: 10px; padding: 16px 24px 10px; background: #0a0a0b;">
+              <span style="width: 7px; height: 7px; border-radius: 50%; background: #5ab87a; flex-shrink: 0;"></span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #f2f2f6;">Anthropic</span>
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">connection</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">sk-ant-&hellip;91c0 &middot; 3 participants from 2 base models</span>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #1e1e22, transparent);"></div>
+              <a href="#1b" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;">manage connection</a>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #1e1e22; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">sonnet 4.5 &middot; baseline</span>
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; background: #0a0a0b; border: 0.5px solid #1e1e22;">variant 1 of 2</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">Anthropic <span style="color: #2e2e36;">&rarr;</span> claude-sonnet-4-5 <span style="color: #2e2e36;">&rarr;</span> <span style="color: #71717c;">inherits connection defaults</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 0.5px solid #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODEL
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">349ms</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">5.02s</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">3.00 / 15.00</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">210</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">15m ago</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end; opacity: 0.5;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #1e1e22; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">rag &middot; docs answerer</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">Anthropic <span style="color: #2e2e36;">&rarr;</span> claude-haiku-4-5 <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">retrieve &rarr; rerank &rarr; answer</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 5px; border: 0.5px solid #2e2e36; border-left: 2px solid #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.5" cy="8" r="1.6"></circle><circle cx="12.5" cy="4" r="1.6"></circle><circle cx="12.5" cy="12" r="1.6"></circle><path d="M5 7.2l6-2.4M5 8.8l6 2.4"></path></svg>PIPE
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">920ms</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; text-align: right;">8.71s</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">0.80 / 4.00</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9b9ba6; text-align: right;">54</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">3d ago</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end; opacity: 0.5;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- group: Ollama -->
+            <div style="display: flex; align-items: center; gap: 10px; padding: 16px 24px 10px; background: #0a0a0b;">
+              <span style="width: 7px; height: 7px; border-radius: 50%; background: #d4944a; flex-shrink: 0;"></span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #f2f2f6;">Ollama</span>
+              <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">local connection</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">localhost:11434 &middot; 1 participant &middot; server unreachable</span>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #1e1e22, transparent);"></div>
+              <a href="#1b" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;">manage connection</a>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 74px 78px 104px 58px 92px 66px; gap: 12px; align-items: center; padding: 11px 24px; border-bottom: 0.5px solid #1e1e22; opacity: 0.6;" style-hover="background: #111113;">
+              <div style="min-width: 0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="width: 2px; align-self: stretch; background: #1e1e22; border-radius: 1px; flex-shrink: 0;"></div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #d6d6de;">llama3.3 &middot; local</span>
+                    <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #e05c5c; padding: 1px 5px; border-radius: 3px; background: #271515; border: 0.5px solid #4a2a2f;">offline</span>
+                  </div>
+                  <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">Ollama <span style="color: #2e2e36;">&rarr;</span> llama3.3:70b <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">temp 0.7 &middot; ctx 8k</span></div>
+                </div>
+              </div>
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 0.5px solid #2e2e36; border-radius: 4px; background: #0a0a0b; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #9b9ba6; justify-self: start;">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z"></path><path d="M2 8l6 3 6-3"></path><path d="M2 11l6 3 6-3"></path></svg>MODEL
+              </span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">&mdash;</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">&mdash;</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">free</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">6</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #71717c; text-align: right;">2w ago</span>
+              <div style="display: flex; gap: 4px; justify-content: flex-end; opacity: 0.5;">
+                <button title="Edit" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.8l2.7 2.7L5.5 13.2l-3.3.6.6-3.3 7.7-7.7z"></path></svg>
+                </button>
+                <button title="Duplicate" style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <div style="padding: 16px 24px 24px;">
+              <button style="width: 100%; padding: 12px; border: 1px dashed #2e2e36; border-radius: 8px; background: none; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;" style-hover="color: #d6d6de; border-color: #4a4390; background: #111113;">+ new participant from an existing connection</button>
+            </div>
+
+          </div>
+
+          <div style="padding: 10px 24px; border-top: 0.5px solid #1e1e22; background: #060608; display: flex; align-items: center; gap: 16px;">
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">12 participants &middot; 3 connections &middot; 7 base models</span>
+            <div style="flex: 1;"></div>
+            <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">select rows to add to a run</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 1c · PARTICIPANT EDITOR ───────── -->
+    <div id="1c" style="width: 620px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; color: #7F77DD; background: #1e1a3a; border: 0.5px solid #4a4390; border-radius: 4px; padding: 2px 7px;">1c</span>
+        <span style="font-size: 12px; color: #9b9ba6;">participant editor &mdash; drawer over the list</span>
+      </div>
+
+      <div style="border: 0.5px solid #1e1e22; border-radius: 10px; background: #111113; display: flex; flex-direction: column; overflow: hidden;">
+
+        <div style="padding: 18px 24px; border-bottom: 0.5px solid #1e1e22; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+          <div>
+            <div style="font-size: 15px; font-weight: 600; color: #f2f2f6;">Edit participant</div>
+            <div style="margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c;">OpenAI <span style="color: #2e2e36;">&rarr;</span> gpt-4o <span style="color: #2e2e36;">&rarr;</span> <span style="color: #9b9ba6;">gpt-4o &middot; strict json</span></div>
+          </div>
+          <button title="Close" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: none; border: 0.5px solid #1e1e22; border-radius: 6px; color: #71717c; flex-shrink: 0;" style-hover="color: #d6d6de; border-color: #2e2e36; background: #0a0a0b;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"></path></svg>
+          </button>
+        </div>
+
+        <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;">
+
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Name</div>
+            <input value="gpt-4o · strict json" style="background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 8px 10px; width: 100%; color: #d6d6de; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Kind</div>
+            <div style="display: inline-flex; align-self: flex-start; background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 7px; padding: 3px; gap: 2px;">
+              <button style="padding: 5px 14px; border: 0.5px solid #2e2e36; border-radius: 5px; background: #111113; color: #f2f2f6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;">MODEL</button>
+              <button style="padding: 5px 14px; border: 0.5px solid transparent; border-radius: 5px; background: none; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">AGENT</button>
+              <button style="padding: 5px 14px; border: 0.5px solid transparent; border-radius: 5px; background: none; color: #71717c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em;" style-hover="color: #9b9ba6;">PIPELINE</button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Connection</div>
+              <div style="display: flex; align-items: center; gap: 8px; background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 8px 10px;">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: #5ab87a; flex-shrink: 0;"></span>
+                <span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de;">OpenAI</span>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#71717c" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6l4.5 4.5L12.5 6"></path></svg>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Base model</div>
+              <div style="display: flex; align-items: center; gap: 8px; background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 8px 10px;">
+                <span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de;">gpt-4o</span>
+                <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; padding: 1px 5px; border-radius: 3px; border: 0.5px solid #1e1e22;">vision</span>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#71717c" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6l4.5 4.5L12.5 6"></path></svg>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 1px; background: linear-gradient(90deg, transparent, #2e2e36 20%, #2e2e36 80%, transparent);"></div>
+
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">Overrides &mdash; 3 of 6 differ from the connection</div>
+              <button style="background: none; border: none; padding: 0; color: #7F77DD; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;">reset all to inherited</button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #9b9ba6; width: 96px; flex-shrink: 0;">Temperature</span>
+              <div style="flex: 1; height: 3px; background: #1e1e22; border-radius: 2px; position: relative;">
+                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 10%; background: #7F77DD; border-radius: 2px;"></div>
+                <div style="position: absolute; left: 10%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #d6d6de;"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #f2f2f6; width: 44px; text-align: right;">0.2</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #7F77DD; width: 64px; text-align: right;">overridden</span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #9b9ba6; width: 96px; flex-shrink: 0;">Top P</span>
+              <div style="flex: 1; height: 3px; background: #1e1e22; border-radius: 2px; position: relative;">
+                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #2e2e36; border-radius: 2px;"></div>
+                <div style="position: absolute; left: 100%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #2e2e36;"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #71717c; width: 44px; text-align: right;">1.00</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; width: 64px; text-align: right;">inherited</span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #9b9ba6; width: 96px; flex-shrink: 0;">Max tokens</span>
+              <div style="flex: 1; height: 3px; background: #1e1e22; border-radius: 2px; position: relative;">
+                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 13%; background: #7F77DD; border-radius: 2px;"></div>
+                <div style="position: absolute; left: 13%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #d6d6de;"></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #f2f2f6; width: 44px; text-align: right;">4096</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #7F77DD; width: 64px; text-align: right;">overridden</span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #9b9ba6; width: 96px; flex-shrink: 0;">Response format</span>
+              <div style="flex: 1; display: flex; align-items: center; gap: 8px; background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 6px 10px;">
+                <span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de;">json_object</span>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#71717c" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6l4.5 4.5L12.5 6"></path></svg>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #7F77DD; width: 64px; text-align: right;">overridden</span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #9b9ba6; width: 96px; flex-shrink: 0;">Streaming</span>
+              <button style="display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid #7F77DD; border-radius: 20px; padding: 4px 12px; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">
+                <span style="width: 10px; height: 10px; border-radius: 50%; background: #ffffff;"></span>on
+              </button>
+              <div style="flex: 1;"></div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #71717c; width: 64px; text-align: right;">inherited</span>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #71717c;">System prompt</div>
+            <div style="background: #0a0a0b; border: 0.5px solid #1e1e22; border-radius: 6px; padding: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6d6de; min-height: 76px; line-height: 1.6;">You are a strict JSON extractor. Return only the object described by the schema &mdash; no prose, no code fences.</div>
+          </div>
+
+          <div style="border: 0.5px solid #1e1e22; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#71717c" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="8" cy="8" r="6"></circle><path d="M8 7.4v3.4"></path><path d="M8 5.2h.01"></path></svg>
+            <span style="font-size: 11px; color: #71717c;">Overrides apply to this participant only. Anything left inherited follows the OpenAI connection &mdash; change it there once and every sibling variant moves with it.</span>
+          </div>
+
+        </div>
+
+        <div style="padding: 14px 24px; border-top: 0.5px solid #1e1e22; background: #0a0a0b; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <button style="padding: 8px 18px; border-radius: 7px; border: 0.5px solid #e05c5c; background: none; color: #e05c5c; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="background: #271515;">Delete</button>
+          <div style="display: flex; gap: 8px;">
+            <button style="padding: 8px 18px; border-radius: 7px; border: 0.5px solid #1e1e22; background: none; color: #9b9ba6; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;" style-hover="border-color: #2e2e36; color: #d6d6de; background: #111113;">Duplicate</button>
+            <button style="padding: 8px 18px; border-radius: 7px; border: 0.5px solid transparent; background: #7F77DD; color: #ffffff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; white-space: nowrap;" style-hover="filter: brightness(1.08);">Save participant</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+</body>
+</html>
