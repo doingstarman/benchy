@@ -124,7 +124,7 @@ function getBenchyDir() {
 function getConfigPath() {
     return join(getBenchyDir(), 'config.json');
 }
-function isDevEnvironment() {
+export function isDevEnvironment() {
     return getBenchyDir().endsWith('.benchy-dev');
 }
 export async function readConfig() {

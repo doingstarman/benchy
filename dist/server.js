@@ -15,6 +15,7 @@ import { registerSettingsRoutes } from './api/settings.js';
 import { registerMockRoutes } from './api/mock.js';
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js';
 import { registerVersionRoutes } from './api/version.js';
+import { isDevEnvironment } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UNBOUND_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 export async function createServer(port, dbPath) {
@@ -60,7 +61,11 @@ export async function createServer(port, dbPath) {
     await registerDatasetsRoutes(app);
     await registerResultsRoutes(app);
     await registerSettingsRoutes(app);
-    await registerMockRoutes(app);
+    // The mock adapter is a dev-only testing aid — its routes exist only under
+    // ~/.benchy-dev, so a production install ships no /api/mock endpoint (mock
+    // providers are likewise filtered out of prod, see config.getProviders).
+    if (isDevEnvironment())
+        await registerMockRoutes(app);
     // Serve built frontend in production
     const frontendDist = join(__dirname, '..', 'frontend', 'dist');
     if (existsSync(frontendDist)) {
