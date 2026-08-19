@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getProviders } from '../config.js';
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
@@ -122,6 +123,24 @@ CREATE TABLE IF NOT EXISTS dataset_run_verdicts (
   PRIMARY KEY (run_id, prompt_index),
   FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
+
+-- A benchmark participant: a named, configurable entity a run is executed against.
+-- kind='model' now (config = { providerId, model, defaults?, pricing? }); 'agent'
+-- and 'pipeline' are future kinds with their own config shapes. Not linked by FK to
+-- results on purpose — results keep their target_id string even after the target is
+-- deleted, so history stays intact and the UI can show it as an orphan.
+CREATE TABLE IF NOT EXISTS targets (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  config TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '[]',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_targets_kind ON targets(kind, enabled);
 `;
 let db = null;
 export function getBenchyDir() {
@@ -192,12 +211,55 @@ export async function initDb(path) {
         // Code runs: the per-test detail beyond match/miss — each case's error text
         // and the execution error (compile/timeout) that score_detail can't express.
         'ALTER TABLE results ADD COLUMN code_report TEXT',
+        // Targets registry: which target produced a result / a run ran against. The
+        // model key stays in results.model too, so nothing reading it today breaks.
+        'ALTER TABLE results ADD COLUMN target_id TEXT',
+        'ALTER TABLE runs ADD COLUMN target_ids TEXT',
     ]) {
         try {
             db.exec(sql);
         }
         catch { /* column already exists */ }
     }
+    // One-time backfill: derive a 'model' target per historical result and per
+    // configured provider model, and point every existing result/run at its
+    // target(s). Best-effort on config — a corrupt config still lets the server
+    // start, seeding from results alone.
+    let providerKeys = [];
+    try {
+        const providers = await getProviders();
+        providerKeys = providers.flatMap(p => p.models.map(m => `${p.id}:${m}`));
+    }
+    catch { /* unreadable config — seed targets from results only */ }
+    backfillTargets(db, providerKeys);
+}
+// Idempotent: seeds the targets table only when empty, then fills the
+// denormalized back-references on any result/run that lacks them. Exported so the
+// migration test can drive it directly. `providerKeys` are `providerId:model`.
+export function backfillTargets(db, providerKeys) {
+    const seeded = db.prepare('SELECT COUNT(*) AS c FROM targets').get().c;
+    if (seeded === 0) {
+        const keys = new Set();
+        for (const row of db.prepare('SELECT DISTINCT model FROM results').all()) {
+            if (row.model)
+                keys.add(row.model);
+        }
+        for (const key of providerKeys)
+            if (key)
+                keys.add(key);
+        const now = Date.now();
+        const insert = db.prepare('INSERT INTO targets (id, kind, name, config, tags, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        db.transaction(() => {
+            for (const key of keys) {
+                const colon = key.indexOf(':');
+                const providerId = colon >= 0 ? key.slice(0, colon) : '';
+                const model = colon >= 0 ? key.slice(colon + 1) : key;
+                insert.run(key, 'model', model, JSON.stringify({ providerId, model }), '[]', 1, now, now);
+            }
+        })();
+    }
+    db.prepare('UPDATE results SET target_id = model WHERE target_id IS NULL').run();
+    db.prepare('UPDATE runs SET target_ids = models WHERE target_ids IS NULL').run();
 }
 export function closeDb() {
     db?.close();
