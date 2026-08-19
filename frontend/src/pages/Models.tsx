@@ -107,8 +107,9 @@ export function Models() {
   )
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: 24 }}>
       <UiStyles />
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
         <div style={{ flex: 1 }}>
@@ -158,6 +159,8 @@ export function Models() {
           {tt('models.count', { n: targets.length, c: new Set(targets.map(x => x.config.providerId)).size, m: new Set(targets.map(x => `${x.config.providerId}:${x.config.model}`)).size })}
         </div>
       )}
+
+      </div>
 
       {editing && (
         <TargetEditor
