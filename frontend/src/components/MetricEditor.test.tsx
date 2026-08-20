@@ -41,6 +41,15 @@ describe('MetricEditor', () => {
     expect(screen.getByRole('button', { name: /Save metric/i })).toBeDisabled()
   })
 
+  it('the fix chip replaces the flagged identifier, not the last one', () => {
+    render_()
+    fireEvent.change(screen.getByPlaceholderText('Tokens per second'), { target: { value: 'X' } })
+    const expr = screen.getByPlaceholderText('output_tokens / total_time * 1000')
+    fireEvent.change(expr, { target: { value: 'outpt_tokens / total_time' } }) // typo is NOT at the end
+    fireEvent.click(screen.getByRole('button', { name: /Use output_tokens/i }))
+    expect(expr).toHaveValue('output_tokens / total_time') // total_time preserved
+  })
+
   it('previews recent results, rendering a null value as an em-dash (never 0)', async () => {
     render_()
     fireEvent.change(screen.getByPlaceholderText('Tokens per second'), { target: { value: 'TPS' } })

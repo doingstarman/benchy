@@ -32,6 +32,13 @@ export const BUILTIN_METRICS: BuiltinDef[] = [
 export const BUILTIN_KEYS: string[] = BUILTIN_METRICS.map(m => m.key)
 export const DEFAULT_DISABLED_METRICS: string[] = BUILTIN_METRICS.filter(m => !m.defaultEnabled).map(m => m.key)
 
+// Built-ins a custom expression may reference: exactly those `resolveBuiltins`
+// provides per answer. `elo` is per-run only (from arena standings) and has no
+// per-answer value, so referencing it would materialize to null — keep it out.
+export const RESOLVABLE_BUILTIN_KEYS: string[] = [
+  'ttfs', 'total_time', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'reasoning_ms', 'score', 'cost',
+]
+
 export function isBuiltinKey(key: string): boolean {
   return BUILTIN_KEYS.includes(key)
 }

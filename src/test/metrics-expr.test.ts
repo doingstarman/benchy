@@ -56,6 +56,18 @@ describe('validate', () => {
     expect(validate('clamp(ttfs, 0)', KEYS, 'answer').ok).toBe(false)
     expect(validate('round(ttfs, 2)', KEYS, 'answer').ok).toBe(true)
   })
+
+  it('rejects a nested aggregate (would silently evaluate to null)', () => {
+    expect(validate('mean(max(ttfs))', KEYS, 'run').ok).toBe(false)
+    expect(validate('mean(ttfs) + max(mean(ttfs))', KEYS, 'run').ok).toBe(false)
+    expect(validate('mean(ttfs) + max(total_time)', KEYS, 'run').ok).toBe(true) // siblings ok
+  })
+
+  it('fails a too-deeply-nested expression cleanly instead of throwing', () => {
+    const deep = '('.repeat(500) + 'ttfs' + ')'.repeat(500)
+    expect(() => validate(deep, KEYS, 'answer')).not.toThrow()
+    expect(validate(deep, KEYS, 'answer').ok).toBe(false)
+  })
 })
 
 describe('evaluate (per answer) — null ≠ 0, ÷0 → null', () => {
@@ -90,6 +102,20 @@ describe('aggregate', () => {
     expect(aggregate('median', xs)).toBe(20)
     expect(aggregate('p95', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(10)
     expect(aggregate('mean', [])).toBeNull()
+  })
+  it('ignores non-finite values (never returns NaN)', () => {
+    expect(aggregate('mean', [1, NaN, 3])).toBe(2)
+    expect(aggregate('p95', [5, NaN, 1, 9, 2])).toBe(9)
+    expect(aggregate('mean', [NaN, Infinity])).toBeNull()
+  })
+})
+
+describe('non-finite results collapse to null (never NaN/Infinity)', () => {
+  it('overflow, big-minus-big, and out-of-range round → null', () => {
+    expect(ev('9'.repeat(400), {})).toBeNull()          // 400-digit literal → Infinity
+    expect(ev('x * x', { x: 1e200 })).toBeNull()        // overflow → Infinity
+    expect(ev('round(5, 400)', {})).toBeNull()          // 10**400 = Infinity → NaN
+    expect(ev('abs(0 - x)', { x: 42 })).toBe(42)        // ordinary case unaffected
   })
 })
 

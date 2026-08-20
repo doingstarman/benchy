@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../../src/types'
 import { metricsApi, type MetricPreviewResult } from '../api'
 import { validate } from '../../../src/metrics/expr'
@@ -14,6 +14,8 @@ const FUNCS = ['mean(', 'median(', 'p95(', 'min(', 'max(', 'sum(', 'abs(', 'roun
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
 }
+
+const KEY_RE = /^[a-z][a-z0-9_]*$/
 
 const selectStyle: React.CSSProperties = {
   padding: '7px 9px', background: 'var(--bg-base)', color: 'var(--text-primary)',
@@ -36,7 +38,9 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
   const editing = metric != null && registry.some(m => m.key === metric.key)
   const [name, setName] = useState(metric?.name ?? '')
   const [key, setKey] = useState(metric?.key ?? '')
-  const [keyEdited, setKeyEdited] = useState(editing)
+  // Auto-slug only for a brand-new metric. When a def is passed (edit OR duplicate)
+  // its key is intentional and must not be clobbered by the name→slug effect.
+  const [keyEdited, setKeyEdited] = useState(metric != null)
   const [expression, setExpression] = useState(metric?.expression ?? '')
   const [unit, setUnit] = useState(metric?.unit ?? '')
   const [format, setFormat] = useState<MetricFormat>(metric?.format ?? 'raw')
@@ -45,6 +49,8 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
   const [aggregate, setAggregate] = useState<MetricAggregate>(metric?.aggregate ?? 'mean')
   const [preview, setPreview] = useState<MetricPreviewResult | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const previewSeq = useRef(0)
+  const downOnBackdrop = useRef(false)
 
   useEffect(() => { if (!keyEdited) setKey(slug(name)) }, [name, keyEdited])
 
@@ -56,14 +62,18 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
 
   useEffect(() => {
     if (!expression.trim() || !check.ok) { setPreview(null); return }
+    const seq = ++previewSeq.current
     const id = setTimeout(() => {
-      metricsApi.preview(expression, scope, scope === 'run' ? aggregate : undefined).then(setPreview).catch(() => setPreview(null))
+      metricsApi.preview(expression, scope, scope === 'run' ? aggregate : undefined)
+        .then(r => { if (seq === previewSeq.current) setPreview(r) })
+        .catch(() => { if (seq === previewSeq.current) setPreview(null) })
     }, 250)
     return () => clearTimeout(id)
   }, [expression, scope, aggregate, check.ok])
 
   const insert = (tok: string) => setExpression(e => (e.trim() ? e.trimEnd() + ' ' : '') + tok)
-  const canSave = !!name.trim() && !!key && !!expression.trim() && check.ok
+  const keyValid = KEY_RE.test(key)
+  const canSave = !!name.trim() && keyValid && !!expression.trim() && check.ok
 
   async function save() {
     try {
@@ -81,10 +91,15 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
   const customKeys = registry.filter(m => m.kind === 'custom' && m.key !== key).map(m => m.key)
 
   return (
-    <div onClick={onClose} role="dialog" aria-modal="true" style={{
-      position: 'fixed', inset: 0, zIndex: 300, padding: 24, background: 'var(--overlay, rgba(0,0,0,0.5))',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
+    <div
+      role="dialog" aria-modal="true"
+      onMouseDown={e => { downOnBackdrop.current = e.target === e.currentTarget }}
+      onClick={e => { if (e.target === e.currentTarget && downOnBackdrop.current) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 300, padding: 24, background: 'var(--overlay, rgba(0,0,0,0.5))',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
       <div onClick={e => e.stopPropagation()} style={{
         width: 880, maxWidth: '94vw', maxHeight: '90vh', background: 'var(--bg-elevated)',
         border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
@@ -125,8 +140,8 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
                 {expression.trim() && !check.ok ? (
                   <>
                     <span style={{ color: 'var(--error)' }}>{check.error?.message}</span>
-                    {check.error?.suggestion && (
-                      <button onClick={() => setExpression(expression.replace(/[a-z_][a-z0-9_]*$/i, check.error!.suggestion!))}
+                    {check.error?.suggestion && check.error.span && (
+                      <button onClick={() => { const [s, e] = check.error!.span!; setExpression(expression.slice(0, s) + check.error!.suggestion! + expression.slice(e)) }}
                         style={{ border: '0.5px solid var(--border-hover)', background: 'var(--bg-base)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '1px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', cursor: 'pointer' }}>
                         {tt('metrics.useKey', { key: check.error.suggestion })}
                       </button>
@@ -213,7 +228,7 @@ export function MetricEditor({ metric, registry, onClose, onSaved }: {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderTop: '0.5px solid var(--border)' }}>
           <span style={{ flex: 1, fontSize: 'var(--fs-sm)', color: saveError ? 'var(--error)' : canSave ? 'var(--text-muted)' : 'var(--warning)' }}>
-            {saveError ?? (canSave ? '' : t('metrics.cannotSave'))}
+            {saveError ?? (canSave ? '' : name.trim() && !keyValid ? t('metrics.badKey') : t('metrics.cannotSave'))}
           </span>
           <Button small onClick={onClose}>{tt('common.cancel')}</Button>
           <Button small variant="primary" disabled={!canSave} onClick={() => void save()}>{t('metrics.saveMetric')}</Button>

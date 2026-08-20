@@ -33,7 +33,10 @@ export function MetricsRegistry() {
 
   async function toggle(m: MetricDef) { await metricsApi.update(m.key, { enabled: !m.enabled }); await load() }
   function duplicate(m: MetricDef) {
-    setEditing({ ...m, kind: 'custom', key: `${m.key}_copy`, name: `${m.name} copy`, expression: m.expression ?? m.key })
+    const taken = new Set(metrics.map(x => x.key))
+    let key = `${m.key}_copy`
+    for (let n = 2; taken.has(key); n++) key = `${m.key}_copy_${n}`
+    setEditing({ ...m, kind: 'custom', key, name: `${m.name} copy`, expression: m.expression ?? m.key })
   }
   async function confirmDelete() {
     if (!pendingDelete) return

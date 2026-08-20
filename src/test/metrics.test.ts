@@ -80,6 +80,28 @@ describe('metrics validation', () => {
     expect((await req('POST', '/api/metrics', { key: 'b', name: 'B', expression: 'a + 1' })).status).toBe(201)
     expect((await req('PATCH', '/api/metrics/a', { expression: 'b + 1' })).status).toBe(400)
   })
+
+  it('rejects a reference to elo or another per-run custom (would materialize null)', async () => {
+    expect((await req('POST', '/api/metrics', metric({ key: 'uses_elo', name: 'E', expression: 'elo + 1' }))).status).toBe(400)
+    expect((await req('POST', '/api/metrics', { key: 'cs', name: 'CS', expression: 'cost / score', scope: 'run', aggregate: 'sum' })).status).toBe(201)
+    expect((await req('POST', '/api/metrics', { key: 'ref_run', name: 'RR', expression: 'cs + 1', scope: 'run', aggregate: 'mean' })).status).toBe(400)
+  })
+
+  it('a too-deeply-nested expression is 400, not 500', async () => {
+    const deep = '('.repeat(5000) + 'ttfs' + ')'.repeat(5000)
+    expect(data<{ ok: boolean }>(await req('POST', '/api/metrics/validate', { expression: deep, scope: 'answer' })).ok).toBe(false)
+    expect((await req('POST', '/api/metrics', metric({ key: 'deep', expression: deep }))).status).toBe(400)
+  })
+})
+
+describe('materialization concurrency', () => {
+  it('does not duplicate metric_values rows under concurrent calls', async () => {
+    await req('POST', '/api/metrics', metric())
+    seedRunWithResults()
+    await Promise.all([materializeRunMetrics('run1'), materializeRunMetrics('run1'), materializeRunMetrics('run1')])
+    const c = (getDb().prepare("SELECT COUNT(*) AS c FROM metric_values WHERE metric_key = 'tokens_per_sec'").get() as { c: number }).c
+    expect(c).toBe(2) // 2 results, one row each — not 6
+  })
 })
 
 describe('built-in immutability', () => {

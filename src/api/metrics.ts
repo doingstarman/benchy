@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import { getDb } from '../db/index.js'
 import { getDisabledMetrics, setBuiltinMetricEnabled, getProviders } from '../config.js'
 import { isLocalRequest } from './csrf.js'
-import { builtinDefs, BUILTIN_KEYS, isBuiltinKey } from '../metrics/builtins.js'
+import { builtinDefs, BUILTIN_KEYS, RESOLVABLE_BUILTIN_KEYS, isBuiltinKey } from '../metrics/builtins.js'
 import { validate, parse, evaluate } from '../metrics/expr.js'
 import {
   resolveBuiltins, topoSortCustoms, evaluateAnswerCustoms, evaluateRunCustom,
@@ -77,6 +77,13 @@ function validateBody(
   const v = validate(expression, known, scope)
   if (!v.ok) return { error: v.error?.message ?? 'invalid expression' }
 
+  // A custom may only reference keys that have a per-answer value: the resolvable
+  // built-ins (not elo) and per-answer customs. A ref to elo or another per-run
+  // custom would pass validate() as "known" yet always evaluate to null.
+  const referenceable = new Set([...RESOLVABLE_BUILTIN_KEYS, ...others.filter(c => c.scope === 'answer').map(c => c.key)])
+  const badRef = v.refs.find(r => r !== key && !referenceable.has(r))
+  if (badRef) return { error: `${badRef} has no per-answer value and can't be used in an expression (elo and per-run metrics are excluded)` }
+
   const candidate: CustomMetric = {
     key, name, expression, unit, format, direction, scope, aggregate,
     nullable: body.nullable === false ? false : true, enabled: body.enabled === false ? false : true,
@@ -113,19 +120,24 @@ function toInput(r: ResRow, pricing: Map<string, Record<string, ModelPricing> | 
 // never written. Safe to call repeatedly (clears the run's rows first).
 export async function materializeRunMetrics(runId: string): Promise<void> {
   const db = getDb()
-  db.prepare('DELETE FROM metric_values WHERE run_id = ? OR result_id IN (SELECT id FROM results WHERE run_id = ?)').run(runId, runId)
+  const clear = () => db.prepare('DELETE FROM metric_values WHERE run_id = ? OR result_id IN (SELECT id FROM results WHERE run_id = ?)').run(runId, runId)
   const customs = loadCustoms(db).filter(c => c.enabled)
-  if (customs.length === 0) return
+  if (customs.length === 0) { clear(); return }
   let ordered: CustomMetric[]
-  try { ordered = topoSortCustoms(customs) } catch { return }
+  try { ordered = topoSortCustoms(customs) } catch { clear(); return }
   const results = db.prepare(`SELECT ${RES_COLS} FROM results WHERE run_id = ? ORDER BY prompt_index`).all(runId) as ResRow[]
-  if (results.length === 0) return
+  if (results.length === 0) { clear(); return }
 
+  // Read pricing (async file read) BEFORE the write, so DELETE + INSERT run inside a
+  // single synchronous better-sqlite3 transaction that no concurrent materialize can
+  // interleave with. Previously the await split DELETE from INSERT, letting two
+  // overlapping calls double-insert (metric_values has no unique constraint).
   const pricing = await loadProviderPricing()
   const now = Date.now()
   const insert = db.prepare('INSERT INTO metric_values (metric_key, result_id, run_id, value, created_at) VALUES (?, ?, ?, ?, ?)')
-  const answerScopes: Scope[] = []
   db.transaction(() => {
+    clear()
+    const answerScopes: Scope[] = []
     for (const r of results) {
       const builtinScope = resolveBuiltins(toInput(r, pricing))
       const customVals = evaluateAnswerCustoms(ordered, builtinScope)

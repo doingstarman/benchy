@@ -29,6 +29,18 @@ class ParseError extends Error {
   constructor(message: string, readonly span: [number, number], readonly suggestion?: string) { super(message) }
 }
 
+// Bounds the recursive-descent parser so a pathological `(((…)))` fails as a clean
+// validation error instead of overflowing the JS stack into an uncaught RangeError
+// (which the API would surface as a 500). No real expression nests this deep.
+const MAX_DEPTH = 128
+
+// Any non-finite arithmetic result (overflow → ±Infinity, `big - big` → NaN,
+// `round(x, 400)` → NaN) collapses to null — the same "no value" the ÷0 guard
+// produces. Keeps the "never NaN/Infinity" contract even on absurd inputs.
+function fin(v: number | null): number | null {
+  return v != null && Number.isFinite(v) ? v : null
+}
+
 function tokenize(src: string): Tok[] {
   const toks: Tok[] = []
   const re = /\s+|([A-Za-z_][A-Za-z0-9_]*)|(\d+(?:\.\d+)?)|([+\-*/])|(\()|(\))|(,)|(.)/g
@@ -50,6 +62,7 @@ function tokenize(src: string): Tok[] {
 // Pratt parser: binding powers 1 (+ -) < 2 (* /) < unary.
 function parseTokens(toks: Tok[], src: string): Node {
   let pos = 0
+  let depth = 0
   const peek = () => toks[pos]
   const eof = (): [number, number] => [src.length, src.length]
 
@@ -75,6 +88,11 @@ function parseTokens(toks: Tok[], src: string): Node {
   }
 
   function atom(): Node {
+    if (++depth > MAX_DEPTH) { depth--; throw new ParseError('Expression is nested too deeply', [0, src.length]) }
+    try { return atomInner() } finally { depth-- }
+  }
+
+  function atomInner(): Node {
     const t = peek()
     if (!t) throw new ParseError('Unexpected end of expression', eof())
     if (t.t === 'num') { pos++; return { t: 'num', v: Number(t.text) } }
@@ -117,6 +135,9 @@ export function parse(src: string): { ast: Node | null; error: ExprError | null 
     return { ast: parseTokens(tokenize(src), src), error: null }
   } catch (e) {
     if (e instanceof ParseError) return { ast: null, error: { message: e.message, span: e.span, suggestion: e.suggestion } }
+    // Backstop for a stack overflow the depth cap somehow missed — a clean error,
+    // never an uncaught RangeError bubbling out to a 500.
+    if (e instanceof RangeError) return { ast: null, error: { message: 'Expression is nested too deeply', span: [0, src.length] } }
     throw e
   }
 }
@@ -191,6 +212,22 @@ export function validate(src: string, knownKeys: string[], scope: 'answer' | 'ru
       return { ok: false, error: { message: `In a per-run metric with aggregates, ${b.name} must sit inside an aggregate like mean(${b.name})`, span: b.span }, refs: [...refs], usesAggregate }
     }
   }
+
+  // An aggregate's argument is evaluated per-answer, where aggregates are illegal —
+  // so a nested aggregate (mean(max(x))) would sail past the checks above yet always
+  // evaluate to null. Reject it explicitly.
+  let nested: Extract<Node, { t: 'call' }> | undefined
+  const scanNested = (n: Node, insideAgg: boolean): void => {
+    if (n.t === 'call') {
+      const agg = AGG_SET.has(n.name)
+      if (agg && insideAgg && !nested) nested = n
+      n.args.forEach(a => scanNested(a, insideAgg || agg))
+    } else if (n.t === 'unary') scanNested(n.x, insideAgg)
+    else if (n.t === 'binary') { scanNested(n.l, insideAgg); scanNested(n.r, insideAgg) }
+  }
+  scanNested(ast, false)
+  if (nested) return { ok: false, error: { message: `Aggregates can't be nested — ${nested.name}( sits inside another aggregate`, span: nested.span }, refs: [...refs], usesAggregate }
+
   return { ok: true, refs: [...refs], usesAggregate }
 }
 
@@ -200,16 +237,16 @@ export type Scope = Record<string, number | null>
 // must not appear here (validation forbids them in answer scope).
 export function evaluate(ast: Node, scope: Scope): number | null {
   switch (ast.t) {
-    case 'num': return ast.v
+    case 'num': return fin(ast.v)
     case 'ident': return scope[ast.name] ?? null
-    case 'unary': { const x = evaluate(ast.x, scope); return x == null ? null : -x }
+    case 'unary': { const x = evaluate(ast.x, scope); return x == null ? null : fin(-x) }
     case 'binary': {
       const l = evaluate(ast.l, scope), r = evaluate(ast.r, scope)
       if (l == null || r == null) return null
-      if (ast.op === '+') return l + r
-      if (ast.op === '-') return l - r
-      if (ast.op === '*') return l * r
-      return r === 0 ? null : l / r
+      if (ast.op === '+') return fin(l + r)
+      if (ast.op === '-') return fin(l - r)
+      if (ast.op === '*') return fin(l * r)
+      return r === 0 ? null : fin(l / r)
     }
     case 'call': return applyScalar(ast, ast.args.map(a => evaluate(a, scope)))
   }
@@ -219,20 +256,22 @@ function applyScalar(node: Extract<Node, { t: 'call' }>, args: (number | null)[]
   if (args.some(a => a == null)) return null
   const a = args as number[]
   switch (node.name) {
-    case 'abs': return Math.abs(a[0])
-    case 'round': return a.length === 2 ? Math.round(a[0] * 10 ** a[1]) / 10 ** a[1] : Math.round(a[0])
-    case 'clamp': return Math.min(Math.max(a[0], a[1]), a[2])
+    case 'abs': return fin(Math.abs(a[0]))
+    case 'round': return a.length === 2 ? fin(Math.round(a[0] * 10 ** a[1]) / 10 ** a[1]) : fin(Math.round(a[0]))
+    case 'clamp': return fin(Math.min(Math.max(a[0], a[1]), a[2]))
     default: return null // aggregates handled in evaluateRun
   }
 }
 
 export function aggregate(name: string, values: number[]): number | null {
-  if (values.length === 0) return null
-  const s = [...values].sort((x, y) => x - y)
+  const finite = values.filter(v => Number.isFinite(v))
+  if (finite.length === 0) return null
+  const s = [...finite].sort((x, y) => x - y)
+  values = finite
   const pct = (p: number) => s[Math.min(s.length - 1, Math.ceil(p / 100 * s.length) - 1)]
   switch (name) {
-    case 'sum': return values.reduce((x, y) => x + y, 0)
-    case 'mean': return values.reduce((x, y) => x + y, 0) / values.length
+    case 'sum': return fin(values.reduce((x, y) => x + y, 0))
+    case 'mean': return fin(values.reduce((x, y) => x + y, 0) / values.length)
     case 'min': return s[0]
     case 'max': return s[s.length - 1]
     case 'median': case 'p50': return pct(50)
@@ -257,14 +296,14 @@ function evalRunNode(ast: Node, series: Scope[]): number | null {
   switch (ast.t) {
     case 'num': return ast.v
     case 'ident': return null // guarded by validation (must be inside an aggregate)
-    case 'unary': { const x = evalRunNode(ast.x, series); return x == null ? null : -x }
+    case 'unary': { const x = evalRunNode(ast.x, series); return x == null ? null : fin(-x) }
     case 'binary': {
       const l = evalRunNode(ast.l, series), r = evalRunNode(ast.r, series)
       if (l == null || r == null) return null
-      if (ast.op === '+') return l + r
-      if (ast.op === '-') return l - r
-      if (ast.op === '*') return l * r
-      return r === 0 ? null : l / r
+      if (ast.op === '+') return fin(l + r)
+      if (ast.op === '-') return fin(l - r)
+      if (ast.op === '*') return fin(l * r)
+      return r === 0 ? null : fin(l / r)
     }
     case 'call':
       if (AGG_SET.has(ast.name)) {
