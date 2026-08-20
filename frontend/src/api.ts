@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, ModelTargetConfig } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, ModelTargetConfig, MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -228,6 +228,7 @@ export interface AppSettings {
   codeExecution: boolean
   codeExecTimeoutMs: number
   runDefaults: AppRunDefaults
+  disabledMetrics: string[]
 }
 
 // Not Partial<AppSettings>: null is how a run default is UNSET, and it means
@@ -242,6 +243,39 @@ export const settingsApi = {
   get: () => apiFetch<AppSettings>('/api/settings'),
   update: (patch: AppSettingsPatch) =>
     apiFetch<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+}
+
+// ─── metrics registry ─────────────────────────────────────────────────────────
+
+export type MetricUpsert = {
+  key: string; name: string; expression: string; unit?: string | null
+  format?: MetricFormat; direction?: MetricDirection; scope?: MetricScope
+  aggregate?: MetricAggregate | null; nullable?: boolean; enabled?: boolean
+}
+export interface MetricValidateResult {
+  ok: boolean
+  error?: { message: string; span?: [number, number]; suggestion?: string }
+  refs: string[]
+  usesAggregate: boolean
+}
+export interface MetricPreviewRow { item: string; inputs: string; value: number | null; note: string }
+export interface MetricPreviewResult {
+  ok: boolean
+  error?: { message: string; span?: [number, number]; suggestion?: string }
+  rows: MetricPreviewRow[]
+  coverage: { have: number; total: number }
+}
+
+export const metricsApi = {
+  list: (kind?: 'builtin' | 'custom') => apiFetch<MetricDef[]>(`/api/metrics${kind ? `?kind=${kind}` : ''}`),
+  create: (body: MetricUpsert) => apiFetch<MetricDef>('/api/metrics', { method: 'POST', body: JSON.stringify(body) }),
+  update: (key: string, body: Partial<MetricUpsert> & { enabled?: boolean }) =>
+    apiFetch<MetricDef>(`/api/metrics/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  remove: (key: string) => fetch(`/api/metrics/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  validate: (expression: string, scope: MetricScope) =>
+    apiFetch<MetricValidateResult>('/api/metrics/validate', { method: 'POST', body: JSON.stringify({ expression, scope }) }),
+  preview: (expression: string, scope: MetricScope, aggregate?: MetricAggregate) =>
+    apiFetch<MetricPreviewResult>('/api/metrics/preview', { method: 'POST', body: JSON.stringify({ expression, scope, aggregate }) }),
 }
 
 // ─── version / updates ───────────────────────────────────────────────────────

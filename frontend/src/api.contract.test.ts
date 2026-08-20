@@ -136,12 +136,12 @@ describe('frontend API client ↔ real server contract', () => {
   // independently — this is the only place they are checked against each other.
   it('settings round-trip through the real client and the real handler', async () => {
     expect(await settingsApi.get()).toEqual({
-      codeExecution: false, codeExecTimeoutMs: 10000, runDefaults: {},
+      codeExecution: false, codeExecTimeoutMs: 10000, runDefaults: {}, disabledMetrics: ['reasoning_ms'],
     })
 
     const after = await settingsApi.update({ runDefaults: { temperature: 0.2 }, codeExecTimeoutMs: 30000 })
     expect(after).toEqual({
-      codeExecution: false, codeExecTimeoutMs: 30000, runDefaults: { temperature: 0.2 },
+      codeExecution: false, codeExecTimeoutMs: 30000, runDefaults: { temperature: 0.2 }, disabledMetrics: ['reasoning_ms'],
     })
     expect(await settingsApi.get()).toEqual(after)
 

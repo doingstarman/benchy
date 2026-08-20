@@ -36,6 +36,10 @@ export function IconPlus(p: IconProps) {
   return <Svg {...p}><path d="M8 3v10M3 8h10" /></Svg>
 }
 
+export function IconMetrics(p: IconProps) {
+  return <Svg {...p}><path d="M2 13.5V8.5M6 13.5V3.5M10 13.5v-7M14 13.5v-10" /></Svg>
+}
+
 export function IconCopy(p: IconProps) {
   return <Svg {...p}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" /></Svg>
 }

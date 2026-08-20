@@ -18,7 +18,7 @@ vi.mock('../api', () => ({
 
 const SAVE_DEBOUNCE_MS = 250
 
-const SERVER_DEFAULTS = { codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {} }
+const SERVER_DEFAULTS = { codeExecution: false, codeExecTimeoutMs: 10_000, runDefaults: {}, disabledMetrics: ['reasoning_ms'] }
 
 beforeEach(() => {
   vi.clearAllMocks()
