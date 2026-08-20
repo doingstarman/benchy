@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { BUILTIN_KEYS, DEFAULT_DISABLED_METRICS } from './metrics/builtins.js';
 export const DEFAULT_PROVIDER_SETTINGS = {
     temperature: 0.7,
     topP: 1.0,
@@ -47,6 +48,13 @@ function readCodeExecTimeout(raw) {
         return CODE_EXEC_TIMEOUT_DEFAULT_MS;
     return clamp(Math.round(raw), CODE_EXEC_TIMEOUT_MIN_MS, CODE_EXEC_TIMEOUT_MAX_MS);
 }
+// Absent → the code default (reasoning_ms off). Present → the user's explicit list,
+// filtered to real built-in keys (a stale key from a removed built-in is dropped).
+function readDisabledMetrics(raw) {
+    if (!Array.isArray(raw))
+        return [...DEFAULT_DISABLED_METRICS];
+    return raw.filter(k => typeof k === 'string' && BUILTIN_KEYS.includes(k));
+}
 // One read for the whole blob — the route would otherwise parse config.json
 // three times to answer one GET.
 export async function getAppSettings() {
@@ -55,7 +63,23 @@ export async function getAppSettings() {
         codeExecution: config.codeExecution === true,
         codeExecTimeoutMs: readCodeExecTimeout(config.codeExecTimeoutMs),
         runDefaults: readRunDefaults(config.runDefaults),
+        disabledMetrics: readDisabledMetrics(config.disabledMetrics),
     };
+}
+export async function getDisabledMetrics() {
+    return readDisabledMetrics((await readConfig()).disabledMetrics);
+}
+export async function setBuiltinMetricEnabled(key, enabled) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const disabled = new Set(readDisabledMetrics(config.disabledMetrics));
+        if (enabled)
+            disabled.delete(key);
+        else
+            disabled.add(key);
+        config.disabledMetrics = [...disabled];
+        await writeConfig(config);
+    });
 }
 export async function getCodeExecTimeoutMs() {
     return readCodeExecTimeout((await readConfig()).codeExecTimeoutMs);

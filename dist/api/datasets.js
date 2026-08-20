@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { getDb } from '../db/index.js';
 import { getProviders, DEFAULT_PROVIDER_SETTINGS, getCodeExecutionEnabled, getAppRunDefaults, getCodeExecTimeoutMs } from '../config.js';
 import { runCell, finalizeRun, getAdapter } from './benchmark.js';
+import { materializeRunMetrics } from './metrics.js';
 import { runTests, interpreterCommand } from '../codeRun.js';
 import { isLocalRequest } from './csrf.js';
 import { getAttachmentRow, bindAttachmentToDataset, cloneAttachmentOnto, deleteAttachment, deleteAttachmentsForDataset, uploadPath, } from './uploads.js';
@@ -703,6 +704,8 @@ export async function registerDatasetsRoutes(app) {
         // deleted since, which there's no mapping to recover.
         const covered = itemIds ? itemIds.map(id => byId.get(id)) : all;
         scoreDatasetRun(req.params.runId, dataset.schema, covered, dataset.normRules);
+        // Scores changed → score-dependent custom metrics need recomputing.
+        void materializeRunMetrics(req.params.runId).catch(() => { });
         return reply.code(200).send({ data: { rescored: true } });
     });
     // "это то же самое": mark a variable type as leniently scored for this dataset.
