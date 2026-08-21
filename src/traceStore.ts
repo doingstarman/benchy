@@ -4,10 +4,16 @@ import type { TraceStepRow } from './types.js'
 
 // Persist a result's full trajectory. Called once with the ordered steps captured
 // live from the trace stream, mirroring how tool_calls is written on the result.
+//
+// A step's `id` is unique only WITHIN a run — agents legitimately reuse the same
+// ids across runs (a fixed script prints "plan"/"calc" every time). trace_steps.id
+// is a global PK, so we namespace the stored id (and parent ref) by result_id to
+// keep them globally unique while the parent chain still resolves per result.
 export function insertTraceSteps(resultId: string, steps: TraceStep[]): void {
   if (steps.length === 0) return
   const db = getDb()
   const now = Date.now()
+  const gid = (id: string) => `${resultId}:${id}`
   const stmt = db.prepare(
     `INSERT INTO trace_steps
       (id, result_id, step_index, parent_id, kind, name, ms, input_tokens, output_tokens, cost, payload, payload_truncated, is_error, created_at)
@@ -16,7 +22,8 @@ export function insertTraceSteps(resultId: string, steps: TraceStep[]): void {
   db.transaction(() => {
     steps.forEach((s, i) => {
       stmt.run(
-        s.id, resultId, i, s.parentId, s.kind, s.name, s.ms,
+        gid(s.id), resultId, i, s.parentId != null ? gid(s.parentId) : null,
+        s.kind, s.name, s.ms,
         s.inputTokens, s.outputTokens, s.cost, s.payload,
         s.payloadTruncated ? 1 : 0, s.isError ? 1 : 0, now,
       )

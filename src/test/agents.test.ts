@@ -171,12 +171,32 @@ describe('a run persists the trace and reads it back in order', () => {
     expect(resultId).not.toBe('')
 
     const trace = data<TraceStepRow[]>(await req('GET', `/api/results/${resultId}/trace`))
-    expect(trace.map(s => s.id)).toEqual(['a', 'b', 'c'])
     expect(trace.map(s => s.kind)).toEqual(['think', 'tool', 'model'])
-    const b = trace.find(s => s.id === 'b')
-    expect(b?.parentId).toBe('a')
-    expect(b?.depth).toBe(1)
-    const c = trace.find(s => s.id === 'c')
-    expect(c?.cost).toBeCloseTo(0.001, 6)
+    // Stored ids are namespaced by result (agents reuse ids across runs), but the
+    // parent chain still resolves and depth is derived from it.
+    const b = trace[1]
+    expect(b.parentId).toBe(trace[0].id)
+    expect(b.depth).toBe(1)
+    expect(trace[2].cost).toBeCloseTo(0.001, 6)
+  })
+
+  it('persists two results whose step ids collide (fixed ids reused across a run)', async () => {
+    // The same agent emits the SAME step ids ('a','b','c') for every prompt; two
+    // results in one run must not violate the global trace_steps.id PK.
+    const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('full4.mjs', FULL)}`)))
+    const { runId } = data<{ runId: string }>(await req('POST', '/api/benchmark', { prompts: ['one', 'two'], models: [t.id] }))
+
+    let results: { id: string; error: string | null }[] = []
+    for (let i = 0; i < 200; i++) {
+      const run = data<{ status: string; results: { id: string; error: string | null }[] }>(await req('GET', `/api/runs/${runId}`))
+      if (run.status === 'done' || run.status === 'error') { results = run.results; break }
+      await new Promise(r => setTimeout(r, 30))
+    }
+    expect(results).toHaveLength(2)
+    for (const r of results) {
+      expect(r.error).toBeNull()
+      const trace = data<TraceStepRow[]>(await req('GET', `/api/results/${r.id}/trace`))
+      expect(trace.map(s => s.kind)).toEqual(['think', 'tool', 'model'])
+    }
   })
 })
