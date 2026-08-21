@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Target, ProviderView, ProviderDefaults, ModelTargetConfig } from '../../../src/types'
+import type { Target, ModelTarget, ProviderView, ProviderDefaults, ModelTargetConfig } from '../../../src/types'
 import { targetsApi, providersApi } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { SliderField } from '../components/SliderField'
@@ -18,24 +18,24 @@ const FIELDS: { key: keyof ProviderDefaults; label: string; min: number; max: nu
   { key: 'maxOutputTokens', label: 'Max tokens', min: 256, max: 32768, step: 256, allowAuto: true },
 ]
 
-const isOrphan = (t: Target, byId: Map<string, ProviderView>): boolean => {
+const isOrphan = (t: ModelTarget, byId: Map<string, ProviderView>): boolean => {
   const p = byId.get(t.config.providerId)
   return !p || !p.models.includes(t.config.model)
 }
 
 export function Models() {
   const { t } = useT()
-  const [targets, setTargets] = useState<Target[]>([])
+  const [targets, setTargets] = useState<ModelTarget[]>([])
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [loading, setLoading] = useState(true)
   const [grouped, setGrouped] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  const [pendingDelete, setPendingDelete] = useState<Target | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<ModelTarget | null>(null)
 
   const load = useCallback(async () => {
     const [ts, ps] = await Promise.all([targetsApi.list('model'), providersApi.list()])
-    setTargets(ts)
+    setTargets(ts as ModelTarget[])
     setProviders(ps)
     setLoading(false)
   }, [])
@@ -61,7 +61,7 @@ export function Models() {
   }, [targets])
 
   const groups = useMemo(() => {
-    const m = new Map<string, Target[]>()
+    const m = new Map<string, ModelTarget[]>()
     for (const tgt of targets) {
       const list = m.get(tgt.config.providerId) ?? []
       list.push(tgt)
@@ -82,7 +82,7 @@ export function Models() {
     await load()
     setEditingId(created.id)
   }
-  const requestDelete = (tgt: Target) => setPendingDelete(tgt)
+  const requestDelete = (tgt: ModelTarget) => setPendingDelete(tgt)
   async function confirmDelete() {
     const tgt = pendingDelete
     if (!tgt) return
@@ -92,7 +92,7 @@ export function Models() {
     await load()
   }
 
-  const row = (tgt: Target) => (
+  const row = (tgt: ModelTarget) => (
     <TargetRow
       key={tgt.id}
       target={tgt}
@@ -224,7 +224,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function TargetEditor({ target, provider, onClose, onSave, onDuplicate, onDelete }: {
-  target: Target
+  target: ModelTarget
   provider?: ProviderView
   onClose: () => void
   onSave: (body: { name: string; tags: string[]; enabled: boolean; config: ModelTargetConfig }) => void | Promise<void>

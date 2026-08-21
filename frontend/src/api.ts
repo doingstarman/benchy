@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, ModelTargetConfig, MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, TargetConfig, ModelTargetConfig, AgentTargetConfig, TraceStepRow, MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -52,18 +52,42 @@ export const providersApi = {
 
 // ─── targets (participants registry) ──────────────────────────────────────────
 
-export type TargetUpsert = { name: string; config: ModelTargetConfig; tags?: string[]; enabled?: boolean; kind?: TargetKind }
+export type TargetUpsert = { name: string; config: TargetConfig | AgentConfigUpsert; tags?: string[]; enabled?: boolean; kind?: TargetKind }
+// The agent editor sends secret values write-only under `secrets` (name→value);
+// they are stored server-side by name and never returned, so a saved agent config
+// carries only `secretRefs`.
+export type AgentConfigUpsert = Partial<AgentTargetConfig> & { secrets?: Record<string, string> }
+
+// Two axes: process (ran/exit/wall) and structure (how many step events). The three
+// outcomes fall out of the pair — see docs/agent-protocol.md.
+export interface HandshakeResult {
+  ok: boolean
+  spokeProtocol: boolean
+  steps: number
+  reportedUsage: { inputTokens: number; outputTokens: number; reasoningTokens?: number }
+  output: string
+  error: string | null
+}
 
 export const targetsApi = {
   list: (kind: TargetKind = 'model') => apiFetch<Target[]>(`/api/targets?kind=${kind}`),
   get: (id: string) => apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`),
   create: (body: TargetUpsert) =>
     apiFetch<Target>('/api/targets', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: string, body: Partial<{ name: string; tags: string[]; enabled: boolean; config: ModelTargetConfig }>) =>
+  update: (id: string, body: Partial<{ name: string; tags: string[]; enabled: boolean; config: TargetConfig | AgentConfigUpsert }>) =>
     apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   duplicate: (id: string) =>
     apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
   remove: (id: string) => fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  handshake: (id: string, prompt?: string) =>
+    apiFetch<HandshakeResult>(`/api/targets/${encodeURIComponent(id)}/handshake`, {
+      method: 'POST', body: JSON.stringify({ ...(prompt ? { prompt } : {}) }),
+    }),
+}
+
+// ─── agent trace ────────────────────────────────────────────────────────────
+export const traceApi = {
+  get: (resultId: string) => apiFetch<TraceStepRow[]>(`/api/results/${encodeURIComponent(resultId)}/trace`),
 }
 
 export interface ProviderDraft {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { createServer } from '../server.js'
 import { getDb, closeDb } from '../db/index.js'
-import type { Target } from '../types.js'
+import type { Target, ModelTargetConfig } from '../types.js'
 
 let server: FastifyInstance
 let base: string
@@ -53,7 +53,7 @@ describe('targets CRUD', () => {
     const t = data<Target>(created)
     expect(t.id).toBe('openai:gpt-4o')
     expect(t.kind).toBe('model')
-    expect(t.config.providerId).toBe('openai')
+    expect((t.config as ModelTargetConfig).providerId).toBe('openai')
     expect(t.enabled).toBe(true)
 
     const list = await req('GET', '/api/targets?kind=model')
@@ -83,7 +83,7 @@ describe('targets CRUD', () => {
     expect(u.name).toBe('renamed')
     expect(u.tags).toEqual(['fast', 'json'])
     expect(u.enabled).toBe(false)
-    expect(u.config.defaults?.temperature).toBe(0.2)
+    expect((u.config as ModelTargetConfig).defaults?.temperature).toBe(0.2)
   })
 
   it('duplicates a target into a distinct variant, returning the new one', async () => {
@@ -93,7 +93,7 @@ describe('targets CRUD', () => {
     const d = data<Target>(dup)
     expect(d.id).not.toBe(t.id)
     expect(d.id.startsWith('openai:gpt-4o#')).toBe(true)
-    expect(d.config.defaults?.temperature).toBe(0.9)
+    expect((d.config as ModelTargetConfig).defaults?.temperature).toBe(0.9)
     expect(data<Target[]>(await req('GET', '/api/targets')).length).toBe(2)
   })
 })

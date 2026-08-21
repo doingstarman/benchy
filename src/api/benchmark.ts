@@ -10,12 +10,14 @@ import { scriptAdapter } from '../adapters/script.js'
 import { webhookAdapter } from '../adapters/webhook.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js'
-import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec } from '../adapters/base.js'
-import type { ProviderType, BenchmarkRequest, RunSettings, RunKind } from '../types.js'
+import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec, TraceStep } from '../adapters/base.js'
+import type { ProviderType, BenchmarkRequest, RunSettings, RunKind, AgentTargetConfig } from '../types.js'
 import { resolveTools, type Tool } from '../tools/index.js'
 import { connectMcpServer } from '../tools/mcp.js'
 import { getCustomTools, getSkills, getMcpServers } from '../config.js'
 import { materializeRunMetrics } from './metrics.js'
+import { buildAgentCall } from '../agentRun.js'
+import { insertTraceSteps, traceAggregate } from '../traceStore.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -128,6 +130,13 @@ export async function runCell(
 ) {
   const [providerId, ...modelParts] = modelKey.split(':')
   const model = modelParts.join(':')
+
+  // An agent participant runs a user program, not a provider model. Detect it by
+  // its target row and hand off — the tool loop below is only for model targets.
+  const agentRow = getDb().prepare("SELECT config FROM targets WHERE id = ? AND kind = 'agent'").get(modelKey) as { config: string } | undefined
+  if (agentRow) {
+    return runAgentCell(runId, promptIndex, promptText, modelKey, JSON.parse(agentRow.config) as AgentTargetConfig, history, systemPrompt)
+  }
 
   const db = getDb()
   const resultId = randomUUID()
@@ -303,6 +312,116 @@ export async function runCell(
     const msg = err instanceof Error ? err.message : String(err)
     db.prepare('UPDATE results SET error = ? WHERE id = ?').run(msg, resultId)
     broadcast(runId, 'cell_error', { runId, promptIndex, model: modelKey, error: msg })
+  } finally {
+    db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId)
+  }
+}
+
+// An agent participant: run the user's program, stream its trajectory live, store
+// the trace, and record agent metrics. Mirrors runCell's row lifecycle but consumes
+// the trace protocol (step/tool_activity/token) instead of the model tool loop.
+// benchy OBSERVES — it never runs the agent's tools. cwd/env/secrets/timeout come
+// from the agent config; a fatal timeout/crash lands as scope:agent (see script.ts).
+export async function runAgentCell(
+  runId: string,
+  promptIndex: number,
+  promptText: string,
+  targetId: string,
+  cfg: AgentTargetConfig,
+  history: Message[] = [],
+  systemPrompt?: string,
+) {
+  const db = getDb()
+  const resultId = randomUUID()
+  db.prepare(
+    'INSERT INTO results (id, run_id, prompt_index, model, provider_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(resultId, runId, promptIndex, targetId, 'agent', '', Date.now())
+  broadcast(runId, 'cell_start', { runId, promptIndex, model: targetId })
+
+  const attachments = await loadAttachments(runId, promptIndex)
+  const convo: Message[] = [
+    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+    ...history,
+    { role: 'user', content: promptText, ...(attachments.length ? { attachments } : {}) },
+  ]
+
+  const maxAttempts = Math.max(1, 1 + (cfg.retries ?? 0))
+  let finalSteps: TraceStep[] = []
+  let finalText = ''
+  let ttfs: number | null = null
+  let totalTime = 0
+  let usageIn = 0
+  let usageOut = 0
+  let agentCost: number | null = null
+  let fatal: string | null = null
+
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const steps: TraceStep[] = []
+      let text = ''
+      let localTtfs: number | null = null
+      let inTok = 0
+      let outTok = 0
+      let cost: number | null = null
+      let err: string | null = null
+      let errScope: 'agent' | 'task' | null = null
+      const t0 = Date.now()
+
+      const { adapter, config } = await buildAgentCall(cfg, targetId)
+      for await (const chunk of adapter.stream(convo, config)) {
+        if (chunk.type === 'token') {
+          if (localTtfs === null && chunk.text) localTtfs = Date.now() - t0
+          text += chunk.text
+          broadcast(runId, 'cell_token', { runId, promptIndex, model: targetId, text: chunk.text })
+        } else if (chunk.type === 'reasoning') {
+          broadcast(runId, 'cell_reasoning', { runId, promptIndex, model: targetId, text: chunk.text })
+        } else if (chunk.type === 'step') {
+          steps.push(chunk.step)
+          if (chunk.step.inputTokens) inTok += chunk.step.inputTokens
+          if (chunk.step.outputTokens) outTok += chunk.step.outputTokens
+          if (chunk.step.cost != null) cost = (cost ?? 0) + chunk.step.cost
+          broadcast(runId, 'cell_step', { runId, promptIndex, model: targetId, step: chunk.step })
+        } else if (chunk.type === 'done') {
+          inTok += chunk.usage.inputTokens
+          outTok += chunk.usage.outputTokens
+        } else if (chunk.type === 'error') {
+          err = chunk.message
+          errScope = chunk.scope === 'task' ? 'task' : 'agent'
+        }
+      }
+
+      totalTime = Date.now() - t0
+      finalSteps = steps; finalText = text; ttfs = localTtfs; usageIn = inTok; usageOut = outTok; agentCost = cost
+
+      // A process death (scope:agent) is retryable up to the configured count; a
+      // task-level declared failure is a real answer, not a crash — don't retry it.
+      if (err && errScope === 'agent' && attempt < maxAttempts - 1) {
+        broadcast(runId, 'cell_token', { runId, promptIndex, model: targetId, text: `\n[retry ${attempt + 1}/${maxAttempts - 1}]\n` })
+        continue
+      }
+      fatal = err
+      break
+    }
+
+    insertTraceSteps(resultId, finalSteps)
+    const agg = traceAggregate(resultId)
+    db.prepare(
+      'UPDATE results SET text = ?, ttfs = ?, total_time = ?, input_tokens = ?, output_tokens = ?, error = ? WHERE id = ?'
+    ).run(finalText, ttfs, totalTime, usageIn || null, usageOut || null, fatal, resultId)
+
+    if (fatal) {
+      broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: fatal })
+    } else {
+      broadcast(runId, 'cell_done', {
+        runId, promptIndex, model: targetId, ttfs, totalTime,
+        steps: agg?.steps ?? 0, toolCalls: agg?.toolCalls ?? 0, agentCost,
+        usage: { inputTokens: usageIn, outputTokens: usageOut },
+      })
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    db.prepare('UPDATE results SET error = ? WHERE id = ?').run(msg, resultId)
+    broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: msg })
   } finally {
     db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId)
   }

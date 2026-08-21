@@ -5,13 +5,13 @@ import { metricsApi } from '../api'
 import type { MetricDef } from '../../../src/types'
 
 const b = (key: string, name: string, over: Partial<MetricDef> = {}): MetricDef => ({
-  key, name, kind: 'builtin', expression: null, unit: 'ms', format: 'ms', direction: 'lower', scope: 'answer', aggregate: null, nullable: true, enabled: true, ...over,
+  key, name, kind: 'builtin', expression: null, unit: 'ms', format: 'ms', direction: 'lower', scope: 'answer', aggregate: null, nullable: true, enabled: true, appliesTo: ['model'], ...over,
 })
 const REGISTRY: MetricDef[] = [
   b('ttfs', 'Time to first token'),
   b('reasoning_ms', 'Reasoning time', { enabled: false }),
   b('cost', 'Cost', { unit: 'USD', direction: 'lower' }),
-  { key: 'tokens_per_sec', name: 'Tokens / second', kind: 'custom', expression: 'output_tokens / total_time * 1000', unit: 'tok/s', format: 'raw', direction: 'higher', scope: 'answer', aggregate: null, nullable: true, enabled: true },
+  { key: 'tokens_per_sec', name: 'Tokens / second', kind: 'custom', expression: 'output_tokens / total_time * 1000', unit: 'tok/s', format: 'raw', direction: 'higher', scope: 'answer', aggregate: null, nullable: true, enabled: true, appliesTo: ['model', 'agent', 'pipeline'] },
 ]
 
 vi.mock('../api', () => ({

@@ -1,4 +1,4 @@
-import type { Target, ProviderView, ProviderDefaults } from '../../../src/types'
+import type { ModelTarget, ProviderView, ProviderDefaults } from '../../../src/types'
 import { resolvePricing } from '../../../src/pricing'
 import { IconButton, PillToggle } from './ui'
 import { IconPencil, IconCopy, IconTrash } from './icons'
@@ -20,7 +20,7 @@ function overrideSummary(d: ProviderDefaults | undefined, inheritedText: string)
 // One participant in the list. Presentational: pricing is real (config today),
 // latency/throughput are placeholders until the metrics registry (stage 2).
 export function TargetRow({ target, provider, orphaned, note, onEdit, onToggle, onDuplicate, onDelete }: {
-  target: Target
+  target: ModelTarget
   provider?: ProviderView
   orphaned: boolean
   note?: string

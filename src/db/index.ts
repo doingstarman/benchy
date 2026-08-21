@@ -159,6 +159,9 @@ CREATE TABLE IF NOT EXISTS metrics (
   nullable INTEGER NOT NULL DEFAULT 1,
   enabled INTEGER NOT NULL DEFAULT 1,
   sort_order INTEGER NOT NULL DEFAULT 0,
+  -- JSON TargetKind[]: which participant kinds this metric applies to. A metric
+  -- not applicable to a target kind is SKIPPED for it (a state distinct from null).
+  applies_to TEXT NOT NULL DEFAULT '["model","agent","pipeline"]',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -176,6 +179,31 @@ CREATE TABLE IF NOT EXISTS metric_values (
 
 CREATE INDEX IF NOT EXISTS idx_metric_values_result ON metric_values(result_id);
 CREATE INDEX IF NOT EXISTS idx_metric_values_run ON metric_values(run_id, metric_key);
+
+-- One node of an agent's trajectory for a single result (see docs/agent-protocol.md).
+-- benchy OBSERVES these — it never executes them, unlike the model→benchy tool
+-- protocol. step_index preserves emission order; parent_id nests up to 3 levels
+-- (deeper is flattened at parse time). payload is capped and payload-truncated is
+-- flagged via a marker the reader restores. cost NULL = unknown (never 0).
+CREATE TABLE IF NOT EXISTS trace_steps (
+  id TEXT PRIMARY KEY,
+  result_id TEXT NOT NULL,
+  step_index INTEGER NOT NULL,
+  parent_id TEXT,
+  kind TEXT NOT NULL,
+  name TEXT,
+  ms INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cost REAL,
+  payload TEXT,
+  payload_truncated INTEGER NOT NULL DEFAULT 0,
+  is_error INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (result_id) REFERENCES results(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_trace_steps_result ON trace_steps(result_id, step_index);
 `
 
 let db: Database.Database | null = null
@@ -254,6 +282,9 @@ export async function initDb(path?: string): Promise<void> {
     // model key stays in results.model too, so nothing reading it today breaks.
     'ALTER TABLE results ADD COLUMN target_id TEXT',
     'ALTER TABLE runs ADD COLUMN target_ids TEXT',
+    // Metrics gained a per-kind applicability list (agents introduced metrics that
+    // do not apply to model targets); existing customs default to all kinds.
+    `ALTER TABLE metrics ADD COLUMN applies_to TEXT NOT NULL DEFAULT '["model","agent","pipeline"]'`,
   ]) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }

@@ -17,11 +17,20 @@ export interface AnswerMetricInput {
   score: number | null
   model: string                                   // "providerId:model"
   pricingOverrides?: Record<string, ModelPricing>
+  // Agent-only, derived from the result's trace_steps. Absent for model results,
+  // where the agent metrics resolve to null (never 0).
+  steps?: number | null
+  toolCalls?: number | null
+  toolErrors?: number | null
+  agentCost?: number | null
 }
 
 // The per-answer built-ins a custom expression can reference. `elo` is per-run only
 // (from arena standings) and is not part of the per-answer scope.
 export function resolveBuiltins(r: AnswerMetricInput): Scope {
+  const toolCalls = r.toolCalls ?? null
+  const toolErrors = r.toolErrors ?? null
+  const toolErrorRate = toolCalls && toolCalls > 0 && toolErrors != null ? toolErrors / toolCalls : null
   return {
     ttfs: r.ttfs,
     total_time: r.totalTime,
@@ -31,6 +40,11 @@ export function resolveBuiltins(r: AnswerMetricInput): Scope {
     reasoning_ms: r.reasoningMs,
     score: r.score,
     cost: computeCost(resolvePricing(r.model, r.pricingOverrides), r.inputTokens, r.outputTokens),
+    steps: r.steps ?? null,
+    tool_calls: toolCalls,
+    tool_error_rate: toolErrorRate,
+    agent_cost: r.agentCost ?? null,
+    wall_clock: r.totalTime,
   }
 }
 

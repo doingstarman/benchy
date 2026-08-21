@@ -63,16 +63,45 @@ export interface ModelTargetConfig {
   pricing?: ModelPricing
 }
 
+// config for kind='agent': a user program benchy runs and reads a trace from.
+// SECURITY: secrets are NEVER stored here — the target keeps only `secretRefs`
+// (names), resolved from ~/.benchy/config.json into the child's env at spawn.
+// `env` holds only non-secret name→value pairs. See docs/agent-protocol.md.
+export interface AgentTargetConfig {
+  transport: 'command' | 'http'
+  command?: string                        // transport='command'
+  cwd?: string
+  url?: string                            // transport='http'
+  authHeader?: string                     // transport='http', e.g. 'Authorization'
+  env?: Record<string, string>
+  secretRefs?: string[]                   // names of secrets in config.json
+  timeoutMs: number
+  maxSteps: number
+  maxCostUsd?: number
+  retries: number
+}
+
+export function isAgentConfig(c: TargetConfig): c is AgentTargetConfig {
+  return 'transport' in c
+}
+
+export type TargetConfig = ModelTargetConfig | AgentTargetConfig
+
 export interface Target {
   id: string
   kind: TargetKind
   name: string
-  config: ModelTargetConfig
+  config: TargetConfig
   tags: string[]
   enabled: boolean
   createdAt: number
   updatedAt: number
 }
+
+// Narrowed views for code that works with one kind only (the model list, an agent
+// editor) so it need not re-narrow the config union at every access.
+export type ModelTarget = Omit<Target, 'config'> & { config: ModelTargetConfig }
+export type AgentTarget = Omit<Target, 'config'> & { config: AgentTargetConfig }
 
 // What the API hands back for a provider. `apiKey` is absent by construction,
 // not by convention: the key stays on the backend and only its mask travels, so
@@ -280,6 +309,24 @@ export interface Result {
   codeReport?: { cases: { name: string; ok: boolean; err?: string }[]; error: string | null }
 }
 
+// ── agent trace ──
+// A stored trajectory node, read back for a result. Mirrors the trace_steps row;
+// `depth` is derived from the parent chain for rendering (0-based, ≤3).
+export interface TraceStepRow {
+  id: string
+  parentId: string | null
+  depth: number
+  kind: string
+  name: string | null
+  ms: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  cost: number | null
+  payload: string | null
+  payloadTruncated: boolean
+  isError: boolean
+}
+
 // ── metrics registry ──
 // A metric is a named, formatted, comparable value. Built-ins resolve over existing
 // `results` columns / functions at read time (never stored); only custom metrics —
@@ -303,6 +350,9 @@ export interface MetricDef {
   aggregate: MetricAggregate | null
   nullable: boolean
   enabled: boolean
+  // Which participant kinds this metric applies to. A target whose kind is absent
+  // here is SKIPPED for the metric (a state distinct from a null value and from 0).
+  appliesTo: TargetKind[]
 }
 
 // A user-defined metric row.
@@ -318,6 +368,7 @@ export interface CustomMetric {
   nullable: boolean
   enabled: boolean
   sortOrder: number
+  appliesTo: TargetKind[]
   createdAt: number
   updatedAt: number
 }

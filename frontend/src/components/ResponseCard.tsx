@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MetricsBar } from './MetricsBar'
 import { ActivityTrace, ActivityTraceStyles } from './ActivityTrace'
+import { TraceView } from './TraceView'
 import { useShowReasoning, useMonoAnswers } from '../prefs'
-import { runsApi } from '../api'
+import { runsApi, traceApi } from '../api'
+import type { TraceStepRow } from '../../../src/types'
 
 interface ResponseCardProps {
   runId: string
@@ -34,6 +36,17 @@ export function ResponseCard({
     const idx = model.indexOf(':')
     return idx >= 0 ? [model.slice(idx + 1), model.slice(0, idx)] : [model, '']
   })()
+
+  // An agent participant carries a trajectory, not just an answer. Fetch it once the
+  // result has settled (steps are persisted when the cell finishes).
+  const isAgent = providerId === 'agent'
+  const [trace, setTrace] = useState<TraceStepRow[] | null>(null)
+  useEffect(() => {
+    if (!isAgent || !resultId || isStreaming) return
+    let live = true
+    traceApi.get(resultId).then(t => { if (live) setTrace(t) }).catch(() => {})
+    return () => { live = false }
+  }, [isAgent, resultId, isStreaming])
 
   async function vote(v: 'up' | 'down') {
     if (!resultId) return
@@ -133,6 +146,9 @@ export function ResponseCard({
             status={isStreaming ? 'streaming' : 'done'}
             answerStarted={text.length > 0}
           />
+        )}
+        {isAgent && trace && trace.length > 0 && (
+          <div style={{ marginBottom: 10 }}><TraceView steps={trace} layout="narrow" /></div>
         )}
         {error ?? text}
         {isStreaming && !error && (

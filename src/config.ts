@@ -44,6 +44,11 @@ interface Config {
   // absent key means "not set", which is what keeps an install that never opened
   // Settings sending exactly what it sent before.
   runDefaults?: AppRunDefaults
+  // Named secrets for agent targets. An agent's config stores only the NAMES
+  // (secretRefs); the values live here and are resolved into the child's env at
+  // spawn. Never leaves the backend — masked in every API response, like provider
+  // keys. Stored cleartext on the user's own machine, same trust model as apiKey.
+  secrets?: Record<string, string>
 }
 
 export interface AppRunDefaults {
@@ -337,6 +342,38 @@ export async function removeSkill(id: string): Promise<void> {
     const config = await readConfig()
     config.skills = (config.skills ?? []).filter(s => s.id !== id)
     await writeConfig(config)
+  })
+}
+
+// The names of stored agent secrets (never the values).
+export async function getSecretNames(): Promise<string[]> {
+  return Object.keys((await readConfig()).secrets ?? {})
+}
+
+// Resolve a set of secret names to name→value pairs for injection into a child's
+// env at spawn. Unknown names are silently skipped (the target keeps a stale ref).
+export async function resolveSecrets(names: string[]): Promise<Record<string, string>> {
+  const secrets = (await readConfig()).secrets ?? {}
+  const out: Record<string, string> = {}
+  for (const n of names) if (n in secrets) out[n] = secrets[n]
+  return out
+}
+
+// Store/replace a named secret. Empty value deletes it.
+export async function setSecret(name: string, value: string): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    const secrets = config.secrets ?? {}
+    if (value) secrets[name] = value; else delete secrets[name]
+    config.secrets = secrets
+    await writeConfig(config)
+  })
+}
+
+export async function removeSecret(name: string): Promise<void> {
+  return serialize(async () => {
+    const config = await readConfig()
+    if (config.secrets) { delete config.secrets[name]; await writeConfig(config) }
   })
 }
 

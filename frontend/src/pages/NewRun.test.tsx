@@ -35,6 +35,8 @@ vi.mock('../api', () => ({
   toolsApi: { list: vi.fn().mockResolvedValue([]) },
   skillsApi: { list: vi.fn().mockResolvedValue([]) },
   mcpApi: { list: vi.fn().mockResolvedValue([]) },
+  targetsApi: { list: vi.fn().mockResolvedValue([]) },
+  traceApi: { get: vi.fn().mockResolvedValue([]) },
   // Feeds the "inherited" readouts in the run-settings panel. Absent from this
   // mock, every case here died on `settingsApi.get is not a function`.
   settingsApi: {

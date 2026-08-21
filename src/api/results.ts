@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '../db/index.js'
 import { computeStandings } from '../arena.js'
+import { readTrace } from '../traceStore.js'
 import type { ArenaVerdict, DatasetVar, DatasetVarType } from '../types.js'
 
 // ─── row shapes ──────────────────────────────────────────────────────────────
@@ -175,6 +176,12 @@ export async function registerResultsRoutes(app: FastifyInstance): Promise<void>
         }
       }),
     }
+  })
+
+  // The agent trajectory for one result, in emission order (read-only). Returns an
+  // empty array for a model result or an agent that emitted no structured steps.
+  app.get<{ Params: { id: string } }>('/api/results/:id/trace', async req => {
+    return { data: readTrace(req.params.id) }
   })
 
   // Per-test analytics summary (3c). Everything derived on read.

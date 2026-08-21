@@ -1,5 +1,6 @@
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
 import { humanizeNetworkError, describeHttpError } from '../errors.js'
+import { isNdjson, streamNdjson } from './protocol.js'
 
 export const httpJsonAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -28,6 +29,17 @@ export const httpJsonAdapter: Adapter = {
     }
 
     const contentType = response.headers.get('content-type') ?? ''
+
+    // An agent endpoint streams its trajectory as NDJSON; a plain model endpoint
+    // uses SSE or one-shot JSON, both unchanged below.
+    if (isNdjson(contentType) && response.body) {
+      yield* streamNdjson(response.body, {
+        model: config.model,
+        pricingOverrides: config.agent?.pricingOverrides,
+        payloadCapBytes: config.agent?.payloadCapBytes,
+      })
+      return
+    }
 
     if (contentType.includes('text/event-stream') && response.body) {
       const reader = response.body.getReader()

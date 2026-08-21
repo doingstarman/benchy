@@ -1,5 +1,6 @@
 import type { Adapter, AdapterConfig, Chunk, Message } from './base.js'
 import { humanizeNetworkError, describeHttpError } from '../errors.js'
+import { isNdjson, streamNdjson } from './protocol.js'
 
 export const webhookAdapter: Adapter = {
   async *stream(messages: Message[], config: AdapterConfig): AsyncIterable<Chunk> {
@@ -28,6 +29,18 @@ export const webhookAdapter: Adapter = {
     }
 
     const contentType = response.headers.get('content-type') ?? ''
+
+    // An agent webhook may stream its trajectory as NDJSON; a plain webhook still
+    // returns one-shot JSON/text, handled below.
+    if (isNdjson(contentType) && response.body) {
+      yield* streamNdjson(response.body, {
+        model: config.model,
+        pricingOverrides: config.agent?.pricingOverrides,
+        payloadCapBytes: config.agent?.payloadCapBytes,
+      })
+      return
+    }
+
     let text: string
 
     if (contentType.includes('application/json')) {

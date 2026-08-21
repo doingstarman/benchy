@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi, settingsApi } from '../api'
+import { providersApi, benchmarkApi, runsApi, uploadsApi, toolsApi, skillsApi, mcpApi, settingsApi, targetsApi } from '../api'
+import { TraceView } from '../components/TraceView'
 import { splitFencedSegments, wholeAnswerHtml, type Segment } from '../lib/artifact'
 import { CodeBlock } from '../components/CodeBlock'
 import { SliderField } from '../components/SliderField'
@@ -16,7 +17,7 @@ import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } fro
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 import { resolvePricing, formatCost } from '../../../src/pricing'
 import { useT, t } from '../i18n'
-import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer } from '../../../src/types'
+import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer, Target, TraceStepRow } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = FACTORY_RUN_DEFAULTS
 
@@ -42,6 +43,8 @@ interface UIResult {
   toolCalls: UIToolCall[]
   status: 'pending' | 'streaming' | 'done' | 'error'
   error?: string
+  // Agent participants only: the trajectory, accumulated live from cell_step.
+  steps?: TraceStepRow[]
 }
 
 interface Turn {
@@ -1453,6 +1456,8 @@ export function NewRun() {
   const location = useLocation()
 
   const [providers, setProviders] = useState<ProviderView[]>([])
+  const [agents, setAgents] = useState<Target[]>([])
+  const agentKeys = useMemo(() => new Set(agents.map(a => a.id)), [agents])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
   // Which tools this run enables. Empty by default — an ordinary run sends no
   // tools and measures exactly what it measured before tools existed. Holds both
@@ -1676,6 +1681,10 @@ export function NewRun() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    targetsApi.list('agent').then(setAgents).catch(() => {})
+  }, [])
+
   // Only feeds the "inherited" readouts in the settings panel — the server does
   // its own merge either way, so a failed fetch shows the factory values rather
   // than blocking the page.
@@ -1711,6 +1720,17 @@ export function NewRun() {
       needsKey: !p.apiKeyMask && !p.baseUrl,
       models: p.models.map(m => ({ key: `${p.id}:${m}`, label: m })),
     }))
+  // Agents join the picker as their own group; their target id is the participant
+  // key, so the run request carries it straight through to runAgentCell.
+  const enabledAgents = agents.filter(a => a.enabled)
+  if (enabledAgents.length > 0) {
+    providerGroups.push({
+      id: '__agents__',
+      name: t('agents.title'),
+      needsKey: false,
+      models: enabledAgents.map(a => ({ key: a.id, label: a.name })),
+    })
+  }
 
   function toggleModel(key: string) {
     setSelectedModels(prev => {
@@ -1789,6 +1809,14 @@ export function NewRun() {
 
     on<{ text: string }>('cell_reasoning', ({ promptIndex, model, text }) =>
       updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, reasoning: r.reasoning + text, status: 'streaming' })))
+
+    on<{ step: Omit<TraceStepRow, 'depth'> }>('cell_step', ({ promptIndex, model, step }) =>
+      updateTurnResult(indexOf(promptIndex), model, r => {
+        const prev = r.steps ?? []
+        const parent = step.parentId ? prev.find(s => s.id === step.parentId) : null
+        const depth = parent ? Math.min(parent.depth + 1, 3) : 0
+        return { ...r, steps: [...prev, { ...step, depth }], status: 'streaming' }
+      }))
 
     on<{ id: string; name: string; args: unknown }>('cell_tool_call', ({ promptIndex, model, id, name, args }) =>
       updateTurnResult(indexOf(promptIndex), model, r => ({ ...r, toolCalls: [...r.toolCalls, { id, name, args }], status: 'streaming' })))
@@ -2049,7 +2077,8 @@ export function NewRun() {
     const r = turn.results.get(key)
     if (!r) return null
     const cellKey = `${turn.promptIndex}:${key}`
-    const label = key.split(':').slice(1).join(':')
+    const isAgent = agentKeys.has(key)
+    const label = isAgent ? (agents.find(a => a.id === key)?.name ?? key) : key.split(':').slice(1).join(':')
     const isStreaming = r.status === 'streaming'
     const isDone = r.status === 'done'
     const isError = r.status === 'error'
@@ -2127,6 +2156,16 @@ export function NewRun() {
               {r.error ?? t('common.error')}
             </div>
           </div>
+        ) : isAgent ? (
+          <AnswerBody streaming={isStreaming} expanded={isExpanded} mono={monoAnswers}>
+            {(r.steps?.length ?? 0) > 0 && (
+              <div style={{ marginBottom: 10 }}><TraceView steps={r.steps ?? []} live={isStreaming} layout="narrow" /></div>
+            )}
+            {r.text
+              ? <span style={{ whiteSpace: 'pre-wrap' }}>{r.text}</span>
+              : ((r.steps?.length ?? 0) === 0 && r.status !== 'done' && <span style={{ color: 'var(--border-hover)' }}>{t('run.waiting')}</span>)}
+            {isStreaming && <span className="bb" style={{ color: 'var(--accent)' }}>▋</span>}
+          </AnswerBody>
         ) : (
           <AnswerBody streaming={isStreaming} expanded={isExpanded} mono={monoAnswers}>
             {showReasoning && (

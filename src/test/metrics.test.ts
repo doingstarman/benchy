@@ -49,12 +49,18 @@ beforeEach(async () => {
 })
 
 describe('metrics registry', () => {
-  it('lists 9 built-ins (reasoning_ms off by default) plus customs', async () => {
+  it('lists 14 built-ins (9 model + 5 agent; reasoning_ms off by default) plus customs', async () => {
     const defs = data<MetricDef[]>(await req('GET', '/api/metrics'))
     const builtins = defs.filter(d => d.kind === 'builtin')
-    expect(builtins.map(d => d.key).sort()).toEqual(['cost', 'elo', 'input_tokens', 'output_tokens', 'reasoning_ms', 'reasoning_tokens', 'score', 'total_time', 'ttfs'])
+    expect(builtins.map(d => d.key).sort()).toEqual([
+      'agent_cost', 'cost', 'elo', 'input_tokens', 'output_tokens', 'reasoning_ms', 'reasoning_tokens',
+      'score', 'steps', 'tool_calls', 'tool_error_rate', 'total_time', 'ttfs', 'wall_clock',
+    ])
     expect(builtins.find(d => d.key === 'reasoning_ms')?.enabled).toBe(false)
     expect(builtins.find(d => d.key === 'ttfs')?.enabled).toBe(true)
+    // The trajectory metrics apply to agents, not model targets.
+    expect(builtins.find(d => d.key === 'steps')?.appliesTo).toEqual(['agent'])
+    expect(builtins.find(d => d.key === 'ttfs')?.appliesTo).toEqual(['model'])
   })
 
   it('creates a custom metric and lists it', async () => {
