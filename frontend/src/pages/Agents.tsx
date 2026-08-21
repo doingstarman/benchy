@@ -220,8 +220,8 @@ function AgentDrawer({ target, onClose, onSaved, onDuplicate, onDelete }: {
   const setRow = (i: number, patch: Partial<EnvRow>) => setEnvRows(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--overlay, rgba(0,0,0,0.5))' }}>
-      <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 620, maxWidth: '96vw', background: 'var(--bg-elevated)', borderLeft: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, padding: 24, background: 'var(--overlay, rgba(0,0,0,0.5))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 620, maxWidth: '92vw', maxHeight: '90vh', background: 'var(--bg-elevated)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '0.5px solid var(--border)' }}>
           <span style={{ flex: 1, fontSize: 'var(--fs-lg)', color: 'var(--text-bright)' }}>{target ? t('agents.edit') : t('agents.new')}</span>
           <IconButton onClick={onClose} title="close"><IconClose size={14} /></IconButton>
