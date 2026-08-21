@@ -196,23 +196,43 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: AttachmentMet
 // number apart.
 interface CostBreakdown { total: number | null; input: number | null; output: number | null }
 
-function MetricsStrip({ result: r, isFastest, cost }: { result: UIResult; isFastest: boolean; cost: CostBreakdown }) {
+function MetricsStrip({ result: r, isFastest, cost, isAgent = false }: { result: UIResult; isFastest: boolean; cost: CostBreakdown; isAgent?: boolean }) {
   const [open, setOpen] = useState(false)
   const { t } = useT()
 
-  const headline = [
-    { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
-    { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
-    { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
-    { l: 'COST', v: formatCost(cost.total), best: false },
-  ]
-  const extra = [
-    { l: 'COST IN', v: formatCost(cost.input) },
-    { l: 'COST OUT', v: formatCost(cost.output) },
-    { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
-    { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
-    { l: 'TOOLS', v: r.toolCalls.length > 0 ? `${r.toolCalls.length}` : '—' },
-  ]
+  // An agent column measures its trajectory, not model pricing: steps, tool calls,
+  // and the trajectory cost the agent reported (never derived from a price table).
+  const steps = r.steps ?? []
+  const toolSteps = steps.filter(s => s.kind === 'tool')
+  let agentCost: number | null = null
+  for (const s of steps) if (s.cost != null) agentCost = (agentCost ?? 0) + s.cost
+
+  const headline = isAgent
+    ? [
+        { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
+        { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
+        { l: 'STEPS', v: steps.length > 0 ? `${steps.length}` : '—', best: false },
+        { l: 'COST', v: formatCost(agentCost), best: false },
+      ]
+    : [
+        { l: 'TTFS', v: r.ttfs !== null ? `${r.ttfs}ms` : '—', best: isFastest },
+        { l: 'TOTAL', v: r.totalTime !== null ? `${(r.totalTime / 1000).toFixed(1)}s` : '—', best: false },
+        { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—', best: false },
+        { l: 'COST', v: formatCost(cost.total), best: false },
+      ]
+  const extra = isAgent
+    ? [
+        { l: 'TOOLS', v: toolSteps.length > 0 ? `${toolSteps.length}` : '—' },
+        { l: 'TOOL ERR', v: toolSteps.length > 0 ? `${toolSteps.filter(s => s.isError).length}` : '—' },
+        { l: 'IN / OUT', v: r.inputTokens !== null ? `${r.inputTokens} / ${r.outputTokens}` : '—' },
+      ]
+    : [
+        { l: 'COST IN', v: formatCost(cost.input) },
+        { l: 'COST OUT', v: formatCost(cost.output) },
+        { l: 'THINK', v: r.reasoningTokens != null ? `${r.reasoningTokens}` : '—' },
+        { l: 'THINK TIME', v: r.reasoningMs != null ? `${(r.reasoningMs / 1000).toFixed(1)}s` : '—' },
+        { l: 'TOOLS', v: r.toolCalls.length > 0 ? `${r.toolCalls.length}` : '—' },
+      ]
 
   const cell = (l: string, v: string, best: boolean, last: boolean) => (
     <div key={l} style={{ flex: 1, padding: '0 10px', borderRight: last ? 'none' : '0.5px solid var(--border)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
@@ -2145,7 +2165,7 @@ export function NewRun() {
           )}
         </div>
 
-        <MetricsStrip result={r} isFastest={isFastest} cost={cost} />
+        <MetricsStrip result={r} isFastest={isFastest} cost={cost} isAgent={isAgent} />
 
         {isError ? (
           <div style={{ flex: 1, padding: 12, overflowY: 'auto' }}>
