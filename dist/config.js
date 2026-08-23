@@ -286,6 +286,42 @@ export async function removeSkill(id) {
         await writeConfig(config);
     });
 }
+// The names of stored agent secrets (never the values).
+export async function getSecretNames() {
+    return Object.keys((await readConfig()).secrets ?? {});
+}
+// Resolve a set of secret names to name→value pairs for injection into a child's
+// env at spawn. Unknown names are silently skipped (the target keeps a stale ref).
+export async function resolveSecrets(names) {
+    const secrets = (await readConfig()).secrets ?? {};
+    const out = {};
+    for (const n of names)
+        if (n in secrets)
+            out[n] = secrets[n];
+    return out;
+}
+// Store/replace a named secret. Empty value deletes it.
+export async function setSecret(name, value) {
+    return serialize(async () => {
+        const config = await readConfig();
+        const secrets = config.secrets ?? {};
+        if (value)
+            secrets[name] = value;
+        else
+            delete secrets[name];
+        config.secrets = secrets;
+        await writeConfig(config);
+    });
+}
+export async function removeSecret(name) {
+    return serialize(async () => {
+        const config = await readConfig();
+        if (config.secrets) {
+            delete config.secrets[name];
+            await writeConfig(config);
+        }
+    });
+}
 export async function upsertMcpServer(server) {
     return serialize(async () => {
         const config = await readConfig();

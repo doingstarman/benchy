@@ -1,5 +1,6 @@
 import { getDb } from '../db/index.js';
 import { computeStandings } from '../arena.js';
+import { readTrace } from '../traceStore.js';
 // ─── pure helpers (unit-testable) ────────────────────────────────────────────
 const VAR_TYPES = ['text', 'date', 'number'];
 function parseSchema(raw) {
@@ -132,6 +133,11 @@ export async function registerResultsRoutes(app) {
                 };
             }),
         };
+    });
+    // The agent trajectory for one result, in emission order (read-only). Returns an
+    // empty array for a model result or an agent that emitted no structured steps.
+    app.get('/api/results/:id/trace', async (req) => {
+        return { data: readTrace(req.params.id) };
     });
     // Per-test analytics summary (3c). Everything derived on read.
     app.get('/api/results/:runId', async (req, reply) => {

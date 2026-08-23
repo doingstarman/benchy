@@ -3,20 +3,36 @@ import { getDisabledMetrics, setBuiltinMetricEnabled, getProviders } from '../co
 import { isLocalRequest } from './csrf.js';
 import { builtinDefs, BUILTIN_KEYS, RESOLVABLE_BUILTIN_KEYS, isBuiltinKey } from '../metrics/builtins.js';
 import { validate, parse, evaluate } from '../metrics/expr.js';
+import { traceAggregate } from '../traceStore.js';
 import { resolveBuiltins, topoSortCustoms, evaluateAnswerCustoms, evaluateRunCustom, } from '../metrics/resolve.js';
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
 const FORMATS = new Set(['raw', 'ms', 's', 'tokens', 'usd', 'pct']);
 const DIRECTIONS = new Set(['lower', 'higher', 'neutral']);
 const SCOPES = new Set(['answer', 'run']);
 const AGGREGATES = new Set(['mean', 'median', 'p50', 'p95', 'min', 'max', 'sum']);
+const KINDS = new Set(['model', 'agent', 'pipeline']);
+const DEFAULT_APPLIES = ['model', 'agent', 'pipeline'];
 const PREVIEW_SAMPLE = 5;
 const MATERIALIZE_RECENT_RUNS = 50;
+function parseAppliesTo(raw) {
+    if (!raw)
+        return DEFAULT_APPLIES;
+    try {
+        const arr = JSON.parse(raw);
+        const kinds = Array.isArray(arr) ? arr.filter((k) => KINDS.has(k)) : [];
+        return kinds.length ? kinds : DEFAULT_APPLIES;
+    }
+    catch {
+        return DEFAULT_APPLIES;
+    }
+}
 function rowToCustom(r) {
     return {
         key: r.key, name: r.name, expression: r.expression, unit: r.unit,
         format: r.format, direction: r.direction,
         scope: r.scope, aggregate: r.aggregate ?? null,
         nullable: r.nullable === 1, enabled: r.enabled === 1, sortOrder: r.sort_order,
+        appliesTo: parseAppliesTo(r.applies_to),
         createdAt: r.created_at, updatedAt: r.updated_at,
     };
 }
@@ -27,7 +43,7 @@ function customToDef(c) {
     return {
         key: c.key, name: c.name, kind: 'custom', expression: c.expression, unit: c.unit,
         format: c.format, direction: c.direction, scope: c.scope, aggregate: c.aggregate,
-        nullable: c.nullable, enabled: c.enabled,
+        nullable: c.nullable, enabled: c.enabled, appliesTo: c.appliesTo,
     };
 }
 // Validate a create/update body; returns the normalized fields or an error message.
@@ -54,6 +70,15 @@ function validateBody(db, body, key, isCreate) {
             return { error: 'invalid aggregate' };
     }
     const unit = typeof body.unit === 'string' && body.unit.trim() ? body.unit.trim() : null;
+    let appliesTo = DEFAULT_APPLIES;
+    if (body.appliesTo !== undefined) {
+        if (!Array.isArray(body.appliesTo))
+            return { error: 'appliesTo must be an array' };
+        const kinds = body.appliesTo.filter((k) => KINDS.has(k));
+        if (kinds.length === 0)
+            return { error: 'appliesTo must name at least one valid kind' };
+        appliesTo = kinds;
+    }
     const others = loadCustoms(db).filter(c => c.key !== key);
     const known = [...BUILTIN_KEYS, ...others.map(c => c.key), key];
     const v = validate(expression, known, scope);
@@ -69,7 +94,7 @@ function validateBody(db, body, key, isCreate) {
     const candidate = {
         key, name, expression, unit, format, direction, scope, aggregate,
         nullable: body.nullable === false ? false : true, enabled: body.enabled === false ? false : true,
-        sortOrder: 0, createdAt: 0, updatedAt: 0,
+        sortOrder: 0, appliesTo, createdAt: 0, updatedAt: 0,
     };
     try {
         topoSortCustoms([...others, candidate]);
@@ -85,12 +110,23 @@ async function loadProviderPricing() {
     return new Map(providers.map(p => [p.id, p.pricing]));
 }
 const RES_COLS = 'id, model, provider_id, text, ttfs, total_time, input_tokens, output_tokens, reasoning_tokens, reasoning_ms, score';
+// An agent result is marked by provider_id='agent' (runAgentCell). This is the
+// discriminator the appliesTo skip rule keys off — no target_id join needed.
+function resultKind(r) {
+    return r.provider_id === 'agent' ? 'agent' : 'model';
+}
 function toInput(r, pricing) {
-    return {
+    const base = {
         ttfs: r.ttfs, totalTime: r.total_time, inputTokens: r.input_tokens, outputTokens: r.output_tokens,
         reasoningTokens: r.reasoning_tokens, reasoningMs: r.reasoning_ms, score: r.score,
         model: r.model, pricingOverrides: pricing.get(r.provider_id),
     };
+    if (r.provider_id === 'agent') {
+        const agg = traceAggregate(r.id);
+        if (agg)
+            return { ...base, steps: agg.steps, toolCalls: agg.toolCalls, toolErrors: agg.toolErrors, agentCost: agg.agentCost };
+    }
+    return base;
 }
 // Recompute + store every enabled custom metric's value for one run. Built-ins are
 // never written. Safe to call repeatedly (clears the run's rows first).
@@ -124,18 +160,29 @@ export async function materializeRunMetrics(runId) {
     const insert = db.prepare('INSERT INTO metric_values (metric_key, result_id, run_id, value, created_at) VALUES (?, ?, ?, ?, ?)');
     db.transaction(() => {
         clear();
-        const answerScopes = [];
+        // Each answer scope carries its target kind so the appliesTo rule can SKIP a
+        // result for a metric that does not apply to it — skipping, not writing 0.
+        const scoped = [];
         for (const r of results) {
+            const kind = resultKind(r);
             const builtinScope = resolveBuiltins(toInput(r, pricing));
             const customVals = evaluateAnswerCustoms(ordered, builtinScope);
-            for (const c of ordered)
-                if (c.scope === 'answer')
+            for (const c of ordered) {
+                if (c.scope === 'answer' && c.appliesTo.includes(kind))
                     insert.run(c.key, r.id, null, customVals[c.key] ?? null, now);
-            answerScopes.push({ ...builtinScope, ...customVals });
+            }
+            scoped.push({ scope: { ...builtinScope, ...customVals }, kind });
         }
-        for (const c of ordered)
-            if (c.scope === 'run')
-                insert.run(c.key, null, runId, evaluateRunCustom(c, answerScopes), now);
+        for (const c of ordered) {
+            if (c.scope !== 'run')
+                continue;
+            const applicable = scoped.filter(s => c.appliesTo.includes(s.kind)).map(s => s.scope);
+            // No applicable target ⇒ the metric is skipped for this run entirely (no row),
+            // which the reader treats as "not applicable", distinct from a null value.
+            if (applicable.length === 0)
+                continue;
+            insert.run(c.key, null, runId, evaluateRunCustom(c, applicable), now);
+        }
     })();
 }
 async function materializeRecent() {
@@ -177,7 +224,7 @@ export async function registerMetricsRoutes(app) {
         const rows = results.map(r => {
             const builtinScope = resolveBuiltins(toInput(r, pricing));
             const fullScope = { ...builtinScope, ...evaluateAnswerCustoms(ordered, builtinScope) };
-            const single = evaluateRunCustom({ key: '__preview', name: '', expression, unit: null, format: 'raw', direction: 'neutral', scope, aggregate: body.aggregate ?? 'mean', nullable: true, enabled: true, sortOrder: 0, createdAt: 0, updatedAt: 0 }, [fullScope]);
+            const single = evaluateRunCustom({ key: '__preview', name: '', expression, unit: null, format: 'raw', direction: 'neutral', scope, aggregate: body.aggregate ?? 'mean', nullable: true, enabled: true, sortOrder: 0, appliesTo: DEFAULT_APPLIES, createdAt: 0, updatedAt: 0 }, [fullScope]);
             const value = scope === 'run' ? single : evalOne(expression, fullScope);
             const nullRef = v.refs.find(k => fullScope[k] == null);
             return {
@@ -218,8 +265,8 @@ export async function registerMetricsRoutes(app) {
             return reply.code(400).send({ error: v.error });
         const now = Date.now();
         const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM metrics').get().m;
-        db.prepare('INSERT INTO metrics (key, name, expression, unit, format, direction, scope, aggregate, nullable, enabled, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(key, v.fields.name, v.fields.expression, v.fields.unit, v.fields.format, v.fields.direction, v.fields.scope, v.fields.aggregate, v.fields.nullable ? 1 : 0, v.fields.enabled ? 1 : 0, maxOrder + 1, now, now);
+        db.prepare('INSERT INTO metrics (key, name, expression, unit, format, direction, scope, aggregate, nullable, enabled, sort_order, applies_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(key, v.fields.name, v.fields.expression, v.fields.unit, v.fields.format, v.fields.direction, v.fields.scope, v.fields.aggregate, v.fields.nullable ? 1 : 0, v.fields.enabled ? 1 : 0, maxOrder + 1, JSON.stringify(v.fields.appliesTo), now, now);
         void materializeRecent().catch(() => { });
         return reply.code(201).send({ data: customToDef(rowToCustom(db.prepare('SELECT * FROM metrics WHERE key = ?').get(key))) });
     });
@@ -246,8 +293,8 @@ export async function registerMetricsRoutes(app) {
         const v = validateBody(db, merged, key, false);
         if ('error' in v)
             return reply.code(400).send({ error: v.error });
-        db.prepare('UPDATE metrics SET name = ?, expression = ?, unit = ?, format = ?, direction = ?, scope = ?, aggregate = ?, nullable = ?, enabled = ?, updated_at = ? WHERE key = ?')
-            .run(v.fields.name, v.fields.expression, v.fields.unit, v.fields.format, v.fields.direction, v.fields.scope, v.fields.aggregate, v.fields.nullable ? 1 : 0, v.fields.enabled ? 1 : 0, Date.now(), key);
+        db.prepare('UPDATE metrics SET name = ?, expression = ?, unit = ?, format = ?, direction = ?, scope = ?, aggregate = ?, nullable = ?, enabled = ?, applies_to = ?, updated_at = ? WHERE key = ?')
+            .run(v.fields.name, v.fields.expression, v.fields.unit, v.fields.format, v.fields.direction, v.fields.scope, v.fields.aggregate, v.fields.nullable ? 1 : 0, v.fields.enabled ? 1 : 0, JSON.stringify(v.fields.appliesTo), Date.now(), key);
         void materializeRecent().catch(() => { });
         return { data: customToDef(rowToCustom(db.prepare('SELECT * FROM metrics WHERE key = ?').get(key))) };
     });

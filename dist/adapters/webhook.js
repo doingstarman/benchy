@@ -1,4 +1,5 @@
 import { humanizeNetworkError, describeHttpError } from '../errors.js';
+import { isNdjson, streamNdjson } from './protocol.js';
 export const webhookAdapter = {
     async *stream(messages, config) {
         const url = config.baseUrl;
@@ -27,6 +28,16 @@ export const webhookAdapter = {
             return;
         }
         const contentType = response.headers.get('content-type') ?? '';
+        // An agent webhook may stream its trajectory as NDJSON; a plain webhook still
+        // returns one-shot JSON/text, handled below.
+        if (isNdjson(contentType) && response.body) {
+            yield* streamNdjson(response.body, {
+                model: config.model,
+                pricingOverrides: config.agent?.pricingOverrides,
+                payloadCapBytes: config.agent?.payloadCapBytes,
+            });
+            return;
+        }
         let text;
         if (contentType.includes('application/json')) {
             const json = await response.json();

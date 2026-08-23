@@ -1,3 +1,6 @@
+export function isAgentConfig(c) {
+    return 'transport' in c;
+}
 export function toProviderView({ apiKey, ...rest }) {
     return { ...rest, apiKeyMask: maskApiKey(apiKey) };
 }
