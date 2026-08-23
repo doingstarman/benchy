@@ -23,6 +23,16 @@ async function req(method: string, path: string, body?: unknown): Promise<ApiRes
 }
 function data<T>(r: ApiResult): T { return r.body.data as T }
 
+// Send a request with an explicit cross-site Origin, to exercise the CSRF guard.
+async function reqOrigin(method: string, path: string, origin: string, body?: unknown): Promise<number> {
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: { Origin: origin, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  return res.status
+}
+
 function script(name: string, body: string): string {
   const p = join(tempDir, name)
   writeFileSync(p, body)
@@ -198,5 +208,41 @@ describe('a run persists the trace and reads it back in order', () => {
       const trace = data<TraceStepRow[]>(await req('GET', `/api/results/${r.id}/trace`))
       expect(trace.map(s => s.kind)).toEqual(['think', 'tool', 'model'])
     }
+  })
+})
+
+describe('agent endpoints refuse cross-site and handle bad targets', () => {
+  it('handshake is refused from a cross-site origin (executes a user command — must be local)', async () => {
+    const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('full5.mjs', FULL)}`)))
+    // A page on another origin must never trigger command execution.
+    expect(await reqOrigin('POST', `/api/targets/${encodeURIComponent(t.id)}/handshake`, 'http://evil.example', {})).toBe(403)
+    // A localhost origin (how the real UI calls it) is allowed.
+    expect(await reqOrigin('POST', `/api/targets/${encodeURIComponent(t.id)}/handshake`, 'http://localhost:5173', {})).toBe(200)
+  })
+
+  it('handshake rejects a model target and a missing target', async () => {
+    const m = data<Target>(await req('POST', '/api/targets', { kind: 'model', name: 'm', config: { providerId: 'openai', model: 'gpt-4o' } }))
+    expect((await req('POST', `/api/targets/${encodeURIComponent(m.id)}/handshake`, {})).status).toBe(400)
+    expect((await req('POST', '/api/targets/agent:ghost/handshake', {})).status).toBe(404)
+  })
+
+  it('trace of an unknown or non-agent result is an empty array, not a 500', async () => {
+    const res = await req('GET', '/api/results/does-not-exist/trace')
+    expect(res.status).toBe(200)
+    expect(data<TraceStepRow[]>(res)).toEqual([])
+  })
+
+  it('a saved agent keeps its secret across an edit that does not resend the value', async () => {
+    const created = data<Target>(await req('POST', '/api/targets', {
+      kind: 'agent', name: 'keep-secret',
+      config: { transport: 'command', command: `node ${script('echo2.mjs', ECHO_SECRET)}`, timeoutMs: 8000, maxSteps: 40, retries: 0, secrets: { MY_SECRET: 'persist-me' } },
+    }))
+    // First run injects the secret.
+    expect(data<{ output: string }>(await req('POST', `/api/targets/${encodeURIComponent(created.id)}/handshake`, {})).output).toContain('persist-me')
+    // An edit that keeps the ref but sends NO new value must not wipe the stored one.
+    await req('PATCH', `/api/targets/${encodeURIComponent(created.id)}`, {
+      config: { transport: 'command', command: `node ${script('echo2.mjs', ECHO_SECRET)}`, timeoutMs: 9000, maxSteps: 40, retries: 0, secretRefs: ['MY_SECRET'] },
+    })
+    expect(data<{ output: string }>(await req('POST', `/api/targets/${encodeURIComponent(created.id)}/handshake`, {})).output).toContain('persist-me')
   })
 })
