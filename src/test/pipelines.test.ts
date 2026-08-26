@@ -360,3 +360,29 @@ describe('pipeline metric rollup (stage 4 phase 4)', () => {
     expect(at('cost')).not.toContain('pipeline')
   })
 })
+
+interface DashboardShape {
+  totals: { runs: number; results: number; models: number; agents: number; pipelines: number; totalCostUsd: number }
+  recentRuns: { id: string; participantCount: number }[]
+  leaderboard: { key: string; kind: string; results: number; costUsd: number | null }[]
+  activity: { day: string; runs: number }[]
+}
+
+describe('dashboard overview (stage 5)', () => {
+  it('aggregates totals, recent runs, a participant leaderboard, and 14-day activity', async () => {
+    const e = await agent('d1.mjs', ECHO)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('dashpipe', { mode: 'internal', nodes: [{ id: 'n', ref: e }], edges: [] }))).id
+    await runOnce(pid)   // one run + result + trace to aggregate
+
+    const d = data<DashboardShape>(await req('GET', '/api/dashboard'))
+    expect(d.totals.runs).toBeGreaterThanOrEqual(1)
+    expect(d.totals.results).toBeGreaterThanOrEqual(1)
+    expect(d.totals.pipelines).toBeGreaterThanOrEqual(1)
+    expect(d.activity).toHaveLength(14)
+    expect(d.recentRuns.length).toBeGreaterThanOrEqual(1)
+    // the pipeline participant shows up with its trace-derived cost
+    const row = d.leaderboard.find(l => l.key === pid)
+    expect(row?.kind).toBe('pipeline')
+    expect(row?.costUsd).toBeCloseTo(0.001, 6)   // one echo stage, cost 0.001
+  })
+})

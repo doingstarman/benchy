@@ -304,6 +304,15 @@ export const metricsApi = {
     apiFetch<MetricPreviewResult>('/api/metrics/preview', { method: 'POST', body: JSON.stringify({ expression, scope, aggregate }) }),
 }
 
+// ─── dashboard ─────────────────────────────────────────────────────────────────
+export interface DashboardData {
+  totals: { runs: number; savedRuns: number; results: number; models: number; agents: number; pipelines: number; totalTokens: number; totalCostUsd: number }
+  recentRuns: { id: string; title: string | null; kind: string; status: string; saved: boolean; createdAt: number; participantCount: number; avgScore: number | null; tokens: number; durationMs: number | null }[]
+  leaderboard: { key: string; kind: 'model' | 'agent' | 'pipeline'; label: string; results: number; avgScore: number | null; tokens: number; costUsd: number | null }[]
+  activity: { day: string; runs: number }[]
+}
+export const dashboardApi = { get: () => apiFetch<DashboardData>('/api/dashboard') }
+
 // ─── version / updates ───────────────────────────────────────────────────────
 
 export const versionApi = {

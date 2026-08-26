@@ -14,6 +14,7 @@ import { registerResultsRoutes } from './api/results.js'
 import { registerSettingsRoutes } from './api/settings.js'
 import { registerTargetsRoutes } from './api/targets.js'
 import { registerMetricsRoutes } from './api/metrics.js'
+import { registerDashboardRoutes } from './api/dashboard.js'
 import { registerMockRoutes } from './api/mock.js'
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js'
 import { registerVersionRoutes } from './api/version.js'
@@ -71,6 +72,7 @@ export async function createServer(port: number, dbPath?: string) {
   await registerSettingsRoutes(app)
   await registerTargetsRoutes(app)
   await registerMetricsRoutes(app)
+  await registerDashboardRoutes(app)
   // The mock adapter is a dev-only testing aid — its routes exist only under
   // ~/.benchy-dev, so a production install ships no /api/mock endpoint (mock
   // providers are likewise filtered out of prod, see config.getProviders).

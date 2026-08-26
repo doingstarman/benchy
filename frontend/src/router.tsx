@@ -8,6 +8,7 @@ import { Providers } from './pages/Providers'
 import { Models } from './pages/Models'
 import { Agents } from './pages/Agents'
 import { Pipelines } from './pages/Pipelines'
+import { Dashboard } from './pages/Dashboard'
 import { Library } from './pages/Library'
 import { Datasets } from './pages/Datasets'
 import { DatasetDetail } from './pages/DatasetDetail'
@@ -26,6 +27,7 @@ export function AppRouter() {
         <Route path="/" element={<App />}>
           <Route index element={<StartRedirect />} />
           <Route path="run" element={<NewRun />} />
+          <Route path="dashboard" element={<Dashboard />} />
           <Route path="results" element={<ResultsDb />} />
           <Route path="results/:runId" element={<Results />} />
           <Route path="history" element={<History />} />
