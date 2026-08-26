@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Target, AgentTargetConfig } from '../../../src/types'
+import type { Target, AgentTargetConfig, AgentHealth } from '../../../src/types'
 import { targetsApi, type AgentConfigUpsert, type HandshakeResult } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
@@ -8,6 +8,21 @@ import { IconPlus, IconClose, IconPencil, IconCopy, IconTrash } from '../compone
 import { useT } from '../i18n'
 
 function asAgent(t: Target): AgentTargetConfig { return t.config as AgentTargetConfig }
+
+// Per-row health from the last verify. green = ran (full = solid, degraded/no-protocol
+// = ring); red = process died; muted ring = never verified. Diagnostic only — a red
+// dot never means the agent is disabled.
+function HealthDot({ health }: { health?: AgentHealth }) {
+  const { t } = useT()
+  const spec = !health
+    ? { color: 'var(--text-muted)', fill: false, title: t('agents.healthUnverified') }
+    : !health.ok
+      ? { color: 'var(--error)', fill: true, title: t('agents.healthCrashed') + (health.error ? `: ${health.error}` : '') }
+      : health.spokeProtocol
+        ? { color: 'var(--success)', fill: true, title: t('agents.healthFull') }
+        : { color: 'var(--success)', fill: false, title: t('agents.healthDegraded') }
+  return <span title={spec.title} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: spec.fill ? spec.color : 'transparent', border: `1.5px solid ${spec.color}` }} />
+}
 
 export function Agents() {
   const { t } = useT()
@@ -96,6 +111,7 @@ function AgentRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '0.5px solid var(--border)', opacity: target.enabled ? 1 : 0.55 }}>
       <TypeBadge kind={target.kind} />
+      <HealthDot health={cfg.lastHandshake} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button onClick={onEdit} style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-base)', color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{target.name}</button>
@@ -211,7 +227,10 @@ function AgentDrawer({ target, onClose, onSaved, onDuplicate, onDelete }: {
     const id = await save()
     if (!id) return
     setVerifying(true); setVerify(null)
-    try { setVerify(await targetsApi.handshake(id, verifyPrompt)) }
+    try {
+      setVerify(await targetsApi.handshake(id, verifyPrompt))
+      await onSaved(id)   // reload the list so the row's health dot reflects this verify
+    }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setVerifying(false) }
   }

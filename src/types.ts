@@ -67,6 +67,18 @@ export interface ModelTargetConfig {
 // SECURITY: secrets are NEVER stored here — the target keeps only `secretRefs`
 // (names), resolved from ~/.benchy/config.json into the child's env at spawn.
 // `env` holds only non-secret name→value pairs. See docs/agent-protocol.md.
+// The last verify (handshake) outcome, persisted on the agent config so the list
+// shows a health dot without re-running. `ok=false` = the process died (red);
+// otherwise green — full trace, or degraded (ran but spoke no protocol). Value-free,
+// so it rides out to clients with the rest of the stored agent config.
+export interface AgentHealth {
+  ok: boolean
+  spokeProtocol: boolean
+  steps: number
+  error: string | null
+  at: number
+}
+
 export interface AgentTargetConfig {
   transport: 'command' | 'http'
   command?: string                        // transport='command'
@@ -79,6 +91,7 @@ export interface AgentTargetConfig {
   maxSteps: number
   maxCostUsd?: number
   retries: number
+  lastHandshake?: AgentHealth             // written by the handshake route; never user-set
 }
 
 export function isAgentConfig(c: TargetConfig): c is AgentTargetConfig {
