@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MetricsBar } from './MetricsBar'
+import { MetricsBar, AgentMetricsBar } from './MetricsBar'
 import { ActivityTrace, ActivityTraceStyles } from './ActivityTrace'
 import { TraceView } from './TraceView'
 import { useShowReasoning, useMonoAnswers } from '../prefs'
@@ -113,13 +113,23 @@ export function ResponseCard({
         )}
       </div>
 
-      {/* Metrics */}
+      {/* Metrics — an agent shows its trajectory (steps/tools/cost), a model its
+          latency + tokens. Agent trajectory metrics come from the fetched trace. */}
       <div style={{ padding: '0 14px', borderBottom: '0.5px solid var(--border)' }}>
-        <MetricsBar
-          ttfs={ttfs} totalTime={totalTime}
-          inputTokens={inputTokens} outputTokens={outputTokens}
-          reasoningTokens={reasoningTokens} reasoningMs={reasoningMs} isFastest={isFastest}
-        />
+        {isAgent ? (
+          <AgentMetricsBar
+            steps={trace ? trace.length : null}
+            tools={trace ? trace.filter(s => s.kind === 'tool').length : null}
+            agentCost={trace ? trace.reduce<number | null>((a, s) => s.cost != null ? (a ?? 0) + s.cost : a, null) : null}
+            totalTime={totalTime}
+          />
+        ) : (
+          <MetricsBar
+            ttfs={ttfs} totalTime={totalTime}
+            inputTokens={inputTokens} outputTokens={outputTokens}
+            reasoningTokens={reasoningTokens} reasoningMs={reasoningMs} isFastest={isFastest}
+          />
+        )}
       </div>
 
       {/* Response */}
