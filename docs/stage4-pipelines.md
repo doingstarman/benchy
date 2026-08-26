@@ -95,8 +95,16 @@ is selectable in NewRun like any participant.
    already renders it. **Done-when** a mixed run shows pipeline columns with rolled-up cost.
 5. **UI.** Pipelines page (node/edge builder) + NewRun selection + verify + health dot.
 
-## Open sub-questions (answer on review, or I take the PROPOSALs)
-- Route conditions (`edge.when`): ship in v1 (basic fan-out/fan-in only, conditions later),
-  or design the condition language now?
-- `maxDepth` default (3, like the TraceView cap)?
-- External mode: does it need its own trace `kind='stage'`, or reuse agent step kinds?
+## Status
+All five phases shipped (branch `codex/stage4-pipelines`), plus the deferred polish:
+- ✅ **Verify + health** — `handshakePipeline` runs the pipeline once (internal = dry DAG
+  run, external = observe); the list shows the shared health dot.
+- ✅ **External live streaming** — a top-level external pipeline streams steps + tokens
+  live (nested stays one rolled-up step).
+- ✅ **Conditional routing** — `edge.when` is a case-insensitive substring on the source
+  output; a node reached by no active edge is skipped. (Chosen over an expression language
+  for determinism; revisit if real tasks need comparisons/regex.)
+
+**Still intentionally deferred:** a visual graph canvas (the node/edge list is the editor);
+`maxDepth` default is 3 (the TraceView nesting cap); external mode reuses the agent step
+kinds (no dedicated `kind='stage'`).
