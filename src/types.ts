@@ -94,11 +94,52 @@ export interface AgentTargetConfig {
   lastHandshake?: AgentHealth             // written by the handshake route; never user-set
 }
 
-export function isAgentConfig(c: TargetConfig): c is AgentTargetConfig {
-  return 'transport' in c
+// config for kind='pipeline': a participant that is itself a graph of participants.
+// `mode` chooses who runs the stages — benchy ('internal', a DAG it topo-runs) or an
+// external program it only observes via the trace protocol ('external', reusing the
+// agent transport). A node's `ref` is any target id (model/agent/pipeline — nesting).
+export interface PipelineNode {
+  id: string                 // unique within the pipeline
+  ref: string                // a target id: model / agent / nested pipeline
+  label?: string
+}
+export interface PipelineEdge {
+  from: string               // node id, or '' = the pipeline's input
+  to: string                 // node id, or '' = the pipeline's output
+  when?: string              // optional route condition over the upstream output
+}
+export interface PipelineTargetConfig {
+  mode: 'internal' | 'external'
+  // internal:
+  nodes?: PipelineNode[]
+  edges?: PipelineEdge[]
+  // external — reuses the agent transport shape:
+  transport?: 'command' | 'http'
+  command?: string
+  cwd?: string
+  url?: string
+  authHeader?: string
+  env?: Record<string, string>
+  secretRefs?: string[]
+  // limits — the task aborts on the first reached (same rule as agents)
+  maxDepth: number           // nesting guard
+  maxNodes: number           // fan-out guard
+  timeoutMs: number
+  maxCostUsd?: number
+  lastHandshake?: AgentHealth
 }
 
-export type TargetConfig = ModelTargetConfig | AgentTargetConfig
+// Discriminators over the config union. A pipeline carries `mode` (agents never do), so
+// it is checked FIRST — an external pipeline also has `transport`, which must not read as
+// an agent.
+export function isPipelineConfig(c: TargetConfig): c is PipelineTargetConfig {
+  return 'mode' in c
+}
+export function isAgentConfig(c: TargetConfig): c is AgentTargetConfig {
+  return 'transport' in c && !('mode' in c)
+}
+
+export type TargetConfig = ModelTargetConfig | AgentTargetConfig | PipelineTargetConfig
 
 export interface Target {
   id: string
