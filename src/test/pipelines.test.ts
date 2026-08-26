@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { createServer } from '../server.js'
 import { getDb, closeDb } from '../db/index.js'
-import type { Target, PipelineTargetConfig, AgentTargetConfig } from '../types.js'
+import type { Target, PipelineTargetConfig, AgentTargetConfig, TraceStepRow } from '../types.js'
 
 let server: FastifyInstance
 let base: string
@@ -171,5 +171,122 @@ describe('pipeline target CRUD (stage 4 phase 1 — data model)', () => {
     // It has a transport (like an agent) but also a mode (only pipelines do).
     expect(cfg.transport).toBe('command')
     expect(cfg.mode).toBe('external')
+  })
+})
+
+// A script agent that reads its input (last user message) off stdin and answers
+// "ECHO:<input>" — so a chain's threading is visible in the final output. Emits one
+// model step with a cost, so the pipeline's rolled-up cost is checkable.
+const ECHO = `
+let buf = ''
+process.stdin.on('data', d => buf += d)
+process.stdin.on('end', () => {
+  let input = ''
+  try { const { messages } = JSON.parse(buf); const m = messages[messages.length - 1]; input = typeof m.content === 'string' ? m.content : '' } catch {}
+  const w = o => process.stdout.write(JSON.stringify(o) + '\\n')
+  w({ type: 'step', id: 's', kind: 'model', name: 'echo', cost: 0.001 })
+  w({ type: 'token', text: 'ECHO:' + input })
+  w({ type: 'done', usage: { inputTokens: 1, outputTokens: 1 } })
+})
+`
+const CRASH = `process.stderr.write('boom'); process.exit(1)`
+
+async function agent(name: string, body: string): Promise<string> {
+  const p = join(tempDir, name)
+  writeFileSync(p, body)
+  const r = await req('POST', '/api/targets', { kind: 'agent', name, config: { transport: 'command', command: `node ${p}`, timeoutMs: 8000, maxSteps: 40, retries: 0 } })
+  return data<Target>(r).id
+}
+
+interface RunResult { id: string; text: string; error: string | null; providerId?: string }
+async function runOnce(participantId: string): Promise<{ result: RunResult; trace: TraceStepRow[] }> {
+  const { runId } = data<{ runId: string }>(await req('POST', '/api/benchmark', { prompts: ['hi'], models: [participantId] }))
+  let result: RunResult | undefined
+  for (let i = 0; i < 300; i++) {
+    const run = data<{ status: string; results: RunResult[] }>(await req('GET', `/api/runs/${runId}`))
+    if (run.status === 'done' || run.status === 'error') { result = run.results[0]; break }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  if (!result) throw new Error('run did not finish')
+  const trace = data<TraceStepRow[]>(await req('GET', `/api/results/${result.id}/trace`))
+  return { result, trace }
+}
+
+describe('internal pipeline orchestration (stage 4 phase 2)', () => {
+  it('runs a 2-node chain, threading each stage output into the next', async () => {
+    const e1 = await agent('e1.mjs', ECHO), e2 = await agent('e2.mjs', ECHO)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('chain2', {
+      mode: 'internal',
+      nodes: [{ id: 'n1', ref: e1 }, { id: 'n2', ref: e2 }],
+      edges: [{ from: '', to: 'n1' }, { from: 'n1', to: 'n2' }, { from: 'n2', to: '' }],
+    }))).id
+    const { result, trace } = await runOnce(pid)
+    expect(result.error).toBeFalsy()
+    expect(result.text).toBe('ECHO:ECHO:hi')          // n2 saw n1's output
+    // one step per node, and the result is a pipeline participant
+    expect(trace.map(s => s.kind)).toEqual(['tool', 'tool'])
+    const providerId = (getDb().prepare('SELECT provider_id AS p FROM results WHERE id = ?').get(result.id) as { p: string }).p
+    expect(providerId).toBe('pipeline')
+  })
+
+  it('rolls each stage cost up into the pipeline trace', async () => {
+    const e1 = await agent('c1.mjs', ECHO), e2 = await agent('c2.mjs', ECHO)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('cost', {
+      mode: 'internal',
+      nodes: [{ id: 'n1', ref: e1 }, { id: 'n2', ref: e2 }],
+      edges: [{ from: 'n1', to: 'n2' }],
+    }))).id
+    const { trace } = await runOnce(pid)
+    const total = trace.reduce((a, s) => a + (s.cost ?? 0), 0)
+    expect(total).toBeCloseTo(0.002, 6)               // 0.001 per stage
+  })
+
+  it('runs a nested pipeline as a single rolled-up stage', async () => {
+    const leaf = await agent('nl.mjs', ECHO)
+    const inner = data<Target>(await req('POST', '/api/targets', pipeline('inner', {
+      mode: 'internal', nodes: [{ id: 'n', ref: leaf }], edges: [],
+    }))).id
+    const outer = data<Target>(await req('POST', '/api/targets', pipeline('outer', {
+      mode: 'internal', nodes: [{ id: 'n', ref: inner }], edges: [],
+    }))).id
+    const { result, trace } = await runOnce(outer)
+    expect(result.error).toBeFalsy()
+    expect(result.text).toBe('ECHO:hi')               // outer → inner → echo
+    expect(trace).toHaveLength(1)                      // nested pipeline = one step
+    expect(trace[0].kind).toBe('tool')
+  })
+
+  it('a crashing stage aborts the pipeline and surfaces the error on the result', async () => {
+    const boom = await agent('boom.mjs', CRASH)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('bad', {
+      mode: 'internal', nodes: [{ id: 'n', ref: boom }], edges: [],
+    }))).id
+    const { result } = await runOnce(pid)
+    expect(result.error).toBeTruthy()
+  })
+})
+
+// An external pipeline program: benchy runs no stages, it just reads the emitted trace.
+const PROG = `
+const w = o => process.stdout.write(JSON.stringify(o) + '\\n')
+w({ type: 'step', id: 'a', kind: 'think', name: 'plan', ms: 5 })
+w({ type: 'step', id: 'b', kind: 'model', name: 'call', cost: 0.002 })
+w({ type: 'token', text: 'external-answer' })
+w({ type: 'done', usage: { inputTokens: 2, outputTokens: 3 } })
+`
+
+describe('external pipeline observation (stage 4 phase 3)', () => {
+  it('observes an external program trace instead of running any stages', async () => {
+    const p = join(tempDir, 'prog.mjs')
+    writeFileSync(p, PROG)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('extrun', {
+      mode: 'external', transport: 'command', command: `node ${p}`, timeoutMs: 8000,
+    }))).id
+    const { result, trace } = await runOnce(pid)
+    expect(result.error).toBeFalsy()
+    expect(result.text).toBe('external-answer')
+    expect(trace.map(s => s.kind)).toEqual(['think', 'model'])   // the program's own steps
+    const providerId = (getDb().prepare('SELECT provider_id AS p FROM results WHERE id = ?').get(result.id) as { p: string }).p
+    expect(providerId).toBe('pipeline')
   })
 })

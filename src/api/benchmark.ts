@@ -11,13 +11,14 @@ import { webhookAdapter } from '../adapters/webhook.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { getAttachmentRow, uploadPath, cloneAttachmentsForTurn } from './uploads.js'
 import type { Adapter, Message, MessageAttachment, ToolCall, ToolResult, ToolSpec, TraceStep } from '../adapters/base.js'
-import type { ProviderType, BenchmarkRequest, RunSettings, RunKind, AgentTargetConfig } from '../types.js'
+import type { ProviderType, BenchmarkRequest, RunSettings, RunKind, AgentTargetConfig, ModelTargetConfig, PipelineTargetConfig, PipelineNode, PipelineEdge } from '../types.js'
 import { resolveTools, type Tool } from '../tools/index.js'
 import { connectMcpServer } from '../tools/mcp.js'
 import { getCustomTools, getSkills, getMcpServers } from '../config.js'
 import { materializeRunMetrics } from './metrics.js'
-import { buildAgentCall } from '../agentRun.js'
+import { buildAgentCall, consumeAgentStream } from '../agentRun.js'
 import { insertTraceSteps, traceAggregate } from '../traceStore.js'
+import { resolvePricing, computeCost } from '../pricing.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -136,6 +137,13 @@ export async function runCell(
   const agentRow = getDb().prepare("SELECT config FROM targets WHERE id = ? AND kind = 'agent'").get(modelKey) as { config: string } | undefined
   if (agentRow) {
     return runAgentCell(runId, promptIndex, promptText, modelKey, JSON.parse(agentRow.config) as AgentTargetConfig, history, systemPrompt)
+  }
+
+  // A pipeline participant is a graph of other participants — hand off to its
+  // orchestrator (internal DAG) / observer (external program).
+  const pipeRow = getDb().prepare("SELECT config FROM targets WHERE id = ? AND kind = 'pipeline'").get(modelKey) as { config: string } | undefined
+  if (pipeRow) {
+    return runPipelineCell(runId, promptIndex, promptText, modelKey, JSON.parse(pipeRow.config) as PipelineTargetConfig, providers, runSettings, systemPrompt)
   }
 
   const db = getDb()
@@ -416,6 +424,229 @@ export async function runAgentCell(
         runId, promptIndex, model: targetId, ttfs, totalTime,
         steps: agg?.steps ?? 0, toolCalls: agg?.toolCalls ?? 0, agentCost,
         usage: { inputTokens: usageIn, outputTokens: usageOut },
+      })
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    db.prepare('UPDATE results SET error = ? WHERE id = ?').run(msg, resultId)
+    broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: msg })
+  } finally {
+    db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId)
+  }
+}
+
+// ── Stage 4: internal pipeline orchestration ────────────────────────────────
+// A pipeline participant runs a graph of other participants. Internal mode: benchy
+// topo-orders the DAG, runs each node's member (model / agent / nested pipeline),
+// threads an upstream node's output into the downstream input, and emits one trace
+// step per node so the pipeline's trajectory aggregates like an agent's. External
+// mode: the pipeline is a user program benchy only observes (reuses the agent path).
+// No edge conditions yet — plain fan-out / fan-in.
+
+type Providers = Awaited<ReturnType<typeof getProviders>>
+
+interface StageResult {
+  text: string
+  kind: 'model' | 'tool' | 'error'
+  cost: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  error: string | null
+}
+interface StageCtx {
+  providers: Providers
+  runSettings?: RunSettings
+  systemPrompt?: string
+  deadline: number
+  depth: number
+}
+interface GraphResult { text: string; steps: TraceStep[]; cost: number | null; error: string | null }
+
+function errStage(error: string): StageResult {
+  return { text: '', kind: 'error', cost: null, inputTokens: null, outputTokens: null, error }
+}
+
+// Kahn's algorithm over the node graph (input/output sentinels ignored). The graph is
+// acyclic by construction (validated at write time); a defensive fallback keeps every
+// node if a cycle ever slips through, so a run never silently drops stages.
+function topoOrder(nodes: PipelineNode[], edges: PipelineEdge[]): string[] {
+  const ids = nodes.map(n => n.id)
+  const indeg = new Map(ids.map(id => [id, 0]))
+  const adj = new Map<string, string[]>(ids.map(id => [id, []]))
+  for (const e of edges) {
+    if (e.from === '' || e.to === '') continue
+    adj.get(e.from)?.push(e.to)
+    indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1)
+  }
+  const queue = ids.filter(id => (indeg.get(id) ?? 0) === 0)
+  const order: string[] = []
+  while (queue.length) {
+    const u = queue.shift() as string
+    order.push(u)
+    for (const v of adj.get(u) ?? []) {
+      indeg.set(v, (indeg.get(v) ?? 0) - 1)
+      if (indeg.get(v) === 0) queue.push(v)
+    }
+  }
+  return order.length === ids.length ? order : ids
+}
+
+// Run one model target once — no result row, no tool loop — and return its answer + cost.
+async function runModelStage(providerId: string, model: string, input: string, ctx: StageCtx): Promise<StageResult> {
+  const provider = ctx.providers.find(p => p.id === providerId)
+  if (!provider) return errStage(`provider "${providerId}" is not configured`)
+  const adapter = getAdapter(provider.type)
+  const settings = { ...DEFAULT_PROVIDER_SETTINGS, ...provider.defaults, ...(await getAppRunDefaults()), ...(ctx.runSettings?.global ?? {}) }
+  const convo: Message[] = [
+    ...(ctx.systemPrompt ? [{ role: 'system' as const, content: ctx.systemPrompt }] : []),
+    { role: 'user', content: input },
+  ]
+  let text = '', inTok = 0, outTok = 0, error: string | null = null
+  try {
+    for await (const chunk of adapter.stream(convo, { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model, settings })) {
+      if (chunk.type === 'token') text += chunk.text
+      else if (chunk.type === 'done') { inTok += chunk.usage.inputTokens; outTok += chunk.usage.outputTokens }
+      else if (chunk.type === 'error') { error = chunk.message; break }
+    }
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  const cost = computeCost(resolvePricing(`${providerId}:${model}`, provider.pricing), inTok, outTok)
+  return { text, kind: 'model', cost, inputTokens: inTok || null, outputTokens: outTok || null, error }
+}
+
+// Run one agent target once (observe its trace), returning its answer + reported cost.
+async function runAgentStage(ref: string, cfg: AgentTargetConfig, input: string, ctx: StageCtx): Promise<StageResult> {
+  const convo: Message[] = [
+    ...(ctx.systemPrompt ? [{ role: 'system' as const, content: ctx.systemPrompt }] : []),
+    { role: 'user', content: input },
+  ]
+  try {
+    const { adapter, config } = await buildAgentCall(cfg, ref)
+    const o = await consumeAgentStream(adapter.stream(convo, config))
+    return { text: o.text, kind: 'tool', cost: o.reportedCost, inputTokens: o.usage.inputTokens || null, outputTokens: o.usage.outputTokens || null, error: o.error }
+  } catch (e) { return errStage(e instanceof Error ? e.message : String(e)) }
+}
+
+// Observe an external pipeline program via the agent transport (its config shares the
+// agent transport fields). Returns the program's emitted trace + answer + reported cost.
+async function runExternal(ref: string, cfg: PipelineTargetConfig, input: string, ctx: StageCtx): Promise<GraphResult> {
+  const agentCfg: AgentTargetConfig = {
+    transport: cfg.transport ?? 'command', command: cfg.command, cwd: cfg.cwd, url: cfg.url,
+    authHeader: cfg.authHeader, env: cfg.env, secretRefs: cfg.secretRefs,
+    timeoutMs: cfg.timeoutMs, maxSteps: cfg.maxNodes, maxCostUsd: cfg.maxCostUsd, retries: 0,
+  }
+  const convo: Message[] = [
+    ...(ctx.systemPrompt ? [{ role: 'system' as const, content: ctx.systemPrompt }] : []),
+    { role: 'user', content: input },
+  ]
+  try {
+    const { adapter, config } = await buildAgentCall(agentCfg, ref)
+    const o = await consumeAgentStream(adapter.stream(convo, config))
+    return { text: o.text, steps: o.steps, cost: o.reportedCost, error: o.error }
+  } catch (e) { return { text: '', steps: [], cost: null, error: e instanceof Error ? e.message : String(e) } }
+}
+
+// Dispatch a single node to its member. A nested pipeline reports as ONE `tool` step
+// with its rolled-up cost (its internal steps are not re-flattened into the parent).
+async function runStage(ref: string, input: string, ctx: StageCtx): Promise<StageResult> {
+  const row = getDb().prepare('SELECT kind, config FROM targets WHERE id = ?').get(ref) as { kind: string; config: string } | undefined
+  if (!row) return errStage(`stage references a missing target: ${ref}`)
+  if (row.kind === 'model') {
+    const c = JSON.parse(row.config) as ModelTargetConfig
+    return runModelStage(c.providerId, c.model, input, ctx)
+  }
+  if (row.kind === 'agent') {
+    return runAgentStage(ref, JSON.parse(row.config) as AgentTargetConfig, input, ctx)
+  }
+  if (row.kind === 'pipeline') {
+    if (ctx.depth >= 16) return errStage('pipeline nesting runtime cap reached')
+    const nested = JSON.parse(row.config) as PipelineTargetConfig
+    const inner = nested.mode === 'external'
+      ? await runExternal(ref, nested, input, ctx)
+      : await runPipelineGraph(nested, input, { ...ctx, depth: ctx.depth + 1 })
+    return { text: inner.text, kind: 'tool', cost: inner.cost, inputTokens: null, outputTokens: null, error: inner.error }
+  }
+  return errStage(`unknown target kind for stage: ${ref}`)
+}
+
+// Run an internal-mode DAG: topo order, thread outputs along edges, one step per node.
+async function runPipelineGraph(cfg: PipelineTargetConfig, input: string, ctx: StageCtx): Promise<GraphResult> {
+  const nodes = cfg.nodes ?? []
+  const edges = cfg.edges ?? []
+  const order = topoOrder(nodes, edges)
+  const outputById = new Map<string, string>()
+  const steps: TraceStep[] = []
+  let cost: number | null = null
+
+  const upstreamOf = (id: string) => edges.filter(e => e.to === id && e.from !== '').map(e => e.from)
+
+  for (const nodeId of order) {
+    if (Date.now() > ctx.deadline) return { text: '', steps, cost, error: 'pipeline timed out' }
+    if (cfg.maxCostUsd != null && cost != null && cost > cfg.maxCostUsd) {
+      return { text: '', steps, cost, error: `pipeline cost exceeded $${cfg.maxCostUsd}` }
+    }
+    const node = nodes.find(n => n.id === nodeId)
+    if (!node) continue
+    const ups = upstreamOf(nodeId)
+    // A node with no real upstream (or wired from the pipeline input '') gets the
+    // pipeline's own input; otherwise it gets its upstream outputs, concatenated.
+    const stageInput = ups.length === 0 ? input : ups.map(u => outputById.get(u) ?? '').join('\n\n')
+    const t0 = Date.now()
+    const out = await runStage(node.ref, stageInput, ctx)
+    outputById.set(nodeId, out.text)
+    if (out.cost != null) cost = (cost ?? 0) + out.cost
+    steps.push({
+      id: node.id, parentId: ups[0] ?? null, kind: out.kind === 'error' ? 'error' : out.kind,
+      name: node.label ?? node.ref, ms: Date.now() - t0,
+      inputTokens: out.inputTokens, outputTokens: out.outputTokens, cost: out.cost,
+      payload: null, payloadTruncated: false, isError: out.error != null,
+    })
+    if (out.error) return { text: out.text, steps, cost, error: out.error }
+  }
+
+  // Output = the outputs of nodes wired to '' (pipeline output), else the last node's.
+  const outNodes = edges.filter(e => e.to === '' && e.from !== '').map(e => e.from)
+  const text = outNodes.length
+    ? outNodes.map(n => outputById.get(n) ?? '').join('\n\n')
+    : (outputById.get(order[order.length - 1]) ?? '')
+  return { text, steps, cost, error: null }
+}
+
+// A pipeline participant cell: one result row (provider_id='pipeline') whose trace is
+// the per-stage trajectory. Mirrors runAgentCell's lifecycle.
+export async function runPipelineCell(
+  runId: string,
+  promptIndex: number,
+  promptText: string,
+  targetId: string,
+  cfg: PipelineTargetConfig,
+  providers: Providers,
+  runSettings?: RunSettings,
+  systemPrompt?: string,
+) {
+  const db = getDb()
+  const resultId = randomUUID()
+  db.prepare(
+    'INSERT INTO results (id, run_id, prompt_index, model, provider_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(resultId, runId, promptIndex, targetId, 'pipeline', '', Date.now())
+  broadcast(runId, 'cell_start', { runId, promptIndex, model: targetId })
+
+  const t0 = Date.now()
+  const ctx: StageCtx = { providers, runSettings, systemPrompt, deadline: t0 + (cfg.timeoutMs || 120_000), depth: 0 }
+  try {
+    const res = cfg.mode === 'external'
+      ? await runExternal(targetId, cfg, promptText, ctx)
+      : await runPipelineGraph(cfg, promptText, ctx)
+    const totalTime = Date.now() - t0
+    insertTraceSteps(resultId, res.steps)
+    const agg = traceAggregate(resultId)
+    db.prepare('UPDATE results SET text = ?, total_time = ?, error = ? WHERE id = ?').run(res.text, totalTime, res.error, resultId)
+    if (res.error) {
+      broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: res.error })
+    } else {
+      broadcast(runId, 'cell_done', {
+        runId, promptIndex, model: targetId, ttfs: null, totalTime,
+        steps: agg?.steps ?? 0, toolCalls: agg?.toolCalls ?? 0, agentCost: res.cost,
+        usage: { inputTokens: 0, outputTokens: 0 },
       })
     }
   } catch (err) {
