@@ -61,6 +61,10 @@ describe('update comparison', () => {
 })
 
 describe('GET /api/version', () => {
+  // The route awaits an update check that makes TWO sequential GitHub fetches, each
+  // with a 5s abort — up to ~10s when the machine is loaded or offline. The default
+  // 5s test timeout trips here, and a timed-out test leaves the fetch in flight,
+  // leaking an unclean server into the next file. A generous timeout fixes both.
   it('reports this install: build identity, real runtime paths, and repo URL', async () => {
     const res = await fetch(`${base}/api/version`)
     expect(res.status).toBe(200)
@@ -88,5 +92,5 @@ describe('GET /api/version', () => {
     // 'network' means we couldn't reach GitHub. It must not be reported when we
     // could — that message tells the user to fix a connection that isn't broken.
     expect(data.checkError === null || data.checkError === 'missing' || data.checkError === 'network').toBe(true)
-  })
+  }, 20_000)
 })

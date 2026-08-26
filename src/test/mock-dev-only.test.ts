@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +21,15 @@ async function probeMock(base: string): Promise<string> {
 
 let server: FastifyInstance | null = null
 let dir: string | null = null
+
+// Mock registration keys off BENCHY_DIR's basename (isDevEnvironment). Start each
+// test from a clean slate so a prior file that leaked its state — e.g. a version
+// check that timed out with an open server/db and a stale BENCHY_DIR — can never
+// decide this file's result. Ordering must not matter.
+beforeEach(() => {
+  try { closeDb() } catch { /* not open */ }
+  delete process.env.BENCHY_DIR
+})
 
 afterEach(async () => {
   if (server) { await server.close(); server = null }
