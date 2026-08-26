@@ -4,6 +4,7 @@ import { modelTargetId, parseTargetId, variantSlug } from '../targets.js'
 import { isLocalRequest } from './csrf.js'
 import { setSecret } from '../config.js'
 import { handshakeAgent } from '../agentRun.js'
+import { handshakePipeline } from './benchmark.js'
 import type { Target, TargetKind, TargetConfig, ModelTargetConfig, AgentTargetConfig, PipelineTargetConfig, PipelineNode, PipelineEdge } from '../types.js'
 
 interface TargetRow {
@@ -371,13 +372,15 @@ export async function registerTargetsRoutes(app: FastifyInstance): Promise<void>
     const { id } = req.params as { id: string }
     const row = getDb().prepare('SELECT * FROM targets WHERE id = ?').get(id) as TargetRow | undefined
     if (!row) return reply.code(404).send({ error: 'Target not found' })
-    if (row.kind !== 'agent') return reply.code(400).send({ error: 'handshake is only for agent targets' })
-    const cfg = JSON.parse(row.config) as AgentTargetConfig
+    if (row.kind !== 'agent' && row.kind !== 'pipeline') return reply.code(400).send({ error: 'handshake is only for agent and pipeline targets' })
     const body = (req.body ?? {}) as { prompt?: string }
-    const result = await handshakeAgent(cfg, id, body.prompt)
-    // Persist the outcome on the (value-free) config so the agents list shows a
-    // health dot without re-running. Diagnostic only — never disables the agent.
-    const nextConfig: AgentTargetConfig = {
+    const cfg = JSON.parse(row.config) as AgentTargetConfig | PipelineTargetConfig
+    const result = row.kind === 'pipeline'
+      ? await handshakePipeline(cfg as PipelineTargetConfig, id, body.prompt)
+      : await handshakeAgent(cfg as AgentTargetConfig, id, body.prompt)
+    // Persist the outcome on the (value-free) config so the list shows a health dot
+    // without re-running. Diagnostic only — never disables the participant.
+    const nextConfig = {
       ...cfg,
       lastHandshake: { ok: result.ok, spokeProtocol: result.spokeProtocol, steps: result.steps, error: result.error, at: Date.now() },
     }

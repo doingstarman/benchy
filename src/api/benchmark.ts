@@ -16,7 +16,7 @@ import { resolveTools, type Tool } from '../tools/index.js'
 import { connectMcpServer } from '../tools/mcp.js'
 import { getCustomTools, getSkills, getMcpServers } from '../config.js'
 import { materializeRunMetrics } from './metrics.js'
-import { buildAgentCall, consumeAgentStream } from '../agentRun.js'
+import { buildAgentCall, consumeAgentStream, type HandshakeResult } from '../agentRun.js'
 import { insertTraceSteps, traceAggregate } from '../traceStore.js'
 import { resolvePricing, computeCost } from '../pricing.js'
 
@@ -663,6 +663,26 @@ export async function runPipelineCell(
     broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: msg })
   } finally {
     db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId)
+  }
+}
+
+// Verify a pipeline once on a trivial prompt, the same two axes as an agent handshake:
+// process (did it run) and structure (did any stage/step happen). Internal mode runs the
+// DAG (a dry topo run); external mode observes the program. No result row is written.
+export async function handshakePipeline(cfg: PipelineTargetConfig, targetId: string, prompt?: string): Promise<HandshakeResult> {
+  const providers = await getProviders()
+  const input = prompt?.trim() || 'What is 2+2? Answer with a single number.'
+  const ctx: StageCtx = { providers, deadline: Date.now() + (cfg.timeoutMs || 120_000), depth: 0 }
+  const res = cfg.mode === 'external'
+    ? await runExternal(targetId, cfg, input, ctx)
+    : await runPipelineGraph(cfg, input, ctx)
+  return {
+    ok: res.error === null,
+    spokeProtocol: res.steps.length > 0,
+    steps: res.steps.length,
+    reportedUsage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+    output: res.text.trim(),
+    error: res.error,
   }
 }
 

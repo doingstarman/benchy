@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Target, PipelineTargetConfig, PipelineNode, PipelineEdge } from '../../../src/types'
-import { targetsApi, type PipelineConfigUpsert } from '../api'
+import { targetsApi, type PipelineConfigUpsert, type HandshakeResult } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
+import { HealthDot } from './Agents'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { IconPlus, IconClose, IconPencil, IconCopy, IconTrash } from '../components/icons'
 import { useT } from '../i18n'
@@ -102,6 +103,7 @@ function PipelineRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '0.5px solid var(--border)', opacity: target.enabled ? 1 : 0.55 }}>
       <TypeBadge kind={target.kind} />
+      <HealthDot health={cfg.lastHandshake} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button onClick={onEdit} style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-base)', color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{target.name}</button>
@@ -147,6 +149,8 @@ function PipelineDrawer({ target, targets, onClose, onSaved, onDelete }: {
   const [enabled, setEnabled] = useState(target?.enabled ?? true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [verifying, setVerifying] = useState(false)
+  const [verify, setVerify] = useState<HandshakeResult | null>(null)
 
   const refOptions = useMemo(() => targets.filter(x => x.id !== target?.id), [targets, target])
 
@@ -199,6 +203,19 @@ function PipelineDrawer({ target, targets, onClose, onSaved, onDelete }: {
       setError(e instanceof Error ? e.message : String(e))
       return null
     } finally { setBusy(false) }
+  }
+
+  // Verify runs by id, so persist first (also captures unsaved edits), then reload the
+  // list so the row's health dot reflects this verify.
+  async function runVerify() {
+    const id = await save()
+    if (!id) return
+    setVerifying(true); setVerify(null)
+    try {
+      setVerify(await targetsApi.handshake(id))
+      await onSaved(id)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setVerifying(false) }
   }
 
   return (
@@ -285,6 +302,23 @@ function PipelineDrawer({ target, targets, onClose, onSaved, onDelete }: {
             <Field label={t('pipelines.timeoutMs')}><Input type="number" value={timeoutMs} onChange={e => setTimeoutMs(Number(e.target.value) || 0)} /></Field>
             <Field label={t('pipelines.maxCost')}><Input value={maxCostUsd} onChange={e => setMaxCostUsd(e.target.value)} placeholder="—" /></Field>
           </div>
+        </Section>
+
+        <Section label={t('pipelines.verify')}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Button small onClick={() => void runVerify()} disabled={verifying || busy}>{verifying ? t('agents.verifying') : t('pipelines.runOnce')}</Button>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{t('pipelines.verifyHint')}</span>
+          </div>
+          {verify && (
+            <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-sm)' }}>
+              <span style={{ color: verify.ok ? 'var(--success)' : 'var(--error)' }}>
+                {verify.ok ? (verify.spokeProtocol ? t('pipelines.verifyOk') : t('pipelines.verifyDegraded')) : t('pipelines.verifyCrashed')}
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}> · {t('pipelines.nodesN', { n: verify.steps })}</span>
+              {verify.error && <div style={{ color: 'var(--error)', marginTop: 4 }}>{verify.error}</div>}
+              {!verify.error && verify.output && <div style={{ color: 'var(--text-secondary)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{verify.output.slice(0, 300)}</div>}
+            </div>
+          )}
         </Section>
 
         {error && <div style={{ color: 'var(--error)', fontSize: 'var(--fs-sm)', marginBottom: 10 }}>{error}</div>}

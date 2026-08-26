@@ -291,6 +291,43 @@ describe('external pipeline observation (stage 4 phase 3)', () => {
   })
 })
 
+describe('pipeline verify / health (stage 4)', () => {
+  const health = (t: Target) => (t.config as PipelineTargetConfig).lastHandshake
+
+  it('verifies an internal pipeline and persists health (ok + steps) for the dot', async () => {
+    const e = await agent('vok.mjs', ECHO)
+    const p = data<Target>(await req('POST', '/api/targets', pipeline('vok', { mode: 'internal', nodes: [{ id: 'n', ref: e }], edges: [] })))
+    const hs = data<{ ok: boolean; spokeProtocol: boolean; steps: number }>(await req('POST', `/api/targets/${encodeURIComponent(p.id)}/handshake`, {}))
+    expect(hs.ok).toBe(true)
+    expect(hs.spokeProtocol).toBe(true)
+    expect(hs.steps).toBe(1)
+    const after = health(data<Target>(await req('GET', `/api/targets/${encodeURIComponent(p.id)}`)))
+    expect(after?.ok).toBe(true)
+    expect(typeof after?.at).toBe('number')
+  })
+
+  it('a crashing pipeline verifies as not ok', async () => {
+    const boom = await agent('vcrash.mjs', CRASH)
+    const p = data<Target>(await req('POST', '/api/targets', pipeline('vbad', { mode: 'internal', nodes: [{ id: 'n', ref: boom }], edges: [] })))
+    await req('POST', `/api/targets/${encodeURIComponent(p.id)}/handshake`, {})
+    expect(health(data<Target>(await req('GET', `/api/targets/${encodeURIComponent(p.id)}`)))?.ok).toBe(false)
+  })
+
+  it('verifies an external pipeline by observing its program', async () => {
+    const prog = join(tempDir, 'vprog.mjs')
+    writeFileSync(prog, PROG)
+    const p = data<Target>(await req('POST', '/api/targets', pipeline('vext', { mode: 'external', transport: 'command', command: `node ${prog}`, timeoutMs: 8000 })))
+    const hs = data<{ ok: boolean; steps: number }>(await req('POST', `/api/targets/${encodeURIComponent(p.id)}/handshake`, {}))
+    expect(hs.ok).toBe(true)
+    expect(hs.steps).toBe(2)
+  })
+
+  it('handshake still refuses a model target', async () => {
+    const m = await model('mh')
+    expect((await req('POST', `/api/targets/${encodeURIComponent(m)}/handshake`, {})).status).toBe(400)
+  })
+})
+
 describe('pipeline metric rollup (stage 4 phase 4)', () => {
   it('the trajectory metrics apply to pipelines; model-only metrics do not', async () => {
     const defs = data<{ key: string; appliesTo: string[] }[]>(await req('GET', '/api/metrics'))
