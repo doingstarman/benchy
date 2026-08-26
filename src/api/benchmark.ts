@@ -459,6 +459,7 @@ interface StageCtx {
   systemPrompt?: string
   deadline: number
   depth: number
+  onStep?: (step: TraceStep) => void   // live per-node emission (top level only)
 }
 interface GraphResult { text: string; steps: TraceStep[]; cost: number | null; error: string | null }
 
@@ -560,9 +561,11 @@ async function runStage(ref: string, input: string, ctx: StageCtx): Promise<Stag
   if (row.kind === 'pipeline') {
     if (ctx.depth >= 16) return errStage('pipeline nesting runtime cap reached')
     const nested = JSON.parse(row.config) as PipelineTargetConfig
+    // A nested pipeline surfaces as ONE step in the parent; don't re-emit its own
+    // internal steps live (drop onStep on the recursion).
     const inner = nested.mode === 'external'
       ? await runExternal(ref, nested, input, ctx)
-      : await runPipelineGraph(nested, input, { ...ctx, depth: ctx.depth + 1 })
+      : await runPipelineGraph(nested, input, { ...ctx, depth: ctx.depth + 1, onStep: undefined })
     return { text: inner.text, kind: 'tool', cost: inner.cost, inputTokens: null, outputTokens: null, error: inner.error }
   }
   return errStage(`unknown target kind for stage: ${ref}`)
@@ -594,12 +597,14 @@ async function runPipelineGraph(cfg: PipelineTargetConfig, input: string, ctx: S
     const out = await runStage(node.ref, stageInput, ctx)
     outputById.set(nodeId, out.text)
     if (out.cost != null) cost = (cost ?? 0) + out.cost
-    steps.push({
+    const step: TraceStep = {
       id: node.id, parentId: ups[0] ?? null, kind: out.kind === 'error' ? 'error' : out.kind,
       name: node.label ?? node.ref, ms: Date.now() - t0,
       inputTokens: out.inputTokens, outputTokens: out.outputTokens, cost: out.cost,
       payload: null, payloadTruncated: false, isError: out.error != null,
-    })
+    }
+    steps.push(step)
+    ctx.onStep?.(step)
     if (out.error) return { text: out.text, steps, cost, error: out.error }
   }
 
@@ -631,7 +636,10 @@ export async function runPipelineCell(
   broadcast(runId, 'cell_start', { runId, promptIndex, model: targetId })
 
   const t0 = Date.now()
-  const ctx: StageCtx = { providers, runSettings, systemPrompt, deadline: t0 + (cfg.timeoutMs || 120_000), depth: 0 }
+  const ctx: StageCtx = {
+    providers, runSettings, systemPrompt, deadline: t0 + (cfg.timeoutMs || 120_000), depth: 0,
+    onStep: step => broadcast(runId, 'cell_step', { runId, promptIndex, model: targetId, step }),
+  }
   try {
     const res = cfg.mode === 'external'
       ? await runExternal(targetId, cfg, promptText, ctx)

@@ -266,7 +266,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
 
       <Item to="/models" label={t('nav.models')} icon="models" collapsed={collapsed} />
       <Item to="/agents" label={t('nav.agents')} icon="agents" collapsed={collapsed} />
-      <DisabledItem label={t('nav.pipelines')} icon="pipelines" collapsed={collapsed} soon />
+      <Item to="/pipelines" label={t('nav.pipelines')} icon="pipelines" collapsed={collapsed} />
       <Item to="/library" label={t('nav.library')} icon="library" collapsed={collapsed} />
       <Item to="/providers" label={t('nav.providers')} icon="providers" collapsed={collapsed} />
 

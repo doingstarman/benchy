@@ -1478,6 +1478,8 @@ export function NewRun() {
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [agents, setAgents] = useState<Target[]>([])
   const agentKeys = useMemo(() => new Set(agents.map(a => a.id)), [agents])
+  const [pipelines, setPipelines] = useState<Target[]>([])
+  const pipelineKeys = useMemo(() => new Set(pipelines.map(p => p.id)), [pipelines])
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => savedSession?.selectedModels ?? new Set())
   // Which tools this run enables. Empty by default — an ordinary run sends no
   // tools and measures exactly what it measured before tools existed. Holds both
@@ -1703,6 +1705,7 @@ export function NewRun() {
 
   useEffect(() => {
     targetsApi.list('agent').then(setAgents).catch(() => {})
+    targetsApi.list('pipeline').then(setPipelines).catch(() => {})
   }, [])
 
   // Only feeds the "inherited" readouts in the settings panel — the server does
@@ -1749,6 +1752,17 @@ export function NewRun() {
       name: t('agents.title'),
       needsKey: false,
       models: enabledAgents.map(a => ({ key: a.id, label: a.name })),
+    })
+  }
+  // Pipelines join the picker the same way — their target id is the participant key,
+  // routed straight through to runPipelineCell.
+  const enabledPipelines = pipelines.filter(p => p.enabled)
+  if (enabledPipelines.length > 0) {
+    providerGroups.push({
+      id: '__pipelines__',
+      name: t('pipelines.title'),
+      needsKey: false,
+      models: enabledPipelines.map(p => ({ key: p.id, label: p.name })),
     })
   }
 
@@ -2097,8 +2111,13 @@ export function NewRun() {
     const r = turn.results.get(key)
     if (!r) return null
     const cellKey = `${turn.promptIndex}:${key}`
-    const isAgent = agentKeys.has(key)
-    const label = isAgent ? (agents.find(a => a.id === key)?.name ?? key) : key.split(':').slice(1).join(':')
+    // Pipelines, like agents, carry a trajectory rather than model pricing — render
+    // them with the agent-style metrics strip + trace.
+    const isPipeline = pipelineKeys.has(key)
+    const isAgent = agentKeys.has(key) || isPipeline
+    const label = agentKeys.has(key) ? (agents.find(a => a.id === key)?.name ?? key)
+      : isPipeline ? (pipelines.find(p => p.id === key)?.name ?? key)
+        : key.split(':').slice(1).join(':')
     const isStreaming = r.status === 'streaming'
     const isDone = r.status === 'done'
     const isError = r.status === 'error'

@@ -7,6 +7,7 @@ import { History } from './pages/History'
 import { Providers } from './pages/Providers'
 import { Models } from './pages/Models'
 import { Agents } from './pages/Agents'
+import { Pipelines } from './pages/Pipelines'
 import { Library } from './pages/Library'
 import { Datasets } from './pages/Datasets'
 import { DatasetDetail } from './pages/DatasetDetail'
@@ -31,6 +32,7 @@ export function AppRouter() {
           <Route path="providers" element={<Providers />} />
           <Route path="models" element={<Models />} />
           <Route path="agents" element={<Agents />} />
+          <Route path="pipelines" element={<Pipelines />} />
           <Route path="library" element={<Library />} />
           <Route path="datasets" element={<Datasets />} />
           <Route path="datasets/:id" element={<DatasetDetail />} />

@@ -12,7 +12,7 @@ function asAgent(t: Target): AgentTargetConfig { return t.config as AgentTargetC
 // Per-row health from the last verify. green = ran (full = solid, degraded/no-protocol
 // = ring); red = process died; muted ring = never verified. Diagnostic only — a red
 // dot never means the agent is disabled.
-function HealthDot({ health }: { health?: AgentHealth }) {
+export function HealthDot({ health }: { health?: AgentHealth }) {
   const { t } = useT()
   const spec = !health
     ? { color: 'var(--text-muted)', fill: false, title: t('agents.healthUnverified') }

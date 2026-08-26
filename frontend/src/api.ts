@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, TargetConfig, ModelTargetConfig, AgentTargetConfig, TraceStepRow, MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../src/types'
+import type { Provider, ProviderView, Run, Result, AttachmentMeta, CustomTool, CustomToolView, Skill, McpServer, McpServerView, Dataset, DatasetItem, DatasetVar, ArenaVerdict, ArenaStanding, Target, TargetKind, TargetConfig, ModelTargetConfig, AgentTargetConfig, PipelineTargetConfig, TraceStepRow, MetricDef, MetricFormat, MetricDirection, MetricScope, MetricAggregate } from '../../src/types'
 // Type-only: src/version.ts pulls in node:fs, but `import type` is erased at build.
 import type { VersionInfo } from '../../src/version'
 
@@ -52,7 +52,9 @@ export const providersApi = {
 
 // ─── targets (participants registry) ──────────────────────────────────────────
 
-export type TargetUpsert = { name: string; config: TargetConfig | AgentConfigUpsert; tags?: string[]; enabled?: boolean; kind?: TargetKind }
+export type TargetUpsert = { name: string; config: TargetConfig | AgentConfigUpsert | PipelineConfigUpsert; tags?: string[]; enabled?: boolean; kind?: TargetKind }
+// External pipelines carry secret values write-only, like agents.
+export type PipelineConfigUpsert = Partial<PipelineTargetConfig> & { secrets?: Record<string, string> }
 // The agent editor sends secret values write-only under `secrets` (name→value);
 // they are stored server-side by name and never returned, so a saved agent config
 // carries only `secretRefs`.
@@ -74,7 +76,7 @@ export const targetsApi = {
   get: (id: string) => apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`),
   create: (body: TargetUpsert) =>
     apiFetch<Target>('/api/targets', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: string, body: Partial<{ name: string; tags: string[]; enabled: boolean; config: TargetConfig | AgentConfigUpsert }>) =>
+  update: (id: string, body: Partial<{ name: string; tags: string[]; enabled: boolean; config: TargetConfig | AgentConfigUpsert | PipelineConfigUpsert }>) =>
     apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   duplicate: (id: string) =>
     apiFetch<Target>(`/api/targets/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
