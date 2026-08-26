@@ -14,9 +14,10 @@ import { Button, Segmented } from '../components/ui'
 import { SliderField } from '../components/SliderField'
 import {
   IconCopy, IconCheck, IconWarning,
-  IconSliders, IconContrast, IconLayers, IconCode, IconDatabase, IconInfo, IconMetrics,
+  IconSliders, IconContrast, IconLayers, IconCode, IconDatabase, IconInfo, IconMetrics, IconText,
 } from '../components/icons'
 import { MetricsRegistry } from '../components/MetricsRegistry'
+import { LogsPanel } from '../components/LogsPanel'
 
 const SETTINGS_CSS = `
   .set-nav-item {
@@ -36,7 +37,7 @@ const SETTINGS_CSS = `
 
 // The section list drives both the nav and the render order, so a new section
 // cannot be added to one and forgotten in the other.
-const SECTIONS = ['general', 'appearance', 'models', 'metrics', 'code', 'server', 'about'] as const
+const SECTIONS = ['general', 'appearance', 'models', 'metrics', 'code', 'server', 'logs', 'about'] as const
 type SectionId = typeof SECTIONS[number]
 
 const SECTION_TITLE: Record<SectionId, string> = {
@@ -46,6 +47,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
   metrics: 'metrics.title',
   code: 'settings.codeExecTitle',
   server: 'settings.server',
+  logs: 'logs.title',
   about: 'settings.aboutTitle',
 }
 
@@ -56,6 +58,7 @@ const SECTION_ICON: Record<SectionId, (p: { size?: number }) => React.JSX.Elemen
   metrics: IconMetrics,
   code: IconCode,
   server: IconDatabase,
+  logs: IconText,
   about: IconInfo,
 }
 
@@ -357,6 +360,10 @@ export function Settings() {
           <PathCard label={tr('settings.config')} value={info?.runtime.configPath ?? null} />
           <PathCard label={tr('settings.database')} value={info?.runtime.dbPath ?? null} />
           <ClearHistoryCard />
+        </Section>
+
+        <Section active={active} id="logs" title={tr('logs.title')} subtitle={tr('logs.subtitle')}>
+          <LogsPanel />
         </Section>
 
         <Section active={active} id="about" title={tr('settings.aboutTitle')}>

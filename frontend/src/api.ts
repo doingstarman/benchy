@@ -313,6 +313,24 @@ export interface DashboardData {
 }
 export const dashboardApi = { get: () => apiFetch<DashboardData>('/api/dashboard') }
 
+// ─── logs ────────────────────────────────────────────────────────────────────
+export interface LogEntry { id: number; ts: number; level: 'debug' | 'info' | 'warn' | 'error'; category: string; message: string; meta: unknown }
+export interface LogQueryParams { since?: number; level?: string; category?: string; q?: string; limit?: number }
+function logQs(p: LogQueryParams): string {
+  const u = new URLSearchParams()
+  if (p.since != null) u.set('since', String(p.since))
+  if (p.level) u.set('level', p.level)
+  if (p.category) u.set('category', p.category)
+  if (p.q) u.set('q', p.q)
+  if (p.limit != null) u.set('limit', String(p.limit))
+  return u.toString()
+}
+export const logsApi = {
+  list: (p: LogQueryParams = {}) => apiFetch<{ rows: LogEntry[]; total: number }>(`/api/logs?${logQs(p)}`),
+  exportUrl: (p: LogQueryParams, format: string) => `/api/logs/export?${logQs(p)}&format=${format}`,
+  clear: () => fetch('/api/logs', { method: 'DELETE' }),
+}
+
 // ─── version / updates ───────────────────────────────────────────────────────
 
 export const versionApi = {

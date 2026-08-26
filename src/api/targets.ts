@@ -5,6 +5,7 @@ import { isLocalRequest } from './csrf.js'
 import { setSecret } from '../config.js'
 import { handshakeAgent } from '../agentRun.js'
 import { handshakePipeline } from './benchmark.js'
+import { logEvent } from '../logStore.js'
 import type { Target, TargetKind, TargetConfig, ModelTargetConfig, AgentTargetConfig, PipelineTargetConfig, PipelineNode, PipelineEdge } from '../types.js'
 
 interface TargetRow {
@@ -385,6 +386,7 @@ export async function registerTargetsRoutes(app: FastifyInstance): Promise<void>
       lastHandshake: { ok: result.ok, spokeProtocol: result.spokeProtocol, steps: result.steps, error: result.error, at: Date.now() },
     }
     getDb().prepare('UPDATE targets SET config = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(nextConfig), Date.now(), id)
+    logEvent(result.ok ? 'info' : 'warn', row.kind === 'pipeline' ? 'pipeline' : 'agent', `verify ${result.ok ? 'ok' : 'failed'}: ${id}`, { steps: result.steps, error: result.error })
     return { data: result }
   })
 }

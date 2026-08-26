@@ -19,6 +19,7 @@ import { materializeRunMetrics } from './metrics.js'
 import { buildAgentCall, consumeAgentStream, type HandshakeResult } from '../agentRun.js'
 import { insertTraceSteps, traceAggregate } from '../traceStore.js'
 import { resolvePricing, computeCost } from '../pricing.js'
+import { logEvent } from '../logStore.js'
 
 export function getAdapter(type: ProviderType): Adapter {
   if (type === 'anthropic') return anthropicAdapter
@@ -316,10 +317,12 @@ export async function runCell(
       ttfs, totalTime, reasoningMs, toolCalls: toolActivity.length,
       usage: { inputTokens, outputTokens, ...(sawReasoningTokens ? { reasoningTokens } : {}) },
     })
+    logEvent('info', 'cell', `${modelKey} answered`, { runId, promptIndex, ttfs, totalTime, inputTokens, outputTokens })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     db.prepare('UPDATE results SET error = ? WHERE id = ?').run(msg, resultId)
     broadcast(runId, 'cell_error', { runId, promptIndex, model: modelKey, error: msg })
+    logEvent('error', 'cell', `${modelKey} failed`, { runId, promptIndex, error: msg })
   } finally {
     db.prepare('UPDATE runs SET completed_calls = completed_calls + 1 WHERE id = ?').run(runId)
   }
@@ -419,12 +422,14 @@ export async function runAgentCell(
 
     if (fatal) {
       broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: fatal })
+      logEvent('error', 'agent', `${targetId} failed`, { runId, promptIndex, error: fatal })
     } else {
       broadcast(runId, 'cell_done', {
         runId, promptIndex, model: targetId, ttfs, totalTime,
         steps: agg?.steps ?? 0, toolCalls: agg?.toolCalls ?? 0, agentCost,
         usage: { inputTokens: usageIn, outputTokens: usageOut },
       })
+      logEvent('info', 'agent', `${targetId} answered`, { runId, promptIndex, steps: agg?.steps ?? 0, totalTime })
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -682,12 +687,14 @@ export async function runPipelineCell(
     db.prepare('UPDATE results SET text = ?, total_time = ?, error = ? WHERE id = ?').run(res.text, totalTime, res.error, resultId)
     if (res.error) {
       broadcast(runId, 'cell_error', { runId, promptIndex, model: targetId, error: res.error })
+      logEvent('error', 'pipeline', `${targetId} failed`, { runId, promptIndex, error: res.error })
     } else {
       broadcast(runId, 'cell_done', {
         runId, promptIndex, model: targetId, ttfs: null, totalTime,
         steps: agg?.steps ?? 0, toolCalls: agg?.toolCalls ?? 0, agentCost: res.cost,
         usage: { inputTokens: 0, outputTokens: 0 },
       })
+      logEvent('info', 'pipeline', `${targetId} completed`, { runId, promptIndex, stages: agg?.steps ?? 0, totalTime, cost: res.cost })
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -738,6 +745,7 @@ export function finalizeRun(runId: string, tasks: Promise<void>[]): void {
       }
       inFlightTurns.delete(runId)
       db.prepare('UPDATE runs SET status = ? WHERE id = ?').run(status, runId)
+      logEvent(status === 'error' ? 'warn' : 'info', 'run', `run ${status}`, { runId })
       // Always terminal, including on the error path: a client that never hears
       // this sits open in "running" forever.
       broadcast(runId, 'run_done', { runId })
@@ -952,6 +960,7 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
     db.prepare(
       'INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, run_settings, kind, tools, system_prompt, skills, mcp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(runId, JSON.stringify(storedPrompts), JSON.stringify(storedModels), 'running', 0, totalCalls, 0, Date.now(), runSettingsJson, kind, toolsJson, sysPrompt, skillsJson, mcpJson)
+    logEvent('info', 'run', `run started (${storedModels.length} participants, ${storedPrompts.length} prompts)`, { runId, kind })
 
     // Regenerate copies the source turn's attachments onto this run so the
     // re-run sees the same media. Done after the INSERT (rows FK-reference it).

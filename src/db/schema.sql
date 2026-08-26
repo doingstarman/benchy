@@ -206,3 +206,17 @@ CREATE TABLE IF NOT EXISTS trace_steps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_trace_steps_result ON trace_steps(result_id, step_index);
+
+-- Structured application log: every meaningful event (API requests, run/cell
+-- lifecycle, handshakes, errors, system). Queried by time range / level / category
+-- / text for the Settings → Logs viewer. Capped by a periodic trim, never by a
+-- foreign key — logs outlive the rows they mention.
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  level TEXT NOT NULL,          -- debug | info | warn | error
+  category TEXT NOT NULL,       -- api | run | cell | agent | pipeline | system
+  message TEXT NOT NULL,
+  meta TEXT                     -- optional JSON detail
+);
+CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);
