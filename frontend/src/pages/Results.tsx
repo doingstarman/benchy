@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { runsApi, useSSE } from '../api'
+import { runsApi, metricsApi, providersApi, traceApi, targetsApi, useSSE } from '../api'
 import type { SSEEvent } from '../api'
 import { ResponseCard } from '../components/ResponseCard'
 import { TestAnalytics } from '../components/TestAnalytics'
+import { ParticipantCompare, type CompareParticipant } from '../components/ParticipantCompare'
+import { participantValues, type ParticipantAnswer } from '../lib/metricsView'
 import { useT } from '../i18n'
-import type { Run, Result } from '../../../src/types'
+import type { Run, Result, MetricDef, TraceStepRow } from '../../../src/types'
+import type { ModelPricing } from '../../../src/pricing'
 
 interface CellState {
   text: string
@@ -24,6 +27,18 @@ function cellKey(promptIndex: number, model: string) {
   return `${promptIndex}:${model}`
 }
 
+// The trajectory aggregate for one agent result, mirroring traceStore.traceAggregate
+// on the backend: steps = node count, tool calls / errors over `tool` steps, agent
+// cost = summed step cost (null if no step reported one).
+function traceAgg(steps: TraceStepRow[]) {
+  let toolCalls = 0, toolErrors = 0, cost = 0, sawCost = false
+  for (const s of steps) {
+    if (s.kind === 'tool') { toolCalls++; if (s.isError) toolErrors++ }
+    if (s.cost != null) { cost += s.cost; sawCost = true }
+  }
+  return { steps: steps.length, toolCalls, toolErrors, agentCost: sawCost ? cost : null }
+}
+
 export function Results() {
   const { t } = useT()
   const { runId } = useParams<{ runId: string }>()
@@ -35,6 +50,18 @@ export function Results() {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [isLive, setIsLive] = useState(true)
+  const [metricDefs, setMetricDefs] = useState<MetricDef[]>([])
+  const [pricing, setPricing] = useState<Map<string, Record<string, ModelPricing> | undefined>>(new Map())
+  const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
+  const [traces, setTraces] = useState<Map<string, TraceStepRow[]>>(new Map())
+
+  // The comparison table needs the metric registry (order + appliesTo), per-provider
+  // pricing (to resolve `cost` client-side) and agent names for readable column labels.
+  useEffect(() => {
+    metricsApi.list().then(setMetricDefs).catch(() => {})
+    providersApi.list().then(ps => setPricing(new Map(ps.map(p => [p.id, p.pricing])))).catch(() => {})
+    targetsApi.list('agent').then(as => setAgentNames(new Map(as.map(a => [a.id, a.name])))).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!runId) return
@@ -114,6 +141,58 @@ export function Results() {
     if (sseStreamDone) setIsLive(false)
   }, [sseStreamDone])
 
+  // Agent columns measure their trajectory, resolved from the stored trace (same
+  // aggregate as api/metrics.ts). Fetch each agent result's trace once the run has
+  // settled; model results carry their metrics inline and need no fetch.
+  useEffect(() => {
+    if (isLive) return
+    const pending = results.filter(r => r.providerId === 'agent' && !traces.has(r.id))
+    if (pending.length === 0) return
+    let live = true
+    Promise.all(pending.map(r =>
+      traceApi.get(r.id).then(t => [r.id, t] as [string, TraceStepRow[]]).catch(() => [r.id, []] as [string, TraceStepRow[]])))
+      .then(pairs => { if (live) setTraces(prev => new Map([...prev, ...pairs])) })
+    return () => { live = false }
+  }, [isLive, results, traces])
+
+  const participants: CompareParticipant[] = useMemo(() => {
+    if (!run || isLive || metricDefs.length === 0) return []
+    const enabled = metricDefs.filter(d => d.enabled)
+    const byColumn = new Map<string, Result[]>()
+    for (const r of results) {
+      const list = byColumn.get(r.model) ?? []
+      list.push(r)
+      byColumn.set(r.model, list)
+    }
+    return run.models.flatMap(col => {
+      const rows = byColumn.get(col) ?? []
+      if (rows.length === 0) return []
+      const isAgent = rows.some(r => r.providerId === 'agent')
+      const answers: ParticipantAnswer[] = rows.map(r => {
+        const base: ParticipantAnswer = {
+          ttfs: r.metrics.ttfs, totalTime: r.metrics.totalTime,
+          inputTokens: r.metrics.inputTokens, outputTokens: r.metrics.outputTokens,
+          reasoningTokens: r.metrics.reasoningTokens, reasoningMs: r.metrics.reasoningMs,
+          score: r.score ?? null, model: r.model, pricingOverrides: pricing.get(r.providerId),
+        }
+        if (r.providerId !== 'agent') return base
+        const agg = traceAgg(traces.get(r.id) ?? [])
+        return { ...base, steps: agg.steps, toolCalls: agg.toolCalls, toolErrors: agg.toolErrors, agentCost: agg.agentCost }
+      })
+      const processError = rows.some(r => r.error != null) ||
+        (isAgent && rows.some(r => (traces.get(r.id) ?? []).some(s => s.kind === 'error')))
+      return [{
+        key: col,
+        label: isAgent ? (agentNames.get(col) ?? col) : col.split(':').slice(1).join(':') || col,
+        kind: isAgent ? 'agent' as const : 'model' as const,
+        values: participantValues(answers, enabled),
+        processError,
+      }]
+    })
+  }, [run, isLive, metricDefs, results, traces, pricing, agentNames])
+
+  const enabledDefs = useMemo(() => metricDefs.filter(d => d.enabled), [metricDefs])
+
   async function handleSave() {
     if (!runId) return
     setSaving(true)
@@ -192,6 +271,13 @@ export function Results() {
 
       {/* Dataset test analytics (renders only for dataset runs; 404 → nothing) */}
       {!isLive && runId && <TestAnalytics runId={runId} />}
+
+      {/* Participant comparison: model + agent columns share metric rows (agent-vs-model) */}
+      {!isLive && participants.length >= 2 && (
+        <div style={{ padding: '12px 24px', flexShrink: 0 }}>
+          <ParticipantCompare defs={enabledDefs} participants={participants} />
+        </div>
+      )}
 
       {/* Prompt tabs */}
       {run.prompts.length > 1 && (
