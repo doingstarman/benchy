@@ -290,3 +290,16 @@ describe('external pipeline observation (stage 4 phase 3)', () => {
     expect(providerId).toBe('pipeline')
   })
 })
+
+describe('pipeline metric rollup (stage 4 phase 4)', () => {
+  it('the trajectory metrics apply to pipelines; model-only metrics do not', async () => {
+    const defs = data<{ key: string; appliesTo: string[] }[]>(await req('GET', '/api/metrics'))
+    const at = (k: string) => defs.find(d => d.key === k)?.appliesTo ?? []
+    for (const k of ['steps', 'tool_calls', 'agent_cost', 'wall_clock']) {
+      expect(at(k), k).toContain('pipeline')
+    }
+    expect(at('total_time')).toContain('pipeline')   // every kind reports total time
+    expect(at('ttfs')).not.toContain('pipeline')      // model-only stays model-only
+    expect(at('cost')).not.toContain('pipeline')
+  })
+})

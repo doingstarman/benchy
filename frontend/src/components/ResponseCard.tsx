@@ -39,14 +39,14 @@ export function ResponseCard({
 
   // An agent participant carries a trajectory, not just an answer. Fetch it once the
   // result has settled (steps are persisted when the cell finishes).
-  const isAgent = providerId === 'agent'
+  const hasTrajectory = providerId === 'agent' || providerId === 'pipeline'
   const [trace, setTrace] = useState<TraceStepRow[] | null>(null)
   useEffect(() => {
-    if (!isAgent || !resultId || isStreaming) return
+    if (!hasTrajectory || !resultId || isStreaming) return
     let live = true
     traceApi.get(resultId).then(t => { if (live) setTrace(t) }).catch(() => {})
     return () => { live = false }
-  }, [isAgent, resultId, isStreaming])
+  }, [hasTrajectory, resultId, isStreaming])
 
   async function vote(v: 'up' | 'down') {
     if (!resultId) return
@@ -116,7 +116,7 @@ export function ResponseCard({
       {/* Metrics — an agent shows its trajectory (steps/tools/cost), a model its
           latency + tokens. Agent trajectory metrics come from the fetched trace. */}
       <div style={{ padding: '0 14px', borderBottom: '0.5px solid var(--border)' }}>
-        {isAgent ? (
+        {hasTrajectory ? (
           <AgentMetricsBar
             steps={trace ? trace.length : null}
             tools={trace ? trace.filter(s => s.kind === 'tool').length : null}
@@ -157,7 +157,7 @@ export function ResponseCard({
             answerStarted={text.length > 0}
           />
         )}
-        {isAgent && trace && trace.length > 0 && (
+        {hasTrajectory && trace && trace.length > 0 && (
           <div style={{ marginBottom: 10 }}><TraceView steps={trace} layout="narrow" /></div>
         )}
         {error ?? text}

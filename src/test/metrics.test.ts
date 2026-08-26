@@ -58,8 +58,9 @@ describe('metrics registry', () => {
     ])
     expect(builtins.find(d => d.key === 'reasoning_ms')?.enabled).toBe(false)
     expect(builtins.find(d => d.key === 'ttfs')?.enabled).toBe(true)
-    // The trajectory metrics apply to agents, not model targets.
-    expect(builtins.find(d => d.key === 'steps')?.appliesTo).toEqual(['agent'])
+    // The trajectory metrics apply to agents AND pipelines (both carry a trace), not
+    // to model targets.
+    expect(builtins.find(d => d.key === 'steps')?.appliesTo).toEqual(['agent', 'pipeline'])
     expect(builtins.find(d => d.key === 'ttfs')?.appliesTo).toEqual(['model'])
   })
 

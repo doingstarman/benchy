@@ -39,7 +39,7 @@ export function ParticipantCompare({ defs, participants }: { defs: MetricDef[]; 
 
   const general = defs.filter(d => !isTrajectory(d))
   const trajectory = defs.filter(isTrajectory)
-  const hasAgent = participants.some(p => p.kind === 'agent')
+  const hasTrajectoryParticipant = participants.some(p => p.kind === 'agent' || p.kind === 'pipeline')
   const grid = `168px repeat(${participants.length}, minmax(88px, 1fr))`
 
   const row = (d: MetricDef) => {
@@ -93,7 +93,7 @@ export function ParticipantCompare({ defs, participants }: { defs: MetricDef[]; 
             ))}
           </div>
           {general.map(row)}
-          {trajectory.length > 0 && hasAgent && (
+          {trajectory.length > 0 && hasTrajectoryParticipant && (
             <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 8, padding: '6px 12px', borderTop: '0.5px solid var(--border)', background: 'var(--bg)' }}>
               <span style={{ ...caption, color: 'var(--text-secondary)', gridColumn: `1 / span ${participants.length + 1}` }}>{t('compare.trajectoryHeader')}</span>
             </div>

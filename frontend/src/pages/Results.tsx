@@ -52,7 +52,7 @@ export function Results() {
   const [isLive, setIsLive] = useState(true)
   const [metricDefs, setMetricDefs] = useState<MetricDef[]>([])
   const [pricing, setPricing] = useState<Map<string, Record<string, ModelPricing> | undefined>>(new Map())
-  const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
+  const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map())
   const [traces, setTraces] = useState<Map<string, TraceStepRow[]>>(new Map())
 
   // The comparison table needs the metric registry (order + appliesTo), per-provider
@@ -60,7 +60,10 @@ export function Results() {
   useEffect(() => {
     metricsApi.list().then(setMetricDefs).catch(() => {})
     providersApi.list().then(ps => setPricing(new Map(ps.map(p => [p.id, p.pricing])))).catch(() => {})
-    targetsApi.list('agent').then(as => setAgentNames(new Map(as.map(a => [a.id, a.name])))).catch(() => {})
+    // Readable labels for trace-bearing participants (agents + pipelines are keyed by id).
+    Promise.all([targetsApi.list('agent'), targetsApi.list('pipeline')])
+      .then(([ag, pi]) => setParticipantNames(new Map([...ag, ...pi].map(t => [t.id, t.name]))))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -146,7 +149,8 @@ export function Results() {
   // settled; model results carry their metrics inline and need no fetch.
   useEffect(() => {
     if (isLive) return
-    const pending = results.filter(r => r.providerId === 'agent' && !traces.has(r.id))
+    const hasTrace = (r: Result) => r.providerId === 'agent' || r.providerId === 'pipeline'
+    const pending = results.filter(r => hasTrace(r) && !traces.has(r.id))
     if (pending.length === 0) return
     let live = true
     Promise.all(pending.map(r =>
@@ -167,7 +171,9 @@ export function Results() {
     return run.models.flatMap(col => {
       const rows = byColumn.get(col) ?? []
       if (rows.length === 0) return []
-      const isAgent = rows.some(r => r.providerId === 'agent')
+      const providerId = rows[0]?.providerId
+      const kind = providerId === 'agent' ? 'agent' as const : providerId === 'pipeline' ? 'pipeline' as const : 'model' as const
+      const hasTrace = kind === 'agent' || kind === 'pipeline'
       const answers: ParticipantAnswer[] = rows.map(r => {
         const base: ParticipantAnswer = {
           ttfs: r.metrics.ttfs, totalTime: r.metrics.totalTime,
@@ -175,21 +181,21 @@ export function Results() {
           reasoningTokens: r.metrics.reasoningTokens, reasoningMs: r.metrics.reasoningMs,
           score: r.score ?? null, model: r.model, pricingOverrides: pricing.get(r.providerId),
         }
-        if (r.providerId !== 'agent') return base
+        if (!hasTrace) return base
         const agg = traceAgg(traces.get(r.id) ?? [])
         return { ...base, steps: agg.steps, toolCalls: agg.toolCalls, toolErrors: agg.toolErrors, agentCost: agg.agentCost }
       })
       const processError = rows.some(r => r.error != null) ||
-        (isAgent && rows.some(r => (traces.get(r.id) ?? []).some(s => s.kind === 'error')))
+        (hasTrace && rows.some(r => (traces.get(r.id) ?? []).some(s => s.kind === 'error')))
       return [{
         key: col,
-        label: isAgent ? (agentNames.get(col) ?? col) : col.split(':').slice(1).join(':') || col,
-        kind: isAgent ? 'agent' as const : 'model' as const,
+        label: hasTrace ? (participantNames.get(col) ?? col) : col.split(':').slice(1).join(':') || col,
+        kind,
         values: participantValues(answers, enabled),
         processError,
       }]
     })
-  }, [run, isLive, metricDefs, results, traces, pricing, agentNames])
+  }, [run, isLive, metricDefs, results, traces, pricing, participantNames])
 
   const enabledDefs = useMemo(() => metricDefs.filter(d => d.enabled), [metricDefs])
 

@@ -132,7 +132,7 @@ const RES_COLS = 'id, model, provider_id, text, ttfs, total_time, input_tokens, 
 // An agent result is marked by provider_id='agent' (runAgentCell). This is the
 // discriminator the appliesTo skip rule keys off — no target_id join needed.
 function resultKind(r: ResRow): TargetKind {
-  return r.provider_id === 'agent' ? 'agent' : 'model'
+  return r.provider_id === 'agent' ? 'agent' : r.provider_id === 'pipeline' ? 'pipeline' : 'model'
 }
 
 function toInput(r: ResRow, pricing: Map<string, Record<string, ModelPricing> | undefined>): AnswerMetricInput {
@@ -141,7 +141,8 @@ function toInput(r: ResRow, pricing: Map<string, Record<string, ModelPricing> | 
     reasoningTokens: r.reasoning_tokens, reasoningMs: r.reasoning_ms, score: r.score,
     model: r.model, pricingOverrides: pricing.get(r.provider_id),
   }
-  if (r.provider_id === 'agent') {
+  // Agents and pipelines both carry a trace; their trajectory metrics resolve from it.
+  if (r.provider_id === 'agent' || r.provider_id === 'pipeline') {
     const agg = traceAggregate(r.id)
     if (agg) return { ...base, steps: agg.steps, toolCalls: agg.toolCalls, toolErrors: agg.toolErrors, agentCost: agg.agentCost }
   }
