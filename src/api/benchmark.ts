@@ -593,7 +593,15 @@ async function runPipelineGraph(cfg: PipelineTargetConfig, input: string, ctx: S
   const steps: TraceStep[] = []
   let cost: number | null = null
 
-  const upstreamOf = (id: string) => edges.filter(e => e.to === id && e.from !== '').map(e => e.from)
+  // Only nodes that actually ran contribute downstream. An edge routes iff its source
+  // ran (or is the pipeline input '') AND its condition passes. A condition is a plain
+  // string: the edge is active only when the source output contains it (case-insensitive
+  // substring) — deterministic routing, no expression language. No `when` = always.
+  const ran = new Set<string>()
+  const srcOut = (e: PipelineEdge) => (e.from === '' ? input : outputById.get(e.from) ?? '')
+  const active = (e: PipelineEdge) =>
+    (e.from === '' || ran.has(e.from)) && (!e.when || srcOut(e).toLowerCase().includes(e.when.toLowerCase()))
+  let lastRan: string | null = null
 
   for (const nodeId of order) {
     if (Date.now() > ctx.deadline) return { text: '', steps, cost, error: 'pipeline timed out' }
@@ -602,16 +610,26 @@ async function runPipelineGraph(cfg: PipelineTargetConfig, input: string, ctx: S
     }
     const node = nodes.find(n => n.id === nodeId)
     if (!node) continue
-    const ups = upstreamOf(nodeId)
-    // A node with no real upstream (or wired from the pipeline input '') gets the
-    // pipeline's own input; otherwise it gets its upstream outputs, concatenated.
-    const stageInput = ups.length === 0 ? input : ups.map(u => outputById.get(u) ?? '').join('\n\n')
+    const incoming = edges.filter(e => e.to === nodeId)
+    let stageInput: string
+    let parent: string | null = null
+    if (incoming.length === 0) {
+      // Unwired node → gets the pipeline input.
+      stageInput = input
+    } else {
+      const live = incoming.filter(active)
+      if (live.length === 0) continue   // routed around — this node does not run
+      stageInput = live.map(srcOut).join('\n\n')
+      parent = live.find(e => e.from !== '')?.from ?? null
+    }
     const t0 = Date.now()
     const out = await runStage(node.ref, stageInput, ctx)
     outputById.set(nodeId, out.text)
+    ran.add(nodeId)
+    lastRan = nodeId
     if (out.cost != null) cost = (cost ?? 0) + out.cost
     const step: TraceStep = {
-      id: node.id, parentId: ups[0] ?? null, kind: out.kind === 'error' ? 'error' : out.kind,
+      id: node.id, parentId: parent, kind: out.kind === 'error' ? 'error' : out.kind,
       name: node.label ?? node.ref, ms: Date.now() - t0,
       inputTokens: out.inputTokens, outputTokens: out.outputTokens, cost: out.cost,
       payload: null, payloadTruncated: false, isError: out.error != null,
@@ -621,11 +639,11 @@ async function runPipelineGraph(cfg: PipelineTargetConfig, input: string, ctx: S
     if (out.error) return { text: out.text, steps, cost, error: out.error }
   }
 
-  // Output = the outputs of nodes wired to '' (pipeline output), else the last node's.
-  const outNodes = edges.filter(e => e.to === '' && e.from !== '').map(e => e.from)
-  const text = outNodes.length
-    ? outNodes.map(n => outputById.get(n) ?? '').join('\n\n')
-    : (outputById.get(order[order.length - 1]) ?? '')
+  // Output = the outputs of nodes wired to '' via an active edge, else the last node run.
+  const outActive = edges.filter(e => e.to === '' && e.from !== '' && active(e))
+  const text = outActive.length
+    ? outActive.map(e => outputById.get(e.from) ?? '').join('\n\n')
+    : (lastRan ? outputById.get(lastRan) ?? '' : '')
   return { text, steps, cost, error: null }
 }
 

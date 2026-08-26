@@ -135,7 +135,7 @@ function PipelineDrawer({ target, targets, onClose, onSaved, onDelete }: {
   const [name, setName] = useState(target?.name ?? '')
   const [mode, setMode] = useState<'internal' | 'external'>(cfg?.mode ?? 'internal')
   const [nodes, setNodes] = useState<NodeRow[]>(() => (cfg?.nodes ?? []).map(n => ({ id: n.id, ref: n.ref, label: n.label ?? '' })))
-  const [edges, setEdges] = useState<PipelineEdge[]>(() => (cfg?.edges ?? []).map(e => ({ from: e.from, to: e.to })))
+  const [edges, setEdges] = useState<PipelineEdge[]>(() => (cfg?.edges ?? []).map(e => ({ from: e.from, to: e.to, ...(e.when ? { when: e.when } : {}) })))
   const [transport, setTransport] = useState<'command' | 'http'>(cfg?.transport ?? 'command')
   const [command, setCommand] = useState(cfg?.command ?? '')
   const [cwd, setCwd] = useState(cfg?.cwd ?? '')
@@ -268,6 +268,7 @@ function PipelineDrawer({ target, targets, onClose, onSaved, onDelete }: {
                     {nodes.map(n => <option key={n.id} value={n.id}>{n.id}</option>)}
                     <option value="">{t('pipelines.output')}</option>
                   </select>
+                  <Input value={e.when ?? ''} onChange={ev => setEdges(edges.map((x, j) => j === i ? { ...x, when: ev.target.value || undefined } : x))} placeholder={t('pipelines.when')} style={{ flex: 1 }} />
                   <IconButton onClick={() => setEdges(edges.filter((_, j) => j !== i))} title={t('common.remove')}><IconTrash size={12} /></IconButton>
                 </div>
               ))}

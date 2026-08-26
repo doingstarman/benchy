@@ -266,6 +266,26 @@ describe('internal pipeline orchestration (stage 4 phase 2)', () => {
   })
 })
 
+describe('conditional edge routing (stage 4)', () => {
+  it('takes an edge only when the source output matches its condition; skips the rest', async () => {
+    const e1 = await agent('r1.mjs', ECHO), e2 = await agent('r2.mjs', ECHO), e3 = await agent('r3.mjs', ECHO)
+    const pid = data<Target>(await req('POST', '/api/targets', pipeline('route', {
+      mode: 'internal',
+      nodes: [{ id: 'n1', ref: e1 }, { id: 'n2', ref: e2 }, { id: 'n3', ref: e3 }],
+      edges: [
+        { from: '', to: 'n1' },
+        { from: 'n1', to: 'n2', when: 'ECHO' },   // n1 output "ECHO:hi" contains "ECHO" → taken
+        { from: 'n1', to: 'n3', when: 'NOPE' },    // does not match → n3 is skipped
+        { from: 'n2', to: '' },
+      ],
+    }))).id
+    const { result, trace } = await runOnce(pid)
+    expect(result.error).toBeFalsy()
+    expect(result.text).toBe('ECHO:ECHO:hi')        // routed through n2 only
+    expect(trace).toHaveLength(2)                    // n1 + n2 ran; n3 was routed around
+  })
+})
+
 // An external pipeline program: benchy runs no stages, it just reads the emitted trace.
 const PROG = `
 const w = o => process.stdout.write(JSON.stringify(o) + '\\n')
