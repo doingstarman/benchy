@@ -17,53 +17,25 @@ done-when**. Legend: ✅ shipped · 🅿️ parked · ⬜ open · 🔒 needs a p
   `kind='agent'` targets + secrets-by-name, handshake, `trace_steps`, `runAgentCell`, 5
   agent metrics + `appliesTo`, Agents page, `TraceView`, live agent column in /run, trace
   in reopened results. Docs + examples.
+- ✅ **Stage 3 finish — agent-vs-model table** (`a6334fc`). Results surface where model and
+  agent columns share metric rows; not-applicable = hatched cell (distinct from `—`/`0`),
+  "trajectory metrics — agents only" sub-header, process dot + score chip on two axes.
+  Client-side via the pure resolver; `lib/metricsView.ts` + `ParticipantCompare.tsx`.
+- ✅ **Agent health dot** (`c6e6613`). Handshake persists its outcome as `lastHandshake` on
+  the (value-free) agent config; the list shows green (full/degraded) / red (crashed) /
+  muted (unverified). Diagnostic only — never disables the agent.
+- ✅ **Agent metrics in ResponseCard** (`04452da`). `AgentMetricsBar` (steps/tools/cost/time)
+  replaces the model `MetricsBar` for agent results, derived from the fetched trace.
+- ✅ **Test flake hardening** (`f9de236`). Raised the `/api/version` test timeout (two 5s
+  GitHub fetches vs a 5s default) and isolated `mock-dev-only` teardown so ordering can't
+  leak.
 
 ---
 
 ## Open — design-complete (no product spec needed)
 
-### 1. agent-vs-model comparison table  ⬜  · priority: high
-**Goal.** The one piece of Stage-3's own design that didn't ship: a Results surface that
-puts model columns and an agent column in the **same metric rows**, so a run with mixed
-participants reads as one table.
-
-**Scope.**
-- In: a "side-by-side / table" comparison on the run/Results view — rows = metrics (shared
-  order), columns = the run's participants; the **not-applicable** cell is a **hatched
-  empty cell** (135° repeating-linear-gradient), *distinct* from `—` (not reported) and
-  from `0`; a "trajectory metrics — agents only" sub-header; process status = left dot,
-  correctness = right score chip (two axes, never merged). Design: `design-dist/agents.md`
-  + the `agent-vs-model.dc.html` mockup.
-- Out: any live-compose metric strip (that's the parked "metrics in context" — do NOT
-  revive here); custom-metric display.
-
-**Approach + files.** Reuse the pure resolver (`src/metrics/resolve.ts`) client-side over
-the run's results, exactly as the (reverted) metricsView helper did — no backend change.
-`appliesTo` already encodes hatch-vs-dash: a metric whose `appliesTo` excludes a column's
-kind → hatched; a null value → `—`. New component (e.g. `frontend/src/components/
-ParticipantCompare.tsx`) rendered on `pages/Results.tsx`; reuse `MetricCell`. i18n en+ru.
-
-**Done-when.** Open a run with two models + an agent → the table shows shared rows; agent
-columns hatch `ttfs`/`reasoning`, model columns hatch `steps`/`tool_calls`/`agent_cost`;
-nulls are `—`; a wrong answer shows as a score chip, never red in the process column.
-
-**⚠️ Sensitivity.** This is a metric-display surface. You reverted the live-run metrics bar
-before (option A: registry-only). Confirm you want this Results table before I build it.
-
-### 2. Agent health in the list  ⬜  · priority: medium
-**Goal.** The design's agents-list shows per-row health (green/red) from the last verify.
-Right now rows have no health signal.
-
-**Scope/approach.** Persist the last handshake outcome per agent (a `lastHandshake` blob in
-the target config, or a tiny `agent_health` store) written by the handshake route; render a
-dot in `AgentRow` (green = full/degraded, red = crashed). Files: `src/api/targets.ts`
-(store on handshake), `frontend/src/pages/Agents.tsx` (`AgentRow`). **Done-when** a crashed
-handshake turns the row red until re-verified; verify never auto-disables the agent.
-
-### 3. Agent metrics in ResponseCard  ⬜  · priority: low
-`ResponseCard` still shows the model-shaped `MetricsBar` for agents. Show agent metrics
-(steps / tools / agent cost) the way the /run cell now does. File:
-`frontend/src/components/ResponseCard.tsx` (+ `MetricsBar` or a small agent variant).
+_All three items here shipped (2026-08-26) — see **Shipped** above: #1 agent-vs-model
+table, #2 agent health dot, #3 agent metrics in ResponseCard, plus the flake hardening._
 
 ---
 
