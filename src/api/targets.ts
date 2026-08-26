@@ -247,6 +247,13 @@ export async function registerTargetsRoutes(app: FastifyInstance): Promise<void>
     const cfg = JSON.parse(row.config) as AgentTargetConfig
     const body = (req.body ?? {}) as { prompt?: string }
     const result = await handshakeAgent(cfg, id, body.prompt)
+    // Persist the outcome on the (value-free) config so the agents list shows a
+    // health dot without re-running. Diagnostic only — never disables the agent.
+    const nextConfig: AgentTargetConfig = {
+      ...cfg,
+      lastHandshake: { ok: result.ok, spokeProtocol: result.spokeProtocol, steps: result.steps, error: result.error, at: Date.now() },
+    }
+    getDb().prepare('UPDATE targets SET config = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(nextConfig), Date.now(), id)
     return { data: result }
   })
 }

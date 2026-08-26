@@ -167,6 +167,45 @@ describe('handshake distinguishes three outcomes', () => {
   })
 })
 
+describe('handshake persists health on the agent config for the list dot', () => {
+  const health = (t: Target) => (t.config as AgentTargetConfig).lastHandshake
+
+  it('a never-verified agent has no lastHandshake (dot reads unverified)', async () => {
+    const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('hnv.mjs', FULL)}`)))
+    expect(health(t)).toBeUndefined()
+  })
+
+  it('full verify persists ok + spokeProtocol + steps + a timestamp, readable via GET', async () => {
+    const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('hfull.mjs', FULL)}`)))
+    await req('POST', `/api/targets/${encodeURIComponent(t.id)}/handshake`, {})
+    const h = health(data<Target>(await req('GET', `/api/targets/${encodeURIComponent(t.id)}`)))
+    expect(h?.ok).toBe(true)
+    expect(h?.spokeProtocol).toBe(true)
+    expect(h?.steps).toBe(3)
+    expect(typeof h?.at).toBe('number')
+  })
+
+  it('a crashed verify persists ok false with the error (row turns red until re-verified)', async () => {
+    const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('hcrash.mjs', CRASH)}`)))
+    await req('POST', `/api/targets/${encodeURIComponent(t.id)}/handshake`, {})
+    const h = health(data<Target>(await req('GET', `/api/targets/${encodeURIComponent(t.id)}`)))
+    expect(h?.ok).toBe(false)
+    expect(h?.error ?? '').toContain('boom')
+  })
+
+  it('persisted health carries no secret values — the config stays value-free', async () => {
+    const t = data<Target>(await req('POST', '/api/targets', {
+      kind: 'agent', name: 'sec',
+      config: { transport: 'command', command: `node ${script('hsec.mjs', FULL)}`, timeoutMs: 8000, maxSteps: 40, retries: 0, secrets: { TOK: 'do-not-leak' } },
+    }))
+    await req('POST', `/api/targets/${encodeURIComponent(t.id)}/handshake`, {})
+    const cfg = data<Target>(await req('GET', `/api/targets/${encodeURIComponent(t.id)}`)).config as AgentTargetConfig
+    expect(health(data<Target>(await req('GET', `/api/targets/${encodeURIComponent(t.id)}`)))?.ok).toBe(true)
+    expect(JSON.stringify(cfg)).not.toContain('do-not-leak')
+    expect(cfg.secretRefs).toContain('TOK')
+  })
+})
+
 describe('a run persists the trace and reads it back in order', () => {
   it('stores each trajectory node and returns them by emission order', async () => {
     const t = data<Target>(await req('POST', '/api/targets', agentBody(`node ${script('full3.mjs', FULL)}`)))
