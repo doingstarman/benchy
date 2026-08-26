@@ -459,7 +459,8 @@ interface StageCtx {
   systemPrompt?: string
   deadline: number
   depth: number
-  onStep?: (step: TraceStep) => void   // live per-node emission (top level only)
+  onStep?: (step: TraceStep) => void   // live per-stage emission (top level only)
+  onToken?: (text: string) => void     // live answer tokens (external mode, top level)
 }
 interface GraphResult { text: string; steps: TraceStep[]; cost: number | null; error: string | null }
 
@@ -541,8 +542,19 @@ async function runExternal(ref: string, cfg: PipelineTargetConfig, input: string
   ]
   try {
     const { adapter, config } = await buildAgentCall(agentCfg, ref)
-    const o = await consumeAgentStream(adapter.stream(convo, config))
-    return { text: o.text, steps: o.steps, cost: o.reportedCost, error: o.error }
+    // Iterate directly (rather than consumeAgentStream) so a top-level external
+    // pipeline can stream its steps + answer tokens live, exactly like runAgentCell.
+    const steps: TraceStep[] = []
+    let text = '', cost: number | null = null, error: string | null = null
+    for await (const chunk of adapter.stream(convo, config)) {
+      if (chunk.type === 'token') { text += chunk.text; ctx.onToken?.(chunk.text) }
+      else if (chunk.type === 'step') {
+        steps.push(chunk.step)
+        if (chunk.step.cost != null) cost = (cost ?? 0) + chunk.step.cost
+        ctx.onStep?.(chunk.step)
+      } else if (chunk.type === 'error') { error = chunk.message }
+    }
+    return { text, steps, cost, error }
   } catch (e) { return { text: '', steps: [], cost: null, error: e instanceof Error ? e.message : String(e) } }
 }
 
@@ -562,10 +574,11 @@ async function runStage(ref: string, input: string, ctx: StageCtx): Promise<Stag
     if (ctx.depth >= 16) return errStage('pipeline nesting runtime cap reached')
     const nested = JSON.parse(row.config) as PipelineTargetConfig
     // A nested pipeline surfaces as ONE step in the parent; don't re-emit its own
-    // internal steps live (drop onStep on the recursion).
+    // internal steps/tokens live (drop the live callbacks on the recursion).
+    const quiet = { ...ctx, depth: ctx.depth + 1, onStep: undefined, onToken: undefined }
     const inner = nested.mode === 'external'
-      ? await runExternal(ref, nested, input, ctx)
-      : await runPipelineGraph(nested, input, { ...ctx, depth: ctx.depth + 1, onStep: undefined })
+      ? await runExternal(ref, nested, input, quiet)
+      : await runPipelineGraph(nested, input, quiet)
     return { text: inner.text, kind: 'tool', cost: inner.cost, inputTokens: null, outputTokens: null, error: inner.error }
   }
   return errStage(`unknown target kind for stage: ${ref}`)
@@ -639,6 +652,7 @@ export async function runPipelineCell(
   const ctx: StageCtx = {
     providers, runSettings, systemPrompt, deadline: t0 + (cfg.timeoutMs || 120_000), depth: 0,
     onStep: step => broadcast(runId, 'cell_step', { runId, promptIndex, model: targetId, step }),
+    onToken: text => broadcast(runId, 'cell_token', { runId, promptIndex, model: targetId, text }),
   }
   try {
     const res = cfg.mode === 'external'
