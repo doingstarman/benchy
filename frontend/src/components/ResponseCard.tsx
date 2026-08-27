@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { MetricsBar, AgentMetricsBar } from './MetricsBar'
 import { ActivityTrace, ActivityTraceStyles } from './ActivityTrace'
 import { TraceView } from './TraceView'
 import { useShowReasoning, useMonoAnswers } from '../prefs'
+import { useT } from '../i18n'
 import { runsApi, traceApi } from '../api'
 import type { TraceStepRow } from '../../../src/types'
 
@@ -29,6 +31,8 @@ export function ResponseCard({
   inputTokens, outputTokens, reasoningTokens, reasoningMs,
   feedback: initialFeedback, isFastest, isStreaming, error,
 }: ResponseCardProps) {
+  const { t } = useT()
+  const navigate = useNavigate()
   const showReasoning = useShowReasoning()
   const monoAnswers = useMonoAnswers()
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(initialFeedback ?? null)
@@ -36,6 +40,8 @@ export function ResponseCard({
     const idx = model.indexOf(':')
     return idx >= 0 ? [model.slice(idx + 1), model.slice(0, idx)] : [model, '']
   })()
+  // Result → participant: the name in the card header opens the participant's page.
+  const participantPath = providerId === 'agent' ? '/agents' : providerId === 'pipeline' ? '/pipelines' : '/models'
 
   // An agent participant carries a trajectory, not just an answer. Fetch it once the
   // result has settled (steps are persisted when the cell finishes).
@@ -74,9 +80,13 @@ export function ResponseCard({
         alignItems: 'center',
       }}>
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-bright)' }}>
+          <button
+            onClick={() => navigate(participantPath)}
+            title={t('results.openParticipant')}
+            style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-bright)', borderBottom: '1px dotted var(--border-hover)' }}
+          >
             {modelName}
-          </div>
+          </button>
           {providerId && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)' }}>
               {providerId}

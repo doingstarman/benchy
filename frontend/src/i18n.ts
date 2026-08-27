@@ -82,6 +82,12 @@ export const DICT: Record<string, Entry> = {
   'empty.datasetsTitle': { en: 'No datasets yet', ru: 'Датасетов пока нет' },
   'empty.datasetsDesc': { en: 'A dataset is prompts with expected answers — a boost, not a requirement: a run works on a single prompt too.', ru: 'Датасет — набор промптов с ожидаемыми ответами. Усиление, а не условие: прогон работает и на одном промпте.' },
   'empty.datasetsAction': { en: 'New dataset', ru: 'Новый датасет' },
+  'empty.runsTitle': { en: 'No runs yet', ru: 'Прогонов пока нет' },
+  'empty.runsDesc': { en: 'A run is one prompt sent to several participants at once — no dataset needed for that.', ru: 'Прогон — один промпт, отданный нескольким участникам сразу. Датасет для этого не нужен.' },
+  'empty.runsAction': { en: 'New run', ru: 'Новый прогон' },
+  'empty.dashTitle': { en: 'One run has nothing to compare', ru: 'Один прогон нечему сравнивать' },
+  'empty.dashDesc': { en: 'The dashboard shows movement over time — it needs at least a few runs. Make one to get started.', ru: 'Дашборд показывает динамику: нужно хотя бы несколько прогонов. Сделайте прогон, чтобы начать.' },
+  'empty.dashAction': { en: 'New run', ru: 'Новый прогон' },
   'nav.dashboard': { en: 'Dashboard', ru: 'Дашборд' },
   'nav.results': { en: 'Results', ru: 'Результаты' },
   'nav.models': { en: 'Models', ru: 'Модели' },
@@ -560,7 +566,8 @@ export const DICT: Record<string, Entry> = {
   'history.confirmDelete': { en: 'Delete this run?', ru: 'Удалить этот тест?' },
 
   // ── results ──
-  'results.backHistory': { en: '← history', ru: '← история' },
+  'results.backHistory': { en: '← runs', ru: '← прогоны' },
+  'results.openParticipant': { en: 'Open participant', ru: 'Открыть участника' },
   'results.live': { en: 'live', ru: 'вживую' },
   'results.bestTtfs': { en: 'best ttfs', ru: 'лучший ttfs' },
   'results.save': { en: 'save', ru: 'сохранить' },

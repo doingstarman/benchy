@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { runsApi } from '../api'
 import { RUNS_CHANGED_EVENT } from './NewRun'
 import { Button, Input } from '../components/ui'
+import { EmptyState } from '../components/EmptyState'
 import { IconPencil } from '../components/icons'
 import { useT } from '../i18n'
 import type { Run } from '../../../src/types'
@@ -140,7 +141,13 @@ export function History() {
               <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{t('common.loading')}</td></tr>
             )}
             {!loading && runs.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{t('history.noRuns')}</td></tr>
+              <tr><td colSpan={8} style={{ padding: '4px 12px' }}>
+                <EmptyState
+                  icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 13.5h12" /><rect x="3" y="8" width="2.6" height="5.5" rx="0.5" /><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5" /><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5" /></svg>}
+                  title={t('empty.runsTitle')} description={t('empty.runsDesc')}
+                  actionLabel={t('empty.runsAction')} onAction={() => navigate('/run?new=1')}
+                />
+              </td></tr>
             )}
             {runs.map(run => {
               const isHovered = hoveredId === run.id

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardData } from '../api'
 import { formatCost } from '../../../src/pricing'
 import { TypeBadge } from '../components/TypeBadge'
+import { EmptyState } from '../components/EmptyState'
 import { useT } from '../i18n'
 import type { TargetKind } from '../../../src/types'
 
@@ -30,6 +31,23 @@ export function Dashboard() {
 
   const { totals, recentRuns, leaderboard, activity } = data
   const maxRuns = Math.max(1, ...activity.map(a => a.runs))
+
+  // Derived surface: with no runs there is nothing to summarise — the action leads
+  // to the cause (make a run), not to "create a dashboard".
+  if (totals.runs === 0) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: 24 }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <h1 style={{ margin: '0 0 4px', fontSize: 'var(--fs-xl)', color: 'var(--text-bright)' }}>{t('dashboard.title')}</h1>
+          <EmptyState
+            icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></svg>}
+            title={t('empty.dashTitle')} description={t('empty.dashDesc')}
+            actionLabel={t('empty.dashAction')} onAction={() => navigate('/run?new=1')}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', boxSizing: 'border-box', padding: 24 }}>
