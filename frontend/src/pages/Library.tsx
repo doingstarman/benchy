@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useT, t } from '../i18n'
+import { EmptyState } from '../components/EmptyState'
 import { toolsApi, skillsApi, mcpApi } from '../api'
 import type { Skill, CustomToolView, McpServerView } from '../../../src/types'
+
+const LIB_ICON = <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3.5A1.5 1.5 0 014.5 2H7v12H4.5A1.5 1.5 0 013 12.5v-9z" /><path d="M9 2h2.5A1.5 1.5 0 0113 3.5v9a1.5 1.5 0 01-1.5 1.5H9V2z" /></svg>
 
 type Tab = 'tools' | 'skills' | 'mcp'
 
@@ -225,28 +228,40 @@ export function Library() {
           </div>
           <div>
             <div className="lib-label" style={{ marginBottom: 8 }}>{t('library.custom')}</div>
-            <Grid>
-              {tools.map(c => <Card key={c.id} title={c.name} subtitle={c.url} badge={c.enabled ? undefined : t('common.off')} onClick={() => openTool(c)} />)}
-              <AddButton label={t('library.addTool')} onClick={() => openTool()} />
-            </Grid>
+            {tools.length === 0 ? (
+              <EmptyState icon={LIB_ICON} title={t('empty.toolsTitle')} description={t('empty.toolsDesc')} actionLabel={t('library.addTool')} onAction={() => openTool()} />
+            ) : (
+              <Grid>
+                {tools.map(c => <Card key={c.id} title={c.name} subtitle={c.url} badge={c.enabled ? undefined : t('common.off')} onClick={() => openTool(c)} />)}
+                <AddButton label={t('library.addTool')} onClick={() => openTool()} />
+              </Grid>
+            )}
           </div>
         </div>
       )}
 
       {tab === 'skills' && (
-        <Grid>
-          {skills.map(s => <Card key={s.id} title={s.name} subtitle={s.instruction || t('library.empty')} badge={s.enabled ? undefined : t('common.off')} onClick={() => openSkill(s)} />)}
-          <AddButton label={t('library.addSkill')} onClick={() => openSkill()} />
-        </Grid>
+        skills.length === 0 ? (
+          <EmptyState icon={LIB_ICON} title={t('empty.skillsTitle')} description={t('empty.skillsDesc')} actionLabel={t('library.addSkill')} onAction={() => openSkill()} />
+        ) : (
+          <Grid>
+            {skills.map(s => <Card key={s.id} title={s.name} subtitle={s.instruction || t('library.empty')} badge={s.enabled ? undefined : t('common.off')} onClick={() => openSkill(s)} />)}
+            <AddButton label={t('library.addSkill')} onClick={() => openSkill()} />
+          </Grid>
+        )
       )}
 
       {tab === 'mcp' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('library.mcpHint')}</div>
-          <Grid>
-            {mcp.map(m => <Card key={m.id} title={m.name} subtitle={m.url ?? m.command} badge={m.transport} onClick={() => openMcp(m)} />)}
-            <AddButton label={t('library.addMcp')} onClick={() => openMcp()} />
-          </Grid>
+          {mcp.length === 0 ? (
+            <EmptyState icon={LIB_ICON} title={t('empty.mcpTitle')} description={t('empty.mcpDesc')} actionLabel={t('library.addMcp')} onAction={() => openMcp()} />
+          ) : (
+            <Grid>
+              {mcp.map(m => <Card key={m.id} title={m.name} subtitle={m.url ?? m.command} badge={m.transport} onClick={() => openMcp(m)} />)}
+              <AddButton label={t('library.addMcp')} onClick={() => openMcp()} />
+            </Grid>
+          )}
         </div>
       )}
 

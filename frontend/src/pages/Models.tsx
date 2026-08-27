@@ -4,6 +4,7 @@ import type { Target, ModelTarget, ProviderView, ProviderDefaults, ModelTargetCo
 import { targetsApi, providersApi } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { EmptyState } from '../components/EmptyState'
+import { useRunCounts } from '../lib/runCounts'
 import { SliderField } from '../components/SliderField'
 import { TargetRow } from '../components/TargetRow'
 import { InheritedField } from '../components/InheritedField'
@@ -28,6 +29,7 @@ const isOrphan = (t: ModelTarget, byId: Map<string, ProviderView>): boolean => {
 export function Models() {
   const { t } = useT()
   const navigate = useNavigate()
+  const runCounts = useRunCounts()
   const [targets, setTargets] = useState<ModelTarget[]>([])
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [loading, setLoading] = useState(true)
@@ -102,6 +104,8 @@ export function Models() {
       provider={byId.get(tgt.config.providerId)}
       orphaned={isOrphan(tgt, byId)}
       note={variantNote.get(tgt.id)}
+      runs={runCounts.get(tgt.id) ?? 0}
+      onRuns={() => navigate(`/history?participant=${encodeURIComponent(tgt.id)}`)}
       onEdit={() => setEditingId(tgt.id)}
       onToggle={() => void patch(tgt.id, { enabled: !tgt.enabled })}
       onDuplicate={() => void duplicate(tgt.id)}

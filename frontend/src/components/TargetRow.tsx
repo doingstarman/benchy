@@ -19,11 +19,13 @@ function overrideSummary(d: ProviderDefaults | undefined, inheritedText: string)
 
 // One participant in the list. Presentational: pricing is real (config today),
 // latency/throughput are placeholders until the metrics registry (stage 2).
-export function TargetRow({ target, provider, orphaned, note, onEdit, onToggle, onDuplicate, onDelete }: {
+export function TargetRow({ target, provider, orphaned, note, runs = 0, onRuns, onEdit, onToggle, onDuplicate, onDelete }: {
   target: ModelTarget
   provider?: ProviderView
   orphaned: boolean
   note?: string
+  runs?: number
+  onRuns?: () => void
   onEdit: () => void
   onToggle: () => void
   onDuplicate: () => void
@@ -72,6 +74,11 @@ export function TargetRow({ target, provider, orphaned, note, onEdit, onToggle, 
       <MetricCell label="total" value={null} />
       <MetricCell label={t('models.priceHint')} value={price ? `${price.inputPer1M} / ${price.outputPer1M}` : null} />
 
+      {runs > 0 && onRuns && (
+        <button onClick={onRuns} title={t('participant.openRuns')} style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+          {t('participant.runsN', { n: runs })} →
+        </button>
+      )}
       <PillToggle on={target.enabled} onToggle={onToggle} labelOn={t('models.enabled')} labelOff={t('models.disabled')} />
       <IconButton onClick={onEdit} title={t('models.edit')}><IconPencil size={13} /></IconButton>
       <IconButton onClick={onDuplicate} title={t('models.duplicate')}><IconCopy size={13} /></IconButton>

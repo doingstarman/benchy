@@ -14,6 +14,7 @@ vi.mock('../api', () => ({
     create: vi.fn(),
   },
   providersApi: { list: vi.fn() },
+  runsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
 const target: Target = {
