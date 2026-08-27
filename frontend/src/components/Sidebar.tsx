@@ -95,7 +95,7 @@ const ICONS: Record<string, React.ReactNode> = {
   test: <Icon><path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor" stroke="none" /></Icon>,
   dashboard: <Icon><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></Icon>,
   results: <Icon><path d="M2 13.5h12" /><rect x="3" y="8" width="2.6" height="5.5" rx="0.5" /><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5" /><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5" /></Icon>,
-  history: <Icon><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 2" /></Icon>,
+  reports: <Icon><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z" /><path d="M9 1.5V5h3.5" /></Icon>,
   models: <Icon><path d="M8 2l6 3-6 3-6-3 6-3z" /><path d="M2 8l6 3 6-3" /><path d="M2 11l6 3 6-3" /></Icon>,
   agents: <Icon><rect x="3.5" y="6" width="9" height="7" rx="1.5" /><path d="M8 3v3" /><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none" /><path d="M6 9h0.01M10 9h0.01" /></Icon>,
   pipelines: <Icon><circle cx="3.5" cy="8" r="1.6" /><circle cx="12.5" cy="4" r="1.6" /><circle cx="12.5" cy="12" r="1.6" /><path d="M5 7.2l6-2.4M5 8.8l6 2.4" /></Icon>,
@@ -107,6 +107,18 @@ const ICONS: Record<string, React.ReactNode> = {
 
 function Divider() {
   return <div style={{ height: 1, background: 'var(--hairline)', margin: '6px 10px' }} />
+}
+
+// Group label carried on the divider, not a full row: a 14px caption. Collapsed, the
+// caption disappears and the dividers alone carry the grouping (as a rhythm, not words).
+function Caption({ label, collapsed }: { label: string; collapsed: boolean }) {
+  if (collapsed) return null
+  return (
+    <div style={{
+      padding: '6px 14px 3px', fontSize: 'var(--fs-xs)', fontFamily: 'var(--font-mono)',
+      textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--text-muted)',
+    }}>{label}</div>
+  )
 }
 
 function Item({ to, label, icon, collapsed, soon }: { to: string; label: string; icon: string; collapsed: boolean; soon?: boolean }) {
@@ -252,27 +264,33 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
 
       <Divider />
 
-      {/* ?new=1 → always starts a fresh dialog; past ones live in the list below */}
+      {/* RUN — the first thing a person comes for. ?new=1 always starts a fresh
+          dialog; past ones live in the recent list below. */}
+      <Caption label={t('nav.groupRun')} collapsed={collapsed} />
       <Item to="/run?new=1" label={t('nav.test')} icon="test" collapsed={collapsed} />
       {!collapsed && <RecentDialogs />}
-      <Item to="/history" label={t('nav.history')} icon="history" collapsed={collapsed} />
 
+      {/* ANALYSIS — one "Runs" item (History and Results were the same list under two
+          names); Results now opens from a run rather than sitting in nav. */}
       <Divider />
-
+      <Caption label={t('nav.groupAnalysis')} collapsed={collapsed} />
+      <Item to="/history" label={t('nav.history')} icon="results" collapsed={collapsed} />
       <Item to="/dashboard" label={t('nav.dashboard')} icon="dashboard" collapsed={collapsed} />
-      <Item to="/results" label={t('nav.results')} icon="results" collapsed={collapsed} />
+      <Item to="/results" label={t('nav.results')} icon="reports" collapsed={collapsed} />
 
+      {/* PARTICIPANTS — configured once, so below the daily analysis group. */}
       <Divider />
-
+      <Caption label={t('nav.groupParticipants')} collapsed={collapsed} />
       <Item to="/models" label={t('nav.models')} icon="models" collapsed={collapsed} />
       <Item to="/agents" label={t('nav.agents')} icon="agents" collapsed={collapsed} />
       <Item to="/pipelines" label={t('nav.pipelines')} icon="pipelines" collapsed={collapsed} />
-      <Item to="/library" label={t('nav.library')} icon="library" collapsed={collapsed} />
       <Item to="/providers" label={t('nav.providers')} icon="providers" collapsed={collapsed} />
 
+      {/* TOOLS — the inputs a run draws on; a caption answers "why is Library here". */}
       <Divider />
-
+      <Caption label={t('nav.groupTools')} collapsed={collapsed} />
       <Item to="/datasets" label={t('nav.datasets')} icon="datasets" collapsed={collapsed} />
+      <Item to="/library" label={t('nav.library')} icon="library" collapsed={collapsed} />
 
       {/* Push settings to bottom */}
       <div style={{ flex: 1 }} />

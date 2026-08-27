@@ -61,8 +61,12 @@ export interface Entry { en: string; ru: string }
 // just renders the key string at the user.
 export const DICT: Record<string, Entry> = {
   // ── nav / chrome ──
-  'nav.test': { en: 'Test', ru: 'Тест' },
-  'nav.history': { en: 'History', ru: 'История' },
+  'nav.test': { en: 'New run', ru: 'Новый прогон' },
+  'nav.history': { en: 'Runs', ru: 'Прогоны' },
+  'nav.groupRun': { en: 'run', ru: 'запуск' },
+  'nav.groupAnalysis': { en: 'analysis', ru: 'разбор' },
+  'nav.groupParticipants': { en: 'participants', ru: 'участники' },
+  'nav.groupTools': { en: 'tools', ru: 'инструмент' },
   'nav.dashboard': { en: 'Dashboard', ru: 'Дашборд' },
   'nav.results': { en: 'Results', ru: 'Результаты' },
   'nav.models': { en: 'Models', ru: 'Модели' },
