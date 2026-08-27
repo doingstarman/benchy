@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { UiStyles } from './components/ui'
@@ -68,7 +68,9 @@ export function App() {
             </button>
           </div>
         )}
-        <Outlet />
+        <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{t('common.loading')}</div>}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   )

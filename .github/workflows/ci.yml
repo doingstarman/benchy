@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One gate for the whole project: types, tests, build, shipped-artifact integrity,
+# and a production audit that fails on any high/critical. Runs on Linux — the release
+# ritual's manual checks stay Windows-side, this catches regressions on every push.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Lint (tsc)
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Package integrity (tarball == dist/version.json == source)
+        run: npm run check:release
+      - name: Production audit (fail on high/critical)
+        run: npm audit --omit=dev --audit-level=high
