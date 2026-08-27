@@ -66,6 +66,7 @@ export const openaiAdapter = {
         try {
             response = await fetch(url, {
                 method: 'POST',
+                signal: config.signal,
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${config.apiKey ?? ''}`,

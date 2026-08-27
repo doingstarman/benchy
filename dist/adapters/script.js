@@ -133,6 +133,13 @@ export const scriptAdapter = {
             yield { type: 'error', message: e instanceof Error ? e.message : String(e), scope: 'agent' };
             return;
         }
+        // User stop: force-kill the child tree at once (graceful term alone doesn't
+        // terminate a console child on Windows). 'close' then finishes the stream
+        // normally — a stop is not a failure, so no error chunk.
+        config.signal?.addEventListener('abort', () => { try {
+            killTree(child);
+        }
+        catch { /* already gone */ } }, { once: true });
         let stderr = '';
         const stdin = child.stdin;
         child.stdout?.on('data', (d) => { emit(streamer.feed(d.toString())); });
