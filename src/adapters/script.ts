@@ -115,6 +115,11 @@ export const scriptAdapter: Adapter = {
       return
     }
 
+    // User stop: force-kill the child tree at once (graceful term alone doesn't
+    // terminate a console child on Windows). 'close' then finishes the stream
+    // normally — a stop is not a failure, so no error chunk.
+    config.signal?.addEventListener('abort', () => { try { killTree(child) } catch { /* already gone */ } }, { once: true })
+
     let stderr = ''
     const stdin = child.stdin
     child.stdout?.on('data', (d: Buffer) => { emit(streamer.feed(d.toString())) })

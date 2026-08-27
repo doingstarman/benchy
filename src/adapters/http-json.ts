@@ -14,6 +14,7 @@ export const httpJsonAdapter: Adapter = {
     try {
       response = await fetch(url, {
         method: 'POST',
+        signal: config.signal,
         headers,
         body: JSON.stringify({ messages, model: config.model }),
       })

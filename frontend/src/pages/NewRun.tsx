@@ -713,6 +713,9 @@ interface PromptboxProps {
   // per-model generation setting — hence its own props, not part of runSettings.
   selectedTools: Set<string>
   onToggleTool: (id: string) => void
+  // Master switch: when off, no tools are sent even if some are selected.
+  toolCallingEnabled: boolean
+  onToggleToolCalling: () => void
   // The library catalog the "/" menu offers, plus the skill/mcp selections it
   // toggles. Tools reuse selectedTools above.
   artifacts: ArtifactItem[]
@@ -836,7 +839,7 @@ export function Promptbox({
   batchPrompts, onBatchPromptsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel, appRunDefaults,
-  selectedTools, onToggleTool,
+  selectedTools, onToggleTool, toolCallingEnabled, onToggleToolCalling,
   artifacts, selectedSkills, onToggleSkill, selectedMcp, onToggleMcp,
   systemPrompt, onSystemPromptChange,
   isBatch,
@@ -1193,9 +1196,13 @@ export function Promptbox({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.toolsSection')}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.toolsSection')}</div>
+              <div style={{ flex: 1 }} />
+              <PillToggle on={toolCallingEnabled} onToggle={onToggleToolCalling} labelOn={t('run.toolCallingOn')} labelOff={t('run.toolCallingOff')} />
+            </div>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -6 }}>{t('run.toolsHint')}</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', opacity: toolCallingEnabled ? 1 : 0.4, pointerEvents: toolCallingEnabled ? undefined : 'none' }}>
               {[
                 { id: 'calc', label: t('run.toolCalc') },
                 { id: 'fetch_url', label: t('run.toolFetch') },
@@ -1485,6 +1492,7 @@ export function NewRun() {
   // tools and measures exactly what it measured before tools existed. Holds both
   // built-in ids (calc…) and custom HTTP-tool ids.
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => savedSession?.selectedTools ?? new Set())
+  const [toolCallingEnabled, setToolCallingEnabled] = useState(true)
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(() => savedSession?.selectedSkills ?? new Set())
   const [selectedMcp, setSelectedMcp] = useState<Set<string>>(() => savedSession?.selectedMcp ?? new Set())
   // The library, loaded once — the "/" menu and chips draw their names from here.
@@ -1900,7 +1908,7 @@ export function NewRun() {
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
 
     const turnAttachments = effectiveMode === 0 && pendingAttachments.length ? pendingAttachments : undefined
-    const tools = selectedTools.size ? [...selectedTools] : undefined
+    const tools = toolCallingEnabled && selectedTools.size ? [...selectedTools] : undefined
     const skillIds = selectedSkills.size ? [...selectedSkills] : undefined
     const mcpIds = selectedMcp.size ? [...selectedMcp] : undefined
     const sys = systemPrompt.trim() || undefined
@@ -1951,6 +1959,9 @@ export function NewRun() {
   // has arrived. The server finishes its calls in the background (there's no
   // abort endpoint) — we just stop listening.
   function handleStop() {
+    // Tell the backend to abort every in-flight cell (stops the fetch/child, not just
+    // the UI), then close the streams and settle the view.
+    if (runId) void benchmarkApi.stop(runId).catch(() => {})
     esRef.current?.close()
     regenEsRef.current?.close()
     setTurns(prev => prev.map(turn => {
@@ -1963,6 +1974,12 @@ export function NewRun() {
       return { ...turn, results: next }
     }))
     setScreenState('done')
+  }
+
+  // Stop a single participant's generation, leaving the other cells streaming.
+  function handleStopCell(promptIndex: number, model: string) {
+    if (runId) void benchmarkApi.stop(runId, { model, promptIndex }).catch(() => {})
+    updateTurnResult(promptIndex, model, r => (r.status === 'pending' || r.status === 'streaming') ? { ...r, status: 'done' } : r)
   }
 
   async function handleContinue() {
@@ -2167,6 +2184,9 @@ export function NewRun() {
               </span>
             )}
           </span>
+          {isStreaming && (
+            <IconButton onClick={() => handleStopCell(turn.promptIndex, key)} title={t('run.stopCell')} style={{ color: 'var(--error)' }}><IconStop /></IconButton>
+          )}
           <IconButton onClick={() => handleRegenerate(turn.promptIndex, key)} title={t('title.regenerate')}><IconRefresh /></IconButton>
           <IconButton onClick={() => handleCopy(cellKey, r.text)} title={t('common.copy')}>
             {copiedCol === cellKey ? <IconCheck /> : <IconCopy />}
@@ -2276,6 +2296,8 @@ export function NewRun() {
     appRunDefaults,
     selectedTools,
     onToggleTool: toggleTool,
+    toolCallingEnabled,
+    onToggleToolCalling: () => setToolCallingEnabled(v => !v),
     artifacts: artifactCatalog,
     selectedSkills,
     onToggleSkill: toggleSkill,

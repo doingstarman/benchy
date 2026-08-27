@@ -867,6 +867,9 @@ export const DICT: Record<string, Entry> = {
     ru: 'Anthropic думает только по запросу — это меняет замер',
   },
   'run.toolsSection': { en: 'Tools', ru: 'Инструменты' },
+  'run.toolCallingOn': { en: 'tool-calling on', ru: 'вызов инструментов вкл' },
+  'run.toolCallingOff': { en: 'tool-calling off', ru: 'вызов инструментов выкл' },
+  'run.stopCell': { en: 'Stop this participant', ru: 'Остановить этого участника' },
   'run.toolsHint': {
     en: 'Same tools for every model — off by default. Tools consume input tokens on every call and change how a model responds.',
     ru: 'Одни инструменты для всех моделей, по умолчанию выкл. Инструменты тратят входные токены в каждом вызове и меняют поведение модели.',

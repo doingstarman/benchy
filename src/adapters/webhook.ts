@@ -14,6 +14,7 @@ export const webhookAdapter: Adapter = {
     try {
       response = await fetch(url, {
         method: 'POST',
+        signal: config.signal,
         headers,
         body: JSON.stringify({ model: config.model, messages, timestamp: Date.now() }),
       })

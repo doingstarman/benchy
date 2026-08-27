@@ -79,7 +79,7 @@ export const anthropicAdapter: Adapter = {
           ? { tools: config.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })) }
           : {}),
         messages: chatMessages.map(toAnthropicMessage),
-      })
+      }, { signal: config.signal })
 
       for await (const event of stream) {
         if (event.type !== 'content_block_delta') continue

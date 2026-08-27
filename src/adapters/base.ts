@@ -90,6 +90,9 @@ export interface AdapterConfig {
   // goes out with no tools at all, byte-for-byte as before tool support existed.
   tools?: ToolSpec[]
   agent?: AgentAdapterOptions
+  // Cancels this call when the user stops the cell/run: wired into fetch and the
+  // Anthropic SDK; every adapter's consumer also breaks on it as a universal stop.
+  signal?: AbortSignal
 }
 
 export interface MessageAttachment {

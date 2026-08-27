@@ -398,6 +398,12 @@ export interface BenchmarkRequest {
 export const benchmarkApi = {
   start: (req: BenchmarkRequest) =>
     apiFetch<{ runId: string }>('/api/benchmark', { method: 'POST', body: JSON.stringify(req) }),
+  // Stop in-flight generation: no target → the whole run; a target (+ optional
+  // promptIndex) → just that participant.
+  stop: (runId: string, target?: { model?: string; promptIndex?: number }) =>
+    apiFetch<{ stopped: number }>(`/api/benchmark/${encodeURIComponent(runId)}/stop`, {
+      method: 'POST', body: JSON.stringify(target ?? {}),
+    }),
   continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings, attachments?: string[]) =>
     apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/continue`, {
       method: 'POST',
