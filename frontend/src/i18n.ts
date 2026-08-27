@@ -136,7 +136,7 @@ export const DICT: Record<string, Entry> = {
   'common.saving': { en: 'saving…', ru: 'сохранение…' },
   'common.remove': { en: 'remove', ru: 'убрать' },
   'dashboard.title': { en: 'Dashboard', ru: 'Дашборд' },
-  'dashboard.subtitle': { en: 'An overview of your benchmarks — totals, recent runs, and participant standings', ru: 'Обзор ваших бенчмарков — тоталы, недавние прогоны и рейтинг участников' },
+  'dashboard.subtitle': { en: 'An overview — totals, recent runs, and participant standings', ru: 'Обзор — тоталы, недавние прогоны и рейтинг участников' },
   'dashboard.error': { en: 'Could not load the dashboard', ru: 'Не удалось загрузить дашборд' },
   'dashboard.runs': { en: 'Runs', ru: 'Прогоны' },
   'dashboard.savedN': { en: '{n} saved', ru: 'сохранено: {n}' },
@@ -733,8 +733,8 @@ export const DICT: Record<string, Entry> = {
   // ── agents ──
   'agents.title': { en: 'Agents', ru: 'Агенты' },
   'agents.subtitle': {
-    en: 'Your own program as a benchmark participant — benchy runs it, reads its trace, and scores it beside the models.',
-    ru: 'Ваша программа как участник бенчмарка — benchy запускает её, читает трейс и оценивает рядом с моделями.',
+    en: 'Your own program as a run participant — benchy runs it, reads its trace, and scores it beside the models.',
+    ru: 'Ваша программа как участник прогона — benchy запускает её, читает трейс и оценивает рядом с моделями.',
   },
   'agents.new': { en: 'New agent', ru: 'Новый агент' },
   'agents.empty': { en: 'No agents yet. Add one that speaks the trace protocol (see docs/agent-protocol.md).', ru: 'Агентов пока нет. Добавьте того, кто говорит на протоколе трейса (см. docs/agent-protocol.md).' },
