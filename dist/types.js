@@ -1,5 +1,11 @@
+// Discriminators over the config union. A pipeline carries `mode` (agents never do), so
+// it is checked FIRST — an external pipeline also has `transport`, which must not read as
+// an agent.
+export function isPipelineConfig(c) {
+    return 'mode' in c;
+}
 export function isAgentConfig(c) {
-    return 'transport' in c;
+    return 'transport' in c && !('mode' in c);
 }
 export function toProviderView({ apiKey, ...rest }) {
     return { ...rest, apiKeyMask: maskApiKey(apiKey) };

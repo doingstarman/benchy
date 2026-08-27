@@ -14,9 +14,12 @@ import { registerResultsRoutes } from './api/results.js';
 import { registerSettingsRoutes } from './api/settings.js';
 import { registerTargetsRoutes } from './api/targets.js';
 import { registerMetricsRoutes } from './api/metrics.js';
+import { registerDashboardRoutes } from './api/dashboard.js';
 import { registerMockRoutes } from './api/mock.js';
 import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js';
 import { registerVersionRoutes } from './api/version.js';
+import { registerLogsRoutes } from './api/logs.js';
+import { logEvent } from './logStore.js';
 import { isDevEnvironment } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UNBOUND_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
@@ -49,9 +52,21 @@ export async function createServer(port, dbPath) {
     // through to Fastify's own shape, which the frontend's apiFetch can't read —
     // the user gets a blank 500 and no idea what happened. This tool is localhost
     // and single-user, so an honest message beats a silent one.
-    app.setErrorHandler((err, _req, reply) => {
+    app.setErrorHandler((err, req, reply) => {
         const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+        if (status >= 500)
+            logEvent('error', 'api', `${req.method} ${req.url} → ${status}`, { error: err.message });
         return reply.code(status).send({ error: err.message });
+    });
+    // Access log: one record per finished request. Skips the log viewer's own polling
+    // and long-lived SSE streams so they don't flood or self-amplify the log.
+    app.addHook('onResponse', async (req, reply) => {
+        const url = req.url.split('?')[0];
+        if (!url.startsWith('/api/') || url.startsWith('/api/logs') || url.endsWith('/stream'))
+            return;
+        const status = reply.statusCode;
+        const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+        logEvent(level, 'api', `${req.method} ${url} → ${status}`, { ms: Math.round(reply.elapsedTime) });
     });
     // API routes
     await registerUploadsRoutes(app);
@@ -65,6 +80,8 @@ export async function createServer(port, dbPath) {
     await registerSettingsRoutes(app);
     await registerTargetsRoutes(app);
     await registerMetricsRoutes(app);
+    await registerDashboardRoutes(app);
+    await registerLogsRoutes(app);
     // The mock adapter is a dev-only testing aid — its routes exist only under
     // ~/.benchy-dev, so a production install ships no /api/mock endpoint (mock
     // providers are likewise filtered out of prod, see config.getProviders).
@@ -80,5 +97,6 @@ export async function createServer(port, dbPath) {
         });
     }
     await app.listen({ port, host: '127.0.0.1' });
+    logEvent('info', 'system', `benchy server started on port ${port}`, { dev: isDevEnvironment() });
     return app;
 }

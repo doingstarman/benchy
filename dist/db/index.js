@@ -203,6 +203,17 @@ CREATE TABLE IF NOT EXISTS trace_steps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_trace_steps_result ON trace_steps(result_id, step_index);
+
+-- Structured application log (see schema.sql for the annotated reference).
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  level TEXT NOT NULL,
+  category TEXT NOT NULL,
+  message TEXT NOT NULL,
+  meta TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);
 `;
 let db = null;
 export function getBenchyDir() {
