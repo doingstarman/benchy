@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Target, ModelTarget, ProviderView, ProviderDefaults, ModelTargetConfig } from '../../../src/types'
 import { targetsApi, providersApi } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
+import { EmptyState } from '../components/EmptyState'
 import { SliderField } from '../components/SliderField'
 import { TargetRow } from '../components/TargetRow'
 import { InheritedField } from '../components/InheritedField'
@@ -25,6 +27,7 @@ const isOrphan = (t: ModelTarget, byId: Map<string, ProviderView>): boolean => {
 
 export function Models() {
   const { t } = useT()
+  const navigate = useNavigate()
   const [targets, setTargets] = useState<ModelTarget[]>([])
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [loading, setLoading] = useState(true)
@@ -127,7 +130,12 @@ export function Models() {
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>{t('common.loading')}</div>
       ) : targets.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>{t('models.empty')}</div>
+        <EmptyState
+          icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2l6 3-6 3-6-3 6-3z" /><path d="M2 8l6 3 6-3" /><path d="M2 11l6 3 6-3" /></svg>}
+          title={t('empty.modelsTitle')} description={t('empty.modelsDesc')}
+          actionLabel={t('empty.modelsAction')} onAction={() => navigate('/providers')}
+          hint={t('models.new')} onHint={() => setCreating(true)}
+        />
       ) : grouped ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {groups.map(g => {

@@ -3,6 +3,7 @@ import type { Target, PipelineTargetConfig, PipelineNode, PipelineEdge } from '.
 import { targetsApi, type PipelineConfigUpsert, type HandshakeResult } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
+import { EmptyState } from '../components/EmptyState'
 import { HealthDot } from './Agents'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { IconPlus, IconClose, IconPencil, IconCopy, IconTrash } from '../components/icons'
@@ -58,7 +59,11 @@ export function Pipelines() {
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>{t('common.loading')}</div>
         ) : pipelines.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>{t('pipelines.empty')}</div>
+          <EmptyState
+            icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><circle cx="3.5" cy="8" r="1.6" /><circle cx="12.5" cy="4" r="1.6" /><circle cx="12.5" cy="12" r="1.6" /><path d="M5 7.2l6-2.4M5 8.8l6 2.4" /></svg>}
+            title={t('empty.pipelinesTitle')} description={t('empty.pipelinesDesc')}
+            actionLabel={t('empty.pipelinesAction')} onAction={() => setEditingId('')}
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {pipelines.map(p => (

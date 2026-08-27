@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useT } from '../i18n'
+import { EmptyState } from '../components/EmptyState'
 import { datasetsApi } from '../api'
 import type { Dataset } from '../../../src/types'
 
@@ -121,11 +122,11 @@ export function Datasets() {
         {loading ? (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</div>
         ) : items.length === 0 ? (
-          <div style={{ border: '0.5px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: 40, textAlign: 'center', background: 'var(--bg-elevated)' }}>
-            <div style={{ fontSize: 28, marginBottom: 10, opacity: 0.5 }}>🗂</div>
-            <div style={{ fontSize: 15, color: 'var(--text-bright)', marginBottom: 6 }}>{t('dataset.emptyTitle')}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 440, margin: '0 auto', lineHeight: 1.5 }}>{t('dataset.emptyBody')}</div>
-          </div>
+          <EmptyState
+            icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></svg>}
+            title={t('empty.datasetsTitle')} description={t('empty.datasetsDesc')}
+            actionLabel={t('empty.datasetsAction')} onAction={() => { setName(''); setCreating(true) }}
+          />
         ) : filtered.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 2px' }}>{t('dataset.searchEmpty', { q: query.trim() })}</div>
         ) : (

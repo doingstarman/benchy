@@ -3,6 +3,7 @@ import type { Target, AgentTargetConfig, AgentHealth } from '../../../src/types'
 import { targetsApi, type AgentConfigUpsert, type HandshakeResult } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
+import { EmptyState } from '../components/EmptyState'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { IconPlus, IconClose, IconPencil, IconCopy, IconTrash } from '../components/icons'
 import { useT } from '../i18n'
@@ -68,7 +69,11 @@ export function Agents() {
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>{t('common.loading')}</div>
         ) : agents.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>{t('agents.empty')}</div>
+          <EmptyState
+            icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="6" width="9" height="7" rx="1.5" /><path d="M8 3v3" /><circle cx="8" cy="2.5" r="0.8" fill="currentColor" stroke="none" /><path d="M6 9h0.01M10 9h0.01" /></svg>}
+            title={t('empty.agentsTitle')} description={t('empty.agentsDesc')}
+            actionLabel={t('empty.agentsAction')} onAction={() => setEditingId('')}
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {agents.map(a => (
