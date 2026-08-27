@@ -20,6 +20,7 @@ import { registerUploadsRoutes, gcUnboundUploads } from './api/uploads.js'
 import { registerVersionRoutes } from './api/version.js'
 import { registerLogsRoutes } from './api/logs.js'
 import { logEvent } from './logStore.js'
+import { isLocalRequest } from './api/csrf.js'
 import { isDevEnvironment } from './config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -61,6 +62,22 @@ export async function createServer(port: number, dbPath?: string) {
     const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500
     if (status >= 500) logEvent('error', 'api', `${req.method} ${req.url} → ${status}`, { error: err.message })
     return reply.code(status).send({ error: err.message })
+  })
+
+  // CSRF: refuse every state-changing /api request that carries a cross-site Origin.
+  // benchy is unauthenticated on localhost, so without this a website the user visits
+  // could script POST/PUT/PATCH/DELETE against the API — creating a command agent and
+  // running it is local code execution. Reads (GET/HEAD) and CORS preflight (OPTIONS)
+  // are safe; a same-origin or Origin-less request (benchy's own UI, the dev server on
+  // another localhost port, server-to-server fetches) is trusted. This is the single
+  // choke point — per-route isLocalRequest checks remain as defence in depth.
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return
+    if (!req.url.startsWith('/api/')) return
+    if (!isLocalRequest(req)) {
+      logEvent('warn', 'api', `${req.method} ${req.url.split('?')[0]} → 403 (cross-site)`, { origin: req.headers.origin })
+      return reply.code(403).send({ error: 'cross-site request refused' })
+    }
   })
 
   // Access log: one record per finished request. Skips the log viewer's own polling
