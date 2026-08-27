@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { runsApi } from '../api'
 import { getActiveNewRunRunId, RUNS_CHANGED_EVENT } from '../pages/NewRun'
-import { useT, t } from '../i18n'
+import { useT } from '../i18n'
 import type { Run } from '../../../src/types'
 
 const EXPANDED_WIDTH = 160
@@ -39,15 +39,6 @@ const SIDEBAR_CSS = `
   }
   .nav-item.active.collapsed {
     padding-left: 11px;
-  }
-  .nav-item.disabled {
-    color: var(--border-hover);
-    cursor: default;
-    pointer-events: none;
-  }
-  .nav-item.disabled:hover {
-    color: var(--border-hover);
-    background: none;
   }
   .nav-icon { flex-shrink: 0; display: flex; }
   .sidebar-collapse-btn {
@@ -121,7 +112,7 @@ function Caption({ label, collapsed }: { label: string; collapsed: boolean }) {
   )
 }
 
-function Item({ to, label, icon, collapsed, soon }: { to: string; label: string; icon: string; collapsed: boolean; soon?: boolean }) {
+function Item({ to, label, icon, collapsed }: { to: string; label: string; icon: string; collapsed: boolean }) {
   return (
     <NavLink
       to={to}
@@ -129,35 +120,8 @@ function Item({ to, label, icon, collapsed, soon }: { to: string; label: string;
       className={({ isActive }) => `nav-item${isActive ? ' active' : ''}${collapsed ? ' collapsed' : ''}`}
     >
       {ICONS[icon]}
-      {!collapsed && (
-        <>
-          {label}
-          {soon && (
-            <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
-              {t('nav.soon')}
-            </span>
-          )}
-        </>
-      )}
+      {!collapsed && label}
     </NavLink>
-  )
-}
-
-function DisabledItem({ label, icon, collapsed, soon }: { label: string; icon: string; collapsed: boolean; soon?: boolean }) {
-  return (
-    <div className={`nav-item disabled${collapsed ? ' collapsed' : ''}`} title={collapsed ? label : undefined}>
-      {ICONS[icon]}
-      {!collapsed && (
-        <>
-          {label}
-          {soon && (
-            <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-sans)', color: 'var(--border-hover)', letterSpacing: 0 }}>
-              {t('nav.soon')}
-            </span>
-          )}
-        </>
-      )}
-    </div>
   )
 }
 

@@ -97,7 +97,6 @@ export const DICT: Record<string, Entry> = {
   'nav.providers': { en: 'Providers', ru: 'Провайдеры' },
   'nav.datasets': { en: 'Datasets', ru: 'Датасеты' },
   'nav.settings': { en: 'Settings', ru: 'Настройки' },
-  'nav.soon': { en: 'soon', ru: 'скоро' },
 
   // ── library (tools / skills / mcp) ──
   'library.title': { en: 'Library', ru: 'Библиотека' },
@@ -133,6 +132,7 @@ export const DICT: Record<string, Entry> = {
   'library.builtinReadonly': { en: 'built-in', ru: 'встроенный' },
   'nav.expand': { en: 'Expand sidebar', ru: 'Развернуть панель' },
   'nav.collapse': { en: 'Collapse sidebar', ru: 'Свернуть панель' },
+  'nav.soon': { en: 'soon', ru: 'скоро' },
   'app.backToDialog': { en: 'to dialog', ru: 'в диалог' },
 
   // ── common ──
@@ -172,7 +172,6 @@ export const DICT: Record<string, Entry> = {
   'pipelines.title': { en: 'Pipelines', ru: 'Пайплайны' },
   'pipelines.subtitle': { en: 'A participant that is itself a graph of participants — models, agents, or nested pipelines', ru: 'Участник, который сам является графом участников — моделей, агентов или вложенных пайплайнов' },
   'pipelines.new': { en: 'New pipeline', ru: 'Новый пайплайн' },
-  'pipelines.empty': { en: 'No pipelines yet', ru: 'Пока нет пайплайнов' },
   'pipelines.edit': { en: 'Edit pipeline', ru: 'Редактировать пайплайн' },
   'pipelines.delete': { en: 'Delete', ru: 'Удалить' },
   'pipelines.deleteConfirm': { en: 'Delete this pipeline? History keeps its results.', ru: 'Удалить этот пайплайн? История сохранит его результаты.' },
@@ -344,8 +343,6 @@ export const DICT: Record<string, Entry> = {
   'dataset.searchCount': { en: '{n} of {total}', ru: '{n} из {total}' },
   'dataset.searchEmpty': { en: 'Nothing matches “{q}”', ru: 'Ничего не найдено по «{q}»' },
   'dataset.create': { en: 'New dataset', ru: 'Новый датасет' },
-  'dataset.emptyTitle': { en: 'No datasets yet', ru: 'Пока нет датасетов' },
-  'dataset.emptyBody': { en: 'Create a dataset, drop files (JPG, PNG, PDF), then define variables and label ground truth by hand.', ru: 'Создайте датасет, загрузите файлы (JPG, PNG, PDF), затем задайте переменные и разметьте эталон вручную.' },
   'dataset.cName': { en: 'Name', ru: 'Название' },
   'dataset.cItems': { en: 'Items', ru: 'Элем.' },
   'dataset.cSchema': { en: 'Schema', ru: 'Схема' },
@@ -557,7 +554,6 @@ export const DICT: Record<string, Entry> = {
   'history.colReplies': { en: 'Replies', ru: 'Реплик' },
   'history.colDate': { en: 'Date', ru: 'Дата' },
   'history.colStatus': { en: 'Status', ru: 'Статус' },
-  'history.noRuns': { en: 'No runs yet.', ru: 'Пока нет тестов.' },
   'history.namePlaceholder': { en: 'Test name…', ru: 'Название теста…' },
   'history.rename': { en: 'Rename', ru: 'Переименовать' },
   'history.scores': { en: 'scores', ru: 'оценки' },
@@ -748,7 +744,6 @@ export const DICT: Record<string, Entry> = {
     ru: 'Ваша программа как участник прогона — benchy запускает её, читает трейс и оценивает рядом с моделями.',
   },
   'agents.new': { en: 'New agent', ru: 'Новый агент' },
-  'agents.empty': { en: 'No agents yet. Add one that speaks the trace protocol (see docs/agent-protocol.md).', ru: 'Агентов пока нет. Добавьте того, кто говорит на протоколе трейса (см. docs/agent-protocol.md).' },
   'agents.edit': { en: 'Agent', ru: 'Агент' },
   'agents.name': { en: 'name', ru: 'имя' },
   'agents.delete': { en: 'Delete agent', ru: 'Удалить агента' },
