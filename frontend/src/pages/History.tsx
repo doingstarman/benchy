@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { runsApi } from '../api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { runsApi, targetsApi } from '../api'
 import { RUNS_CHANGED_EVENT } from './NewRun'
 import { Button, Input } from '../components/ui'
 import { EmptyState } from '../components/EmptyState'
@@ -19,6 +19,20 @@ export function History() {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const participant = searchParams.get('participant')
+  const [participantName, setParticipantName] = useState<string | null>(null)
+
+  // A participant filter arrives as ?participant=<id> from a participant row. Resolve
+  // its name for the chip; the run set is narrowed to runs that included it.
+  useEffect(() => {
+    if (!participant) { setParticipantName(null); return }
+    let live = true
+    targetsApi.get(participant).then(t => { if (live) setParticipantName(t.name) }).catch(() => { if (live) setParticipantName(participant) })
+    return () => { live = false }
+  }, [participant])
+  const clearParticipant = () => setSearchParams(p => { p.delete('participant'); return p }, { replace: true })
+  const shownRuns = participant ? runs.filter(r => r.models.includes(participant)) : runs
 
   const load = useCallback(() => {
     setLoading(true)
@@ -120,6 +134,16 @@ export function History() {
         </select>
       </div>
 
+      {/* Participant filter chip — visible so a short list reads as filtered, not empty */}
+      {participant && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', background: 'var(--accent-bg)', border: '0.5px solid var(--accent-dim)', borderRadius: 'var(--radius-sm)', padding: '3px 8px' }}>
+            {t('history.filterParticipant', { name: participantName ?? participant })}
+            <button onClick={clearParticipant} title={t('common.remove')} style={{ all: 'unset', cursor: 'pointer', color: 'var(--accent)' }}>✕</button>
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -140,7 +164,7 @@ export function History() {
             {loading && (
               <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{t('common.loading')}</td></tr>
             )}
-            {!loading && runs.length === 0 && (
+            {!loading && shownRuns.length === 0 && (
               <tr><td colSpan={8} style={{ padding: '4px 12px' }}>
                 <EmptyState
                   icon={<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 13.5h12" /><rect x="3" y="8" width="2.6" height="5.5" rx="0.5" /><rect x="6.7" y="4.5" width="2.6" height="9" rx="0.5" /><rect x="10.4" y="6.5" width="2.6" height="7" rx="0.5" /></svg>}
@@ -149,7 +173,7 @@ export function History() {
                 />
               </td></tr>
             )}
-            {runs.map(run => {
+            {shownRuns.map(run => {
               const isHovered = hoveredId === run.id
               const turnCount = run.prompts.length
               const previewPrompt = (turnCount > 1 ? run.prompts[turnCount - 1] : run.prompts[0]) ?? ''

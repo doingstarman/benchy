@@ -568,6 +568,10 @@ export const DICT: Record<string, Entry> = {
   // ── results ──
   'results.backHistory': { en: '← runs', ru: '← прогоны' },
   'results.openParticipant': { en: 'Open participant', ru: 'Открыть участника' },
+  'history.filterParticipant': { en: 'participant: {name}', ru: 'участник: {name}' },
+  'participant.runsN': { en: '{n} runs', ru: '{n} прогонов' },
+  'participant.openRuns': { en: 'Open its runs', ru: 'Открыть его прогоны' },
+  'metrics.usedBy': { en: 'used by', ru: 'используется в' },
   'results.live': { en: 'live', ru: 'вживую' },
   'results.bestTtfs': { en: 'best ttfs', ru: 'лучший ttfs' },
   'results.save': { en: 'save', ru: 'сохранить' },

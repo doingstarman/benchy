@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Target, AgentTargetConfig, AgentHealth } from '../../../src/types'
+import { useRunCounts } from '../lib/runCounts'
 import { targetsApi, type AgentConfigUpsert, type HandshakeResult } from '../api'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
@@ -27,6 +29,8 @@ export function HealthDot({ health }: { health?: AgentHealth }) {
 
 export function Agents() {
   const { t } = useT()
+  const navigate = useNavigate()
+  const runCounts = useRunCounts()
   const [agents, setAgents] = useState<Target[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)   // null=closed, ''=new
@@ -77,8 +81,9 @@ export function Agents() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {agents.map(a => (
-              <AgentRow key={a.id} target={a}
+              <AgentRow key={a.id} target={a} runs={runCounts.get(a.id) ?? 0}
                 onEdit={() => setEditingId(a.id)}
+                onRuns={() => navigate(`/history?participant=${encodeURIComponent(a.id)}`)}
                 onToggle={() => void targetsApi.update(a.id, { enabled: !a.enabled }).then(load)}
                 onDuplicate={() => void duplicate(a.id)}
                 onDelete={() => setPendingDelete(a)} />
@@ -107,8 +112,8 @@ export function Agents() {
   )
 }
 
-function AgentRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
-  target: Target; onEdit: () => void; onToggle: () => void; onDuplicate: () => void; onDelete: () => void
+function AgentRow({ target, runs, onEdit, onRuns, onToggle, onDuplicate, onDelete }: {
+  target: Target; runs: number; onEdit: () => void; onRuns: () => void; onToggle: () => void; onDuplicate: () => void; onDelete: () => void
 }) {
   const { t } = useT()
   const cfg = asAgent(target)
@@ -131,6 +136,11 @@ function AgentRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
           </div>
         )}
       </div>
+      {runs > 0 && (
+        <button onClick={onRuns} title={t('participant.openRuns')} style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+          {t('participant.runsN', { n: runs })} →
+        </button>
+      )}
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{t('agents.maxStepsShort', { n: cfg.maxSteps })}</span>
       <PillToggle on={target.enabled} onToggle={onToggle} labelOn={t('models.enabled')} labelOff={t('models.disabled')} />
       <IconButton onClick={onEdit} title={t('models.edit')}><IconPencil size={13} /></IconButton>

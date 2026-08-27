@@ -31,6 +31,23 @@ export function MetricsRegistry() {
   const builtins = filtered.filter(m => m.kind === 'builtin')
   const customs = filtered.filter(m => m.kind === 'custom')
 
+  // metric → where it is used: the custom metrics whose expression references this
+  // metric's key. Answers the "из метрики → где" transition (keys are ^[a-z0-9_]+$,
+  // so a word-boundary match is exact). Computed over the full set, not the filter.
+  const usedBy = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const c of metrics) {
+      if (c.kind !== 'custom' || !c.expression) continue
+      for (const other of metrics) {
+        if (other.key === c.key) continue
+        if (new RegExp(`\\b${other.key}\\b`).test(c.expression)) {
+          m.set(other.key, [...(m.get(other.key) ?? []), c.name])
+        }
+      }
+    }
+    return m
+  }, [metrics])
+
   async function toggle(m: MetricDef) { await metricsApi.update(m.key, { enabled: !m.enabled }); await load() }
   function duplicate(m: MetricDef) {
     const taken = new Set(metrics.map(x => x.key))
@@ -52,7 +69,12 @@ export function MetricsRegistry() {
       padding: '9px 14px', borderTop: '0.5px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-md)',
     }}>
       <span style={{ color: 'var(--text-bright)', fontFamily: m.kind === 'custom' ? 'var(--font-mono)' : 'var(--font-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
-      <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.key}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.key}</span>
+        {(usedBy.get(m.key)?.length ?? 0) > 0 && (
+          <span title={`${t('metrics.usedBy')}: ${usedBy.get(m.key)!.join(', ')}`} style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', color: 'var(--accent)', border: '0.5px solid var(--accent-dim)', borderRadius: 'var(--radius-sm)', padding: '0 4px', cursor: 'default' }}>→{usedBy.get(m.key)!.length}</span>
+        )}
+      </span>
       <span style={{ color: m.kind === 'custom' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 'var(--fs-sm)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {m.kind === 'custom' ? m.expression : `${t('metrics.builtinExpr')}${m.nullable ? ` · ${t('metrics.nullableNote')}` : ''}`}
       </span>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Target, PipelineTargetConfig, PipelineNode, PipelineEdge } from '../../../src/types'
 import { targetsApi, type PipelineConfigUpsert, type HandshakeResult } from '../api'
+import { useRunCounts } from '../lib/runCounts'
 import { UiStyles, Button, IconButton, Input, PillToggle, Segmented } from '../components/ui'
 import { TypeBadge } from '../components/TypeBadge'
 import { EmptyState } from '../components/EmptyState'
@@ -14,6 +16,8 @@ function slug(s: string): string { return s.toLowerCase().replace(/[^a-z0-9]+/g,
 
 export function Pipelines() {
   const { t } = useT()
+  const navigate = useNavigate()
+  const runCounts = useRunCounts()
   const [pipelines, setPipelines] = useState<Target[]>([])
   const [allTargets, setAllTargets] = useState<Target[]>([])   // ref candidates
   const [loading, setLoading] = useState(true)
@@ -67,8 +71,9 @@ export function Pipelines() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {pipelines.map(p => (
-              <PipelineRow key={p.id} target={p}
+              <PipelineRow key={p.id} target={p} runs={runCounts.get(p.id) ?? 0}
                 onEdit={() => setEditingId(p.id)}
+                onRuns={() => navigate(`/history?participant=${encodeURIComponent(p.id)}`)}
                 onToggle={() => void targetsApi.update(p.id, { enabled: !p.enabled }).then(load)}
                 onDuplicate={() => void duplicate(p.id)}
                 onDelete={() => setPendingDelete(p)} />
@@ -97,8 +102,8 @@ export function Pipelines() {
   )
 }
 
-function PipelineRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
-  target: Target; onEdit: () => void; onToggle: () => void; onDuplicate: () => void; onDelete: () => void
+function PipelineRow({ target, runs, onEdit, onRuns, onToggle, onDuplicate, onDelete }: {
+  target: Target; runs: number; onEdit: () => void; onRuns: () => void; onToggle: () => void; onDuplicate: () => void; onDelete: () => void
 }) {
   const { t } = useT()
   const cfg = asPipeline(target)
@@ -118,6 +123,11 @@ function PipelineRow({ target, onEdit, onToggle, onDuplicate, onDelete }: {
         </div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
       </div>
+      {runs > 0 && (
+        <button onClick={onRuns} title={t('participant.openRuns')} style={{ all: 'unset', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+          {t('participant.runsN', { n: runs })} →
+        </button>
+      )}
       <PillToggle on={target.enabled} onToggle={onToggle} labelOn={t('models.enabled')} labelOff={t('models.disabled')} />
       <IconButton onClick={onEdit} title={t('models.edit')}><IconPencil size={13} /></IconButton>
       <IconButton onClick={onDuplicate} title={t('models.duplicate')}><IconCopy size={13} /></IconButton>
