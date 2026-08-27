@@ -552,7 +552,7 @@ export const DICT: Record<string, Entry> = {
   'history.savedFilter': { en: 'Saved', ru: 'Сохранённые' },
   'history.unsavedFilter': { en: 'Unsaved', ru: 'Несохранённые' },
   'history.colPrompt': { en: 'Prompt', ru: 'Промпт' },
-  'history.colModels': { en: 'Models', ru: 'Модели' },
+  'history.colModels': { en: 'Participants', ru: 'Участники' },
   'history.colCalls': { en: 'Calls', ru: 'Вызовы' },
   'history.colReplies': { en: 'Replies', ru: 'Реплик' },
   'history.colDate': { en: 'Date', ru: 'Дата' },

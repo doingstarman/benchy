@@ -169,7 +169,7 @@ export function History() {
                     transition: 'background 0.1s',
                   }}
                 >
-                  <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
+                  <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)' }}>
                     {run.id.slice(0, 8)}
                     {run.saved && <span style={{ marginLeft: 6, color: 'var(--accent)', fontSize: 10 }}>●</span>}
                   </td>
