@@ -1,0 +1,1 @@
+import{r as o,e as c}from"./index-DogiUPF1.js";function f(){const[e,n]=o.useState(new Map);return o.useEffect(()=>{c.list().then(r=>{const t=new Map;for(const u of r)for(const s of u.models)t.set(s,(t.get(s)??0)+1);n(t)}).catch(()=>{})},[]),e}export{f as u};
