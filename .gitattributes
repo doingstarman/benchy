@@ -1,0 +1,23 @@
+# Line endings: everything text is LF in the repo AND the working tree, on every OS.
+# Without this, core.autocrlf=true on Windows checks build artifacts out as CRLF while
+# the packed tarball keeps LF — so `check:release` sees dist/version.json differ from
+# its own tarball copy even though the content is identical.
+* text=auto eol=lf
+
+# Generated build output ships in the tarball byte-for-byte — keep it LF explicitly.
+dist/**            text eol=lf
+frontend/dist/**   text eol=lf
+
+# The published tarball and binary assets must never be line-ending-converted.
+*.tgz   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.pdf   binary

@@ -30,8 +30,13 @@ if (!existsSync(join(root, TARBALL))) fail(`no ${TARBALL} — run \`npm pack\` f
 if (!existsSync(local)) fail('no dist/version.json — the build did not stamp')
 if (process.exitCode) process.exit(1)
 
-const inTarball = tar(['-xzOf', TARBALL, 'package/dist/version.json']).trim()
-const onDisk = readFileSync(local, 'utf8').trim()
+// Compare content, not line endings. `.gitattributes` pins dist/ to LF, but a working
+// tree checked out before that (core.autocrlf=true on Windows) leaves version.json CRLF
+// on disk while its tarball copy stays LF — identical JSON that `!==` would reject. A
+// real rebuild-desync changes sha/builtAt, which survives this normalization.
+const norm = s => s.replace(/\r\n/g, '\n').trim()
+const inTarball = norm(tar(['-xzOf', TARBALL, 'package/dist/version.json']))
+const onDisk = norm(readFileSync(local, 'utf8'))
 
 if (inTarball !== onDisk) {
   console.error('\x1b[31m✗ dist/version.json in the tarball differs from the one on disk.\x1b[0m')
