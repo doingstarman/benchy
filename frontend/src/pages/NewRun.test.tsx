@@ -73,7 +73,7 @@ function renderForkedFrom(run: Record<string, unknown>) {
 
 // Wait for async providers.list() to resolve and re-render
 async function waitForProviders() {
-  return screen.findByPlaceholderText('Ask anything…')
+  return screen.findByPlaceholderText('/ - for skills and MCP')
 }
 
 // The mode lives behind the header selector, so switching is open-then-pick.
@@ -252,8 +252,8 @@ describe('ModeSelector — mode switching', () => {
 
     await pickMode(user, 'prompt per model')
 
-    // In per-model mode, there's no single "Ask anything…" textarea
-    expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
+    // In per-model mode, there's no single "/ - for skills and MCP" textarea
+    expect(screen.queryByPlaceholderText('/ - for skills and MCP')).not.toBeInTheDocument()
     // Instead there's a per-model textarea for the selected model
     expect(screen.getByPlaceholderText(/Prompt for gpt-4o/)).toBeInTheDocument()
   })
@@ -277,7 +277,7 @@ describe('ModeSelector — mode switching', () => {
     await pickMode(user, 'prompt per model')
     await pickMode(user, 'one prompt → all models')
 
-    expect(screen.getByPlaceholderText('Ask anything…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('/ - for skills and MCP')).toBeInTheDocument()
   })
 
   it('"many prompts" mode shows a prompt list and runs all filled prompts', async () => {
@@ -332,7 +332,7 @@ describe('ChipsRow — model selection', () => {
     await waitForProviders()
 
     // Type something so callCount can reflect selection changes
-    const textarea = screen.getByPlaceholderText('Ask anything…')
+    const textarea = screen.getByPlaceholderText('/ - for skills and MCP')
     await user.type(textarea, 'q')
 
     // gpt-4o is selected by default — add gpt-4o-mini from the popover
@@ -383,15 +383,15 @@ describe('Session persistence across navigation', () => {
     await user.type(textarea, 'explain transformers')
     await user.click(screen.getByRole('button', { name: /^run$/i }))
 
-    // Run started — screen should have left the idle "Ask anything…" view
-    expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
+    // Run started — screen should have left the idle "/ - for skills and MCP" view
+    expect(screen.queryByPlaceholderText('/ - for skills and MCP')).not.toBeInTheDocument()
 
     unmount()
     renderNewRun()
 
     // Re-rendered "in place" (as if navigating back to /run) — still shows
     // the active session, not a fresh idle screen.
-    expect(screen.queryByPlaceholderText('Ask anything…')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('/ - for skills and MCP')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('Follow-up or new prompt…')).toBeInTheDocument()
   })
 })

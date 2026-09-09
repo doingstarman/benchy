@@ -766,7 +766,7 @@ function SlashMenu({ items, activeIndex, selectionOf, onPick }: {
   return (
     <div style={{
       position: 'absolute', bottom: 'calc(100% - 6px)', left: 14, right: 14, maxHeight: 240, overflowY: 'auto',
-      zIndex: 40, background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
+      zIndex: 60, background: 'var(--bg-elevated)', border: '0.5px solid var(--border)',
       borderRadius: 'var(--radius-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.55)', padding: 4,
     }}>
       {items.map((it, i) => {
@@ -1233,7 +1233,7 @@ export function Promptbox({
         </div>
       )}
 
-      <div style={{ borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ borderRadius: 10, overflow: 'visible' }}>
       {/* Selected-artifact chips sit above every prompt mode, so a skill picked
           in mode 0 stays visible and removable after switching to 1/2. */}
       <ArtifactChips
@@ -1328,7 +1328,7 @@ export function Promptbox({
                 if (!disabled) onRun()
               }
             }}
-            placeholder={simplified ? (isBatch ? t('run.addAnotherPrompt') : t('run.followup')) : t('run.ask')}
+            placeholder={simplified ? (isBatch ? t('run.addAnotherPrompt') : t('run.followup')) : t('run.slashHint')}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none',
               fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
