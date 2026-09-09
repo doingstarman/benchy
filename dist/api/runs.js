@@ -28,6 +28,7 @@ function rowToRun(row) {
         ...(row.system_prompt != null ? { systemPrompt: row.system_prompt } : {}),
         ...(row.skills ? { skills: parseTools(row.skills) } : {}),
         ...(row.mcp ? { mcp: parseTools(row.mcp) } : {}),
+        ...(row.prompt_selections ? { promptSelections: JSON.parse(row.prompt_selections) } : {}),
         ...(row.dataset_item_ids ? { datasetItemIds: JSON.parse(row.dataset_item_ids) } : {}),
         ...(row.base_prompt != null ? { basePrompt: row.base_prompt } : {}),
     };
@@ -212,7 +213,7 @@ export async function registerRunsRoutes(app) {
         if (!original)
             return reply.code(404).send({ error: 'Run not found' });
         const newId = randomUUID();
-        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools, system_prompt, skills, mcp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null, original.system_prompt ?? null, original.skills ?? null, original.mcp ?? null);
+        db.prepare('INSERT INTO runs (id, prompts, models, status, saved, total_calls, completed_calls, created_at, kind, tools, system_prompt, skills, mcp, prompt_selections) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId, original.prompts, original.models, 'pending', 0, 0, 0, Date.now(), original.kind ?? 'chat', original.tools ?? null, original.system_prompt ?? null, original.skills ?? null, original.mcp ?? null, original.prompt_selections ?? null);
         // Note: fork intentionally omits settings_overrides — forked runs use provider defaults
         // Attachments are copied (own files + rows) so the fork re-runs with the
         // same media instead of silently dropping it.
