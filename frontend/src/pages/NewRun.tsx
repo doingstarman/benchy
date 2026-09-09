@@ -17,7 +17,7 @@ import { useShowReasoning, useMonoAnswers, getDefaultMode, type PromptMode } fro
 import { FACTORY_RUN_DEFAULTS } from '../runDefaults'
 import { resolvePricing, formatCost } from '../../../src/pricing'
 import { useT, t } from '../i18n'
-import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, CustomTool, Skill, McpServer, Target, TraceStepRow } from '../../../src/types'
+import type { ProviderView, RunSettings, RunSettingsOverrides, AttachmentMeta, RunKind, Run, PromptSelections, CustomTool, Skill, McpServer, Target, TraceStepRow } from '../../../src/types'
 
 const RUN_DEFAULTS: Required<RunSettingsOverrides> = FACTORY_RUN_DEFAULTS
 
@@ -48,6 +48,7 @@ interface UIResult {
 }
 
 interface Turn {
+  selection?: PromptSelections
   promptIndex: number
   prompt: string
   // false only for a "prompt per model" initial turn, where there's no single
@@ -64,6 +65,7 @@ interface Turn {
 // prompts were never addressed to each other, and dressing them as a dialogue
 // is what made the whole mode read wrong.
 interface BatchPromptHeaderProps {
+  selectionLabel?: string
   turn: Turn
   index: number
   editing: string | null
@@ -77,7 +79,7 @@ interface BatchPromptHeaderProps {
 }
 
 function BatchPromptHeader({
-  turn, index, editing, busy, copied,
+  turn, index, editing, busy, copied, selectionLabel,
   onEditStart, onEditChange, onEditCancel, onEditSend, onCopy,
 }: BatchPromptHeaderProps) {
   return (
@@ -138,6 +140,7 @@ function BatchPromptHeader({
             </div>
           )}
           {turn.prompt}
+          {selectionLabel && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{selectionLabel}</div>}
         </div>
       )}
     </div>
@@ -695,7 +698,9 @@ interface PromptboxProps {
   perModelPrompts: Record<string, string>
   onPerModelPromptChange: (key: string, v: string) => void
   batchPrompts: string[]
+  batchSelections?: PromptSelections[]
   onBatchPromptsChange: (prompts: string[]) => void
+  onBatchSelectionsChange?: (selections: PromptSelections[]) => void
   // Rendered inside the box in multi-prompt mode — the "send to" model picker
   // moves in here and the external chips row is hidden.
   modelsSlot?: React.ReactNode
@@ -833,10 +838,64 @@ function ArtifactChips({ artifacts, selectedTools, selectedSkills, selectedMcp, 
   )
 }
 
+function BatchPromptRow({ index, value, selection, artifacts, onChange, onSelectionChange, onRemove }: {
+  index: number; value: string; selection: PromptSelections; artifacts: ArtifactItem[]
+  onChange: (value: string) => void; onSelectionChange: (selection: PromptSelections) => void; onRemove?: () => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const [menu, setMenu] = useState<{ start: number; end: number; query: string } | null>(null)
+  const [active, setActive] = useState(0)
+  const matches = menu ? artifacts.filter(a => a.name.toLowerCase().includes(menu.query.toLowerCase())) : []
+  const field = (kind: ArtifactItem['kind']) => kind === 'tool' ? 'tools' : kind === 'skill' ? 'skills' : 'mcp'
+  function toggle(kind: ArtifactItem['kind'], id: string) {
+    const key = field(kind)
+    onSelectionChange({ ...selection, [key]: selection[key].includes(id) ? selection[key].filter(v => v !== id) : [...selection[key], id] })
+  }
+  function refresh(text: string, caret: number) {
+    const match = /(?:^|\s)\/([^\s/]*)$/.exec(text.slice(0, caret))
+    setMenu(match ? { start: caret - match[1].length - 1, end: caret + (text.slice(caret).match(/^[^\s/]*/)?.[0].length ?? 0), query: match[1] } : null)
+    setActive(0)
+  }
+  function pick(item: ArtifactItem) {
+    if (item.disabled) return
+    toggle(item.kind, item.id)
+    if (menu && menu.start >= 0) {
+      onChange(value.slice(0, menu.start) + value.slice(menu.end))
+      const caret = menu.start
+      requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(caret, caret) })
+    }
+    setMenu(null)
+  }
+  return (
+    <div onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMenu(null) }} style={{ position: 'relative', padding: '10px 14px', borderBottom: '0.5px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ flex: 1, fontSize: 11, color: 'var(--text-secondary)' }}>{t('run.promptLabel', { n: index + 1 })}</span>
+        <button type="button" onClick={() => { setMenu(menu ? null : { start: -1, end: -1, query: '' }); setActive(0) }}
+          style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 8px' }}>{t('run.selectArtifacts')}</button>
+        {onRemove && <button type="button" onClick={onRemove} title={t('title.removePrompt')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>}
+      </div>
+      <ArtifactChips artifacts={artifacts} selectedTools={new Set(selection.tools)} selectedSkills={new Set(selection.skills)} selectedMcp={new Set(selection.mcp)}
+        onToggleTool={id => toggle('tool', id)} onToggleSkill={id => toggle('skill', id)} onToggleMcp={id => toggle('mcp', id)} />
+      <textarea ref={ref} className="nr-ta" value={value} placeholder={t('run.promptN', { n: index + 1 })} title={t('run.slashHint')} rows={2}
+        onChange={e => { onChange(e.target.value); refresh(e.target.value, e.target.selectionStart) }}
+        onSelect={e => refresh(e.currentTarget.value, e.currentTarget.selectionStart)}
+        onKeyDown={e => {
+          if (!menu) return
+          if (e.key === 'Escape') { e.preventDefault(); setMenu(null) }
+          if (!matches.length) return
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setActive(i => (i + (e.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length) }
+          if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(matches[active] ?? matches[0]) }
+        }}
+        style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', resize: 'vertical', lineHeight: 1.65 }} />
+      {menu && matches.length > 0 && <SlashMenu items={matches} activeIndex={active} selectionOf={kind => new Set(selection[field(kind)])} onPick={pick} />}
+    </div>
+  )
+}
+
 export function Promptbox({
   simplified, mode, selectedModels,
   prompt, onPromptChange, perModelPrompts, onPerModelPromptChange,
-  batchPrompts, onBatchPromptsChange, modelsSlot,
+  batchPrompts, onBatchPromptsChange, batchSelections = [], onBatchSelectionsChange, modelsSlot,
   callCount, isRunning, onRun, onStop,
   runSettings, onRunSettingsChange, providerDefaultsByModel, appRunDefaults,
   selectedTools, onToggleTool, toolCallingEnabled, onToggleToolCalling,
@@ -1195,7 +1254,7 @@ export function Promptbox({
             {overrideToggle('extendedThinking', t('run.extendedThinking'), t('run.extendedThinkingHint'))}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {(simplified || mode !== 2) && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('run.toolsSection')}</div>
               <div style={{ flex: 1 }} />
@@ -1217,7 +1276,7 @@ export function Promptbox({
                 />
               ))}
             </div>
-          </div>
+          </div>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('providers.reliability')}</div>
@@ -1234,13 +1293,12 @@ export function Promptbox({
       )}
 
       <div style={{ borderRadius: 10, overflow: 'visible' }}>
-      {/* Selected-artifact chips sit above every prompt mode, so a skill picked
-          in mode 0 stays visible and removable after switching to 1/2. */}
-      <ArtifactChips
+      {/* Single/pairs selections are shared; batch rows render their own chips. */}
+      {(simplified || mode !== 2) && <ArtifactChips
         artifacts={artifacts}
         selectedTools={selectedTools} selectedSkills={selectedSkills} selectedMcp={selectedMcp}
         onToggleTool={onToggleTool} onToggleSkill={onToggleSkill} onToggleMcp={onToggleMcp}
-      />
+      />}
 
       {!simplified && mode === 1 ? (
         <div>
@@ -1262,29 +1320,17 @@ export function Promptbox({
         </div>
       ) : !simplified && mode === 2 ? (
         <div>
+          <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)' }}>{t('run.promptSelectionsHint')}</div>
           {batchPrompts.map((p, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '0.5px solid var(--border)' }}>
-              <div style={{ padding: '10px 0 0 14px', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0, width: 26 }}>
-                {i + 1}
-              </div>
-              <textarea
-                className="nr-ta"
-                value={p}
-                onChange={e => onBatchPromptsChange(batchPrompts.map((bp, bi) => bi === i ? e.target.value : bp))}
-                placeholder={t('run.promptN', { n: i + 1 })}
-                rows={2}
-                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', resize: 'none', lineHeight: 1.65, padding: '8px 8px 10px 0' }}
-              />
-              {batchPrompts.length > 1 && (
-                <button
-                  onClick={() => onBatchPromptsChange(batchPrompts.filter((_, bi) => bi !== i))}
-                  title={t('title.removePrompt')}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: '10px 14px 0 4px', lineHeight: 1 }}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
+            <BatchPromptRow key={i} index={i} value={p} artifacts={artifacts}
+              selection={batchSelections[i] ?? { tools: [], skills: [], mcp: [] }}
+              onChange={value => onBatchPromptsChange(batchPrompts.map((bp, bi) => bi === i ? value : bp))}
+              onSelectionChange={selection => onBatchSelectionsChange?.(batchPrompts.map((_, bi) => bi === i ? selection : batchSelections[bi] ?? { tools: [], skills: [], mcp: [] }))}
+              onRemove={batchPrompts.length > 1 ? () => {
+                onBatchPromptsChange(batchPrompts.filter((_, bi) => bi !== i))
+                onBatchSelectionsChange?.(batchPrompts.flatMap((_, bi) => bi === i ? [] : [batchSelections[bi] ?? { tools: [], skills: [], mcp: [] }]))
+              } : undefined}
+            />
           ))}
           <button
             onClick={() => onBatchPromptsChange([...batchPrompts, ''])}
@@ -1435,6 +1481,7 @@ interface SavedSession {
   prompt: string
   perModelPrompts: Record<string, string>
   batchPrompts: string[]
+  batchSelections: PromptSelections[]
   runSettings: RunSettings
   vote: string | null
   pendingAttachments: AttachmentMeta[]
@@ -1507,9 +1554,18 @@ export function NewRun() {
   // run machinery is untouched; it swaps the idle body for its own config panel.
   const [datasetMode, setDatasetMode] = useState(false)
   const selMode: SelMode = datasetMode ? 'dataset' : mode
-  const onSelectMode = (m: SelMode) => { if (m === 'dataset') setDatasetMode(true); else { setDatasetMode(false); setMode(m) } }
+  const onSelectMode = (m: SelMode) => {
+    if (m === 'dataset') { setDatasetMode(true); return }
+    if (m === 2 && mode !== 2 && !batchPrompts.some(p => p.trim())) {
+      setBatchPrompts([prompt])
+      setBatchSelections([{ tools: toolCallingEnabled ? [...selectedTools] : [], skills: [...selectedSkills], mcp: [...selectedMcp] }])
+    }
+    setDatasetMode(false)
+    setMode(m)
+  }
   const [prompt, setPrompt] = useState(() => savedSession?.prompt ?? '')
   const [perModelPrompts, setPerModelPrompts] = useState<Record<string, string>>(() => savedSession?.perModelPrompts ?? {})
+  const [batchSelections, setBatchSelections] = useState<PromptSelections[]>(() => savedSession?.batchSelections ?? [])
   const [batchPrompts, setBatchPrompts] = useState<string[]>(() => savedSession?.batchPrompts ?? [''])
 
   const [runSettings, setRunSettings] = useState<RunSettings>(() => savedSession?.runSettings ?? {})
@@ -1539,7 +1595,7 @@ export function NewRun() {
   useEffect(() => {
     savedSession = {
       screenState, turns, sessionModels, runKind, runId, selectedModels, selectedTools, selectedSkills, selectedMcp, systemPrompt,
-      mode, prompt, perModelPrompts, batchPrompts, runSettings, vote, pendingAttachments,
+      mode, prompt, perModelPrompts, batchPrompts, batchSelections, runSettings, vote, pendingAttachments,
     }
   })
 
@@ -1592,6 +1648,13 @@ export function NewRun() {
     setError(null)
     setPendingAttachments([])
 
+    setSystemPrompt(forkFrom.systemPrompt ?? '')
+    setRunSettings(forkFrom.runSettings ?? {})
+    const openingSelection = forkFrom.kind === 'chat' ? forkFrom.promptSelections?.[0] : undefined
+    setSelectedTools(new Set(openingSelection?.tools ?? forkFrom.tools ?? []))
+    setSelectedSkills(new Set(openingSelection?.skills ?? forkFrom.skills ?? []))
+    setSelectedMcp(new Set(openingSelection?.mcp ?? forkFrom.mcp ?? []))
+    setBatchSelections(forkFrom.promptSelections ?? forkFrom.prompts.map(() => ({ tools: forkFrom.tools ?? [], skills: forkFrom.skills ?? [], mcp: forkFrom.mcp ?? [] })))
     const kind = forkFrom.kind ?? 'chat'
     setSelectedModels(new Set(forkFrom.models))
     setRunKind(kind)
@@ -1648,6 +1711,7 @@ export function NewRun() {
       const restored: Turn[] = run.prompts.map((p, i) => ({
         promptIndex: i,
         prompt: p,
+        selection: run.promptSelections?.[i],
         showPromptBubble: true,
         ...(run.attachments?.some(a => a.promptIndex === i)
           ? { attachments: run.attachments.filter(a => a.promptIndex === i).map(({ promptIndex: _, ...meta }) => meta) }
@@ -1813,6 +1877,7 @@ export function NewRun() {
     .map(k => ({ prompt: perModelPrompts[k].trim(), model: k }))
 
   const filledBatchPrompts = batchPrompts.map(p => p.trim()).filter(Boolean)
+  const filledBatchSelections = batchPrompts.flatMap((p, i) => p.trim() ? [batchSelections[i] ?? { tools: [], skills: [], mcp: [] }] : [])
 
   const effectiveMode = screenState === 'idle' ? mode : 0
   const callCount = effectiveMode === 0
@@ -1916,7 +1981,7 @@ export function NewRun() {
       ? { prompts: [sharedPrompt], models: activeModels, runSettings: effectiveRunSettings, attachments: turnAttachments?.map(a => a.id), tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
       : effectiveMode === 1
         ? { pairs: filledPairs, runSettings: effectiveRunSettings, tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
-        : { prompts: filledBatchPrompts, models: activeModels, runSettings: effectiveRunSettings, tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
+        : { prompts: filledBatchPrompts, promptSelections: filledBatchSelections, models: activeModels, runSettings: effectiveRunSettings, tools, systemPrompt: sys, skills: skillIds, mcp: mcpIds }
 
     try {
       const { runId: newRunId } = await benchmarkApi.start(req)
@@ -1926,6 +1991,7 @@ export function NewRun() {
         ? filledBatchPrompts.map((p, i) => ({
             promptIndex: i,
             prompt: p,
+            selection: filledBatchSelections[i],
             showPromptBubble: true,
             results: pendingResults(activeModels),
           }))
@@ -1945,7 +2011,7 @@ export function NewRun() {
       notifyRunsChanged()
       if (effectiveMode === 0) { setPrompt(''); setPendingAttachments([]) }
       else if (effectiveMode === 1) setPerModelPrompts({})
-      else setBatchPrompts([''])
+      else { setBatchPrompts(['']); setBatchSelections([]) }
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${newRunId}`)
       esRef.current = es
@@ -1995,11 +2061,13 @@ export function NewRun() {
     const hasPerModel = Object.values(runSettings.perModel ?? {}).some(m => Object.values(m).some(v => v != null))
     const effectiveRunSettings = (hasGlobal || hasPerModel) ? runSettings : undefined
     const newPromptIndex = turns.length
+    const selection = runKind === 'batch' ? { tools: toolCallingEnabled ? [...selectedTools] : [], skills: [...selectedSkills], mcp: [...selectedMcp] } : undefined
 
     const turnAttachments = pendingAttachments.length ? pendingAttachments : undefined
     setTurns(prev => [...prev, {
       promptIndex: newPromptIndex,
       prompt: trimmed,
+      selection,
       showPromptBubble: true,
       results: pendingResults(sessionModels),
       ...(turnAttachments ? { attachments: turnAttachments } : {}),
@@ -2009,7 +2077,7 @@ export function NewRun() {
     setPendingAttachments([])
 
     try {
-      await benchmarkApi.continue(runId, trimmed, effectiveRunSettings, turnAttachments?.map(a => a.id))
+      await benchmarkApi.continue(runId, trimmed, effectiveRunSettings, turnAttachments?.map(a => a.id), selection)
       esRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${runId}`)
       esRef.current = es
@@ -2031,7 +2099,12 @@ export function NewRun() {
       // Carry the turn's attachments onto the throwaway regenerate run so a
       // vision cell re-runs with its image instead of a blank prompt.
       const cloneAttachmentsFrom = runId && turn.attachments?.length ? { runId, promptIndex } : undefined
-      const { runId: regenRunId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey], cloneAttachmentsFrom })
+      const original = runId ? await runsApi.get(runId) : undefined
+      const selection = original?.promptSelections?.[promptIndex]
+      const { runId: regenRunId } = await benchmarkApi.start({ prompts: [savedPrompt], models: [modelKey], cloneAttachmentsFrom,
+        tools: selection?.tools ?? original?.tools, skills: selection?.skills ?? original?.skills, mcp: selection?.mcp ?? original?.mcp,
+        systemPrompt: original?.systemPrompt ?? undefined, runSettings: original?.runSettings,
+      })
       regenEsRef.current?.close()
       const es = new EventSource(`/api/benchmark/stream/${regenRunId}`)
       regenEsRef.current = es
@@ -2099,17 +2172,21 @@ export function NewRun() {
     setVote(null)
     setExpandedCol(null)
 
-    // Fork semantics — everything after the edited turn is discarded.
+    // Chat edits discard later turns; batch edits preserve neighboring variants.
     // The edited turn keeps its own attachments (ids re-sent so the backend
     // doesn't garbage-collect them).
     const keptAttachments = turns.find(t => t.promptIndex === promptIndex)?.attachments
-    setTurns(prev => [...prev.slice(0, promptIndex), {
-      promptIndex,
-      prompt: trimmed,
-      showPromptBubble: true,
-      results: pendingResults(sessionModels),
-      ...(keptAttachments?.length ? { attachments: keptAttachments } : {}),
-    }])
+    setTurns(prev => {
+      const edited: Turn = {
+        selection: prev.find(t => t.promptIndex === promptIndex)?.selection,
+        promptIndex,
+        prompt: trimmed,
+        showPromptBubble: true,
+        results: pendingResults(sessionModels),
+        ...(keptAttachments?.length ? { attachments: keptAttachments } : {}),
+      }
+      return runKind === 'chat' ? [...prev.slice(0, promptIndex), edited] : prev.map(t => t.promptIndex === promptIndex ? edited : t)
+    })
     setScreenState('running')
 
     try {
@@ -2284,6 +2361,8 @@ export function NewRun() {
     perModelPrompts,
     onPerModelPromptChange: (key, v) => setPerModelPrompts(prev => ({ ...prev, [key]: v })),
     batchPrompts,
+    batchSelections,
+    onBatchSelectionsChange: setBatchSelections,
     onBatchPromptsChange: setBatchPrompts,
     modelsSlot: <ChipsRow {...chipsRowProps} wrap={false} />,
     callCount,
@@ -2387,6 +2466,7 @@ export function NewRun() {
             <div key={turn.promptIndex} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
               <BatchPromptHeader
                 turn={turn}
+                selectionLabel={turn.selection ? (artifactCatalog.filter(a => turn.selection![a.kind === 'tool' ? 'tools' : a.kind === 'skill' ? 'skills' : 'mcp'].includes(a.id)).map(a => a.name).join(' · ') || t('run.noArtifacts')) : undefined}
                 index={turn.promptIndex}
                 editing={editingTurn?.promptIndex === turn.promptIndex ? editingTurn.value : null}
                 busy={screenState === 'running'}

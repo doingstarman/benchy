@@ -485,3 +485,48 @@ describe('slash menu — library artifacts', () => {
     expect(screen.getByText('Pirate')).toBeInTheDocument()
   })
 })
+
+
+describe('independent prompt variants', () => {
+  it('sends identical prompts to one model with isolated artifacts, skipping empty rows', async () => {
+    vi.mocked(skillsApi.list).mockResolvedValue([{ id: 's1', name: 'Pirate', instruction: 'arr', toolIds: [], enabled: true }])
+    const user = userEvent.setup()
+    renderNewRun()
+    await waitForProviders()
+    await pickMode(user, 'many prompts')
+    const first = screen.getByPlaceholderText('Prompt 1…')
+    await user.type(first, '/calc')
+    await user.click(await screen.findByText('calc'))
+    await user.type(first, 'same')
+    await user.click(screen.getByText('+ add prompt'))
+    await user.click(screen.getByText('+ add prompt'))
+    const third = screen.getByPlaceholderText('Prompt 3…')
+    await user.type(third, '/pir')
+    await user.keyboard('{Enter}')
+    await user.type(third, 'same')
+    await user.click(screen.getByRole('button', { name: /^run$/i }))
+    expect(benchmarkApi.start).toHaveBeenCalledWith(expect.objectContaining({
+      prompts: ['same', 'same'],
+      models: ['mock-p1:gpt-4o'],
+      promptSelections: [{ tools: ['calc'], skills: [], mcp: [] }, { tools: [], skills: ['s1'], mcp: [] }],
+    }))
+  })
+})
+
+
+describe('restoring prompt variants', () => {
+  it('keeps the remaining row selection after deleting a row from a forked run', async () => {
+    vi.mocked(skillsApi.list).mockResolvedValue([{ id: 's1', name: 'Pirate', instruction: 'arr', toolIds: [], enabled: true }])
+    const user = userEvent.setup()
+    renderForkedFrom({ id: 'old', kind: 'batch', prompts: ['one', 'two'], models: ['mock-p1:gpt-4o'],
+      promptSelections: [{ tools: ['calc'], skills: [], mcp: [] }, { tools: [], skills: ['s1'], mcp: [] }],
+    })
+    await screen.findByPlaceholderText('Prompt 2…')
+    await user.click(screen.getAllByTitle('Remove prompt')[0])
+    expect(screen.getByPlaceholderText('Prompt 1…')).toHaveValue('two')
+    await user.click(screen.getByRole('button', { name: /^run$/i }))
+    expect(benchmarkApi.start).toHaveBeenCalledWith(expect.objectContaining({
+      prompts: ['two'], promptSelections: [{ tools: [], skills: ['s1'], mcp: [] }],
+    }))
+  })
+})

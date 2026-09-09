@@ -427,9 +427,17 @@ export interface CustomMetric {
   updatedAt: number
 }
 
+// Per-prompt selections replace the run-level selections for that prompt.
+export interface PromptSelections {
+  tools: string[]
+  skills: string[]
+  mcp: string[]
+}
+
 export interface Run {
   id: string
   prompts: string[]
+  promptSelections?: PromptSelections[]
   models: string[]
   status: RunStatus
   saved: boolean
@@ -459,6 +467,7 @@ export type RunKind = 'chat' | 'batch' | 'pairs'
 
 export interface BenchmarkRequest {
   prompts?: string[]
+  promptSelections?: PromptSelections[]
   models?: string[]
   pairs?: { prompt: string; model: string }[]
   runSettings?: RunSettings

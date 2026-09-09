@@ -258,6 +258,7 @@ export async function initDb(path?: string): Promise<void> {
     // Selected skill ids and MCP-server ids for the run (JSON arrays; NULL none).
     'ALTER TABLE runs ADD COLUMN skills TEXT',
     'ALTER TABLE runs ADD COLUMN mcp TEXT',
+    'ALTER TABLE runs ADD COLUMN prompt_selections TEXT',
     // Datasets: dataset files are permanent attachments, so they carry a
     // dataset_id that exempts them from the unbound-upload GC.
     'ALTER TABLE attachments ADD COLUMN dataset_id TEXT',

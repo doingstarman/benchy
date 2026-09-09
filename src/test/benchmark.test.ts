@@ -1759,3 +1759,72 @@ describe('app-wide run defaults', () => {
     expect(perModel.temperature).toBe(1.4)
   })
 })
+
+
+describe('per-prompt artifact selections', () => {
+  it('isolates identical prompts on one model and preserves selections on edit and fork', async () => {
+    const { upsertSkill } = await import('../config.js')
+    await upsertSkill({ id: 'isolated-skill', name: 'Reviewer', instruction: 'Review carefully', toolIds: [], enabled: true })
+    const providerResponse = await fetch(`${base}/api/providers`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Variants', type: 'openai', apiKey: 'fake', models: ['test'], enabled: true }),
+    }).then(r => r.json()) as { data: { id: string } }
+    const selections = [
+      { tools: ['calc'], skills: [], mcp: [] },
+      { tools: [], skills: ['isolated-skill'], mcp: [] },
+      { tools: [], skills: [], mcp: [] },
+    ]
+    capturedMessages = []; capturedTools = []; toolMode = 'off'
+    const response = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['same', 'same', 'same'], models: [`${providerResponse.data.id}:test`], tools: ['fetch_url'], systemPrompt: 'Shared', promptSelections: selections }),
+    })
+    expect(response.status).toBe(202)
+    const { data: { runId } } = await response.json() as { data: { runId: string } }
+    await waitForRun(runId)
+    expect(capturedMessages).toHaveLength(3)
+    const calls = capturedMessages.map((messages, i) => ({ system: messages[0].content, tools: capturedTools[i].map(t => (t as { name: string }).name) }))
+    expect(calls).toEqual(expect.arrayContaining([
+      { system: 'Shared', tools: ['calc'] },
+      { system: 'Shared\n\nReview carefully', tools: [] },
+      { system: 'Shared', tools: [] },
+    ]))
+    const run = await fetch(`${base}/api/runs/${runId}`).then(r => r.json()) as { data: Run & { results: unknown[] } }
+    expect(run.data.promptSelections).toEqual(selections)
+    expect(run.data.results).toHaveLength(3)
+    capturedMessages = []; capturedTools = []
+    const edited = await fetch(`${base}/api/runs/${runId}/edit-turn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ promptIndex: 1, prompt: 'edited' }),
+    })
+    expect(edited.status).toBe(202)
+    await waitForRun(runId)
+    expect(capturedMessages[0][0].content).toContain('Review carefully')
+    expect(capturedTools[0]).toEqual([])
+    const fork = await fetch(`${base}/api/runs/${runId}/fork`, { method: 'POST' }).then(r => r.json()) as { data: Run }
+    expect(fork.data.promptSelections).toEqual(selections)
+    capturedMessages = []; capturedTools = []
+    const appended = { tools: [], skills: ['isolated-skill'], mcp: [] }
+    const continuation = await fetch(`${base}/api/runs/${runId}/continue`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'another variant', selection: appended }),
+    })
+    expect(continuation.status).toBe(202)
+    await waitForRun(runId)
+    expect(capturedMessages[0]).toHaveLength(2)
+    expect(capturedMessages[0][0].content).toContain('Review carefully')
+    expect(capturedTools[0]).toEqual([])
+    const continued = await fetch(`${base}/api/runs/${runId}`).then(r => r.json()) as { data: Run }
+    expect(continued.data.promptSelections).toEqual([...selections, appended])
+
+  })
+
+  it('rejects misaligned selections before creating a run', async () => {
+    const before = (getDb().prepare('SELECT COUNT(*) AS n FROM runs').get() as { n: number }).n
+    const response = await fetch(`${base}/api/benchmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: ['one', 'two'], models: ['p:m'], promptSelections: [{ tools: [], skills: [], mcp: [] }] }),
+    })
+    expect(response.status).toBe(400)
+    expect((getDb().prepare('SELECT COUNT(*) AS n FROM runs').get() as { n: number }).n).toBe(before)
+  })
+})

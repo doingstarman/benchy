@@ -384,6 +384,7 @@ export const runsApi = {
 
 export interface BenchmarkRequest {
   prompts?: string[]
+  promptSelections?: import('../../src/types').PromptSelections[]
   models?: string[]
   pairs?: { prompt: string; model: string }[]
   runSettings?: import('../../src/types').RunSettings
@@ -404,10 +405,10 @@ export const benchmarkApi = {
     apiFetch<{ stopped: number }>(`/api/benchmark/${encodeURIComponent(runId)}/stop`, {
       method: 'POST', body: JSON.stringify(target ?? {}),
     }),
-  continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings, attachments?: string[]) =>
+  continue: (runId: string, prompt: string, runSettings?: import('../../src/types').RunSettings, attachments?: string[], selection?: import('../../src/types').PromptSelections) =>
     apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/continue`, {
       method: 'POST',
-      body: JSON.stringify({ prompt, runSettings, attachments }),
+      body: JSON.stringify({ prompt, runSettings, attachments, selection }),
     }),
   editTurn: (runId: string, promptIndex: number, prompt: string, attachments?: string[]) =>
     apiFetch<{ runId: string; promptIndex: number }>(`/api/runs/${runId}/edit-turn`, {

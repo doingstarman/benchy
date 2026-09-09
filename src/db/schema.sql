@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS runs (
   mode TEXT,                  -- dataset run judging: NULL/'score' = auto, 'arena' = human
   dataset_item_ids TEXT,      -- JSON array of covered item ids, in prompt_index order
   base_prompt TEXT,           -- dataset run's base prompt before per-item input was folded in
-  target_ids TEXT             -- JSON array of target ids this run ran against (mirrors models)
+  target_ids TEXT,            -- JSON array of target ids this run ran against (mirrors models)
+  prompt_selections TEXT     -- JSON array aligned with prompts, overriding run selections
 );
 
 CREATE TABLE IF NOT EXISTS results (
