@@ -1,4 +1,4 @@
-import{k as Tt,u as It,a as Ft,r as x,M as v,p as Rt,e as Ae,n as At,j as e,s as Be,N as _,h as Bt,i as Pt,f as Dt}from"./index-DogiUPF1.js";const Mt=["text","date","number"],Qe=`
+import{k as Tt,u as It,a as Ft,r as x,M as v,p as Rt,e as Ae,n as At,j as e,s as Be,N as _,h as Bt,i as Pt,f as Dt}from"./index-SKb_ctjd.js";const Mt=["text","date","number"],Qe=`
   .dsx { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); --mid: var(--warning); --bad: var(--error); }
   .dsx-in { box-sizing: border-box; padding: 6px 9px; background: var(--bg-base); border: 0.5px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); outline: none; }
   .dsx-in:focus { border-color: var(--p-bd); }

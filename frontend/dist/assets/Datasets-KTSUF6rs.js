@@ -1,4 +1,4 @@
-import{u as $,a as E,r,M as w,j as e}from"./index-DogiUPF1.js";import{E as F}from"./EmptyState-CUe8gUj-.js";const T=`
+import{u as $,a as E,r,M as w,j as e}from"./index-SKb_ctjd.js";import{E as F}from"./EmptyState-DwxethoA.js";const T=`
   .dsx { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); }
   .dsx-card { position: relative; text-align: left; background: var(--bg-elevated); border: 0.5px solid var(--border); border-radius: var(--radius-md); padding: 15px 16px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; overflow: hidden; transition: border-color 0.12s, transform 0.12s; }
   .dsx-card:hover { border-color: var(--p-bd); transform: translateY(-1px); }

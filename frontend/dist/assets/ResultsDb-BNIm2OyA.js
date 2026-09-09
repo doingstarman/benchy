@@ -1,4 +1,4 @@
-import{u as c,a as x,r as a,g as u,j as t}from"./index-DogiUPF1.js";const h=`
+import{u as c,a as x,r as a,g as u,j as t}from"./index-SKb_ctjd.js";const h=`
   .rdb { --p: var(--accent); --p-bg: var(--accent-bg); --p-bd: var(--accent-dim); --ok: var(--success); }
   .rdb-row { cursor: pointer; }
   .rdb-row:hover td { background: rgba(127,119,221,0.05); }
